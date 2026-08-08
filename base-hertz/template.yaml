@@ -1,0 +1,4 @@
+name: base-hertz
+kind: hertz
+description: Official base Hertz HTTP service template (standard layered layout + health check)
+version: "1"

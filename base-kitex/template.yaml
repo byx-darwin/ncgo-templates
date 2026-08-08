@@ -1,0 +1,4 @@
+name: base-kitex
+kind: kitex
+description: Official base Kitex RPC service template (standard layered layout + health check)
+version: "1"

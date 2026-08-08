@@ -1,0 +1,4 @@
+name: rule-center
+kind: kitex
+description: Official rate-limit rule-center service template (Kitex gRPC + rate-limit store/resolver/middleware)
+version: "1"

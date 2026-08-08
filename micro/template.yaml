@@ -1,4 +1,4 @@
 name: micro
 kind: micro
-description: Official micro workspace template (multi-service layout: services/rpc + services/bff, shared compose + pre-commit)
+description: "Official micro workspace template (multi-service layout: services/rpc + services/bff, shared compose + pre-commit)"
 version: "1"

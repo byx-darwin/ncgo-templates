@@ -1,0 +1,8 @@
+# ncgo exported template — internal/base/data/tx.go
+path: internal/base/data/tx.go
+update_behavior:
+    type: cover
+body: |
+    package data
+
+    // Transaction helpers are generated when WithDatabase=true.

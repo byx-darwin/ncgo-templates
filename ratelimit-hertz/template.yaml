@@ -1,0 +1,4 @@
+name: ratelimit-hertz
+kind: hertz
+description: Official Hertz HTTP service template with built-in rate limiting support (Redis/memory backend, fixed window/sliding window/token bucket algorithms)
+version: "1"

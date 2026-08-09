@@ -1,0 +1,125 @@
+# ncgo exported template — internal/repository/rate_limit_rule_test.go
+path: internal/repository/rate_limit_rule_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package repository
+
+    import (
+    	"context"
+    	"errors"
+    	"testing"
+    	"time"
+
+    	"{{.Module}}/internal/pkg/ratelimit"
+    )
+
+    type stubRateLimitRuleFinder struct {{ "{" }}
+    	record *RateLimitRuleRecord
+    	err    error
+    	onFind func(service, phase, method, path, appKey string)
+    {{ "}" }}
+
+    func (s stubRateLimitRuleFinder) FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error) {{ "{" }}
+    	_ = ctx
+    	if s.onFind != nil {{ "{" }}
+    		s.onFind(service, phase, method, path, appKey)
+    	{{ "}" }}
+    	_ = service
+    	_ = phase
+    	_ = method
+    	_ = path
+    	_ = appKey
+    	return s.record, s.err
+    {{ "}" }}
+
+    func TestRateLimitRuleHookReturnsNotFoundWhenFinderNil(t *testing.T) {{ "{" }}
+    	hook := NewRateLimitRuleHook(nil)
+    	rule, found, err := hook.ResolveRateLimitRule(context.Background(), ratelimit.Lookup{{ "{" }}Service: "order-api", Phase: "pre_auth", Method: "GET", Path: "/orders"{{ "}" }})
+    	if err != nil || found || rule != nil {{ "{" }}
+    		t.Fatalf("got rule=%v found=%v err=%v, want nil false nil", rule, found, err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRateLimitRuleHookMapsRepositoryRecord(t *testing.T) {{ "{" }}
+    	hook := NewRateLimitRuleHook(stubRateLimitRuleFinder{{ "{" }}record: &RateLimitRuleRecord{{ "{" }}
+    		Enabled:          true,
+    		KeyBy:            []string{{ "{" }}"ak_path"{{ "}" }},
+    		Strategy:         "fixed_window",
+    		WindowSeconds:    60,
+    		MaxRequests:      9,
+    		ClientTTLSeconds: 90,
+    	{{ "}}" }})
+    	rule, found, err := hook.ResolveRateLimitRule(context.Background(), ratelimit.Lookup{{ "{" }}Service: "order-api", Phase: "post_auth", Method: "GET", Path: "/orders", AppKey: "app-1"{{ "}" }})
+    	if err != nil || !found || rule == nil {{ "{" }}
+    		t.Fatalf("got rule=%v found=%v err=%v, want mapped rule", rule, found, err)
+    	{{ "}" }}
+    	if rule.MaxRequests != 9 || rule.WindowSeconds.Duration != 60*time.Second || len(rule.KeyBy) != 1 || rule.KeyBy[0] != "ak_path" {{ "{" }}
+    		t.Fatalf("unexpected mapped rule: %+v", rule)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRateLimitRuleHookPropagatesRepositoryError(t *testing.T) {{ "{" }}
+    	hook := NewRateLimitRuleHook(stubRateLimitRuleFinder{{ "{" }}err: errors.New("boom"){{ "}" }})
+    	rule, found, err := hook.ResolveRateLimitRule(context.Background(), ratelimit.Lookup{{ "{" }}Service: "order-api", Phase: "pre_auth", Method: "GET", Path: "/orders"{{ "}" }})
+    	if err == nil || found || rule != nil {{ "{" }}
+    		t.Fatalf("got rule=%v found=%v err=%v, want nil false error", rule, found, err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRateLimitRuleHookForwardsServiceToFinder(t *testing.T) {{ "{" }}
+    	gotService := ""
+    	hook := NewRateLimitRuleHook(stubRateLimitRuleFinder{{ "{" }}onFind: func(service, phase, method, path, appKey string) {{ "{" }}
+    		gotService = service
+    		_ = phase
+    		_ = method
+    		_ = path
+    		_ = appKey
+    	{{ "}}" }})
+
+    	_, _, _ = hook.ResolveRateLimitRule(context.Background(), ratelimit.Lookup{{ "{" }}Service: "order-api", Phase: "pre_auth", Method: "GET", Path: "/orders"{{ "}" }})
+    	if gotService != "order-api" {{ "{" }}
+    		t.Fatalf("service = %q, want order-api", gotService)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNormalizeRateLimitLookup(t *testing.T) {{ "{" }}
+    	lookup, ok := normalizeRateLimitLookup(" order-api ", " POST_AUTH ", " get ", " /orders ", " app-1 ")
+    	if !ok {{ "{" }}
+    		t.Fatal("expected normalized lookup to be valid")
+    	{{ "}" }}
+    	if lookup.Service != "order-api" || lookup.Phase != "post_auth" || lookup.Method != "GET" || lookup.Path != "/orders" || lookup.AppKey != "app-1" {{ "{" }}
+    		t.Fatalf("unexpected normalized lookup: %+v", lookup)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNormalizeRateLimitLookupRejectsBlankRequiredFields(t *testing.T) {{ "{" }}
+    	if _, ok := normalizeRateLimitLookup("", "pre_auth", "GET", "/orders", "app-1"); ok {{ "{" }}
+    		t.Fatal("expected blank service to be rejected")
+    	{{ "}" }}
+    	if _, ok := normalizeRateLimitLookup("order-api", "", "GET", "/orders", "app-1"); ok {{ "{" }}
+    		t.Fatal("expected blank phase to be rejected")
+    	{{ "}" }}
+    	if _, ok := normalizeRateLimitLookup("order-api", "pre_auth", "", "/orders", "app-1"); ok {{ "{" }}
+    		t.Fatal("expected blank method to be rejected")
+    	{{ "}" }}
+    	if _, ok := normalizeRateLimitLookup("order-api", "pre_auth", "GET", "", "app-1"); ok {{ "{" }}
+    		t.Fatal("expected blank path to be rejected")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestMapRateLimitRuleRecordCopiesKeyBySlice(t *testing.T) {{ "{" }}
+    	record := &RateLimitRuleRecord{{ "{" }}
+    		Enabled: true,
+    		KeyBy:   []string{{ "{" }}"ip"{{ "}" }},
+    	{{ "}" }}
+    	cfg := mapRateLimitRuleRecord(record)
+    	if cfg == nil {{ "{" }}
+    		t.Fatal("expected config to be mapped")
+    	{{ "}" }}
+    	record.KeyBy[0] = "mutated"
+    	if cfg.KeyBy[0] != "ip" {{ "{" }}
+    		t.Fatalf("expected mapped key_by to be copied, got %v", cfg.KeyBy)
+    	{{ "}" }}
+    {{ "}" }}

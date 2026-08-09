@@ -1,0 +1,10 @@
+# ncgo exported template — internal/base/data/data.go
+path: internal/base/data/data.go
+update_behavior:
+    type: cover
+body: |
+    package data
+
+    import (
+
+    )

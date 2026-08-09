@@ -9,12 +9,6 @@ body: |-
   {{ $svc := exportName .ServiceName -}}
   package {{ToLower .ServiceName}}
 
-  import (
-      "context"
-
-      goerror "github.com/byx-darwin/go-tools/go-common/error"
-  )
-
   // {{$svc}}Repo defines the data-access port for this usecase.
   // Implement it in internal/repository/{{ToLower .ServiceName}}/.
   type {{$svc}}Repo interface {
@@ -34,6 +28,13 @@ body: |-
 
   // Add HTTP methods to the IDL proto, then rerun `make update`.
   // Implement handler methods here as:
+  //
+  //   import (
+  //       "context"
+  //       goerror "github.com/byx-darwin/go-tools/go-common/error"
+  //       pb "{{.Module}}/internal/pb"
+  //   )
+  //
   //   func (uc *UseCase) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error) {
   //       // Placeholder code 10010 shares its value with frameworkerror.CodeRPCUnavailable;
   //       // replace with a domain-specific error code when implementing.

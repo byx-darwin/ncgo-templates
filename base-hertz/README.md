@@ -7,8 +7,17 @@ health check, matching what `ncgo new --kind hertz` generates with built-in asse
 
 ```bash
 ncgo template pull base-hertz
+
+# With database support (recommended)
+ncgo new my-api --module github.com/acme/my-api --kind hertz --db postgres --template base-hertz
+
+# Without database support (limited functionality)
 ncgo new my-api --module github.com/acme/my-api --kind hertz --template base-hertz
 ```
+
+**Note:** This template includes database-related templates (repository, usecase, sqlc).
+For full functionality, use with `--db postgres`. Without `--db`, some generated files
+may reference database code that requires manual setup.
 
 ## Contents
 
@@ -17,3 +26,11 @@ ncgo new my-api --module github.com/acme/my-api --kind hertz --template base-her
 `errcode`, `response`, `makefile`, `sqlc`.
 
 Variables: `{{.Module}}`, `{{.ServiceName}}`, `{{ToLower .ServiceName}}`.
+
+## Features
+
+- **Health Check**: Built-in `/healthz` and `/readyz` endpoints
+- **Standard Layout**: Follows ncgo's layered architecture
+- **Database Support**: Repository and usecase patterns with sqlc
+- **Rate Limiting**: Configurable rate limiting middleware
+- **Middleware Stack**: CORS, error handling, authentication, etc.

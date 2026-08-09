@@ -19,6 +19,90 @@ ncgo new my-api --module github.com/acme/my-api --kind hertz --template base-her
 For full functionality, use with `--db postgres`. Without `--db`, some generated files
 may reference database code that requires manual setup.
 
+## Adding Infrastructure Components
+
+After creating your project, you can add infrastructure components using `ncgo add infra`:
+
+### Redis
+
+```bash
+ncgo add infra redis --root .
+```
+
+This adds:
+- `internal/base/data/redis.go` - Redis client initialization
+- `internal/base/data/redis_shared.go` - Shared Redis client helper
+
+Configuration in `conf/dev/conf.yaml`:
+```yaml
+redis:
+  enabled: true
+  addrs:
+    - "localhost:6379"
+  password: ""
+  db: 0
+```
+
+### Kafka
+
+```bash
+ncgo add infra kafka --root .
+```
+
+Adds Kafka producer and consumer helpers under `internal/base/data/`.
+
+### Elasticsearch
+
+```bash
+ncgo add infra elasticsearch --root .
+```
+
+Adds Elasticsearch client initialization.
+
+### ClickHouse
+
+```bash
+ncgo add infra clickhouse --root .
+```
+
+Adds ClickHouse client for analytics workloads.
+
+### Structured Logging
+
+```bash
+ncgo add infra logging --root .
+```
+
+Adds structured logging with:
+- `internal/base/logging/logging.go` - Core logging setup
+- `internal/base/logging/hertz.go` - Hertz-specific access logging
+
+Wire it up in `internal/base/server/server.go`:
+```go
+import "my-api/internal/base/logging"
+
+// In Run() function:
+h.Use(logging.HertzRecovery())
+h.Use(logging.HertzRequestID())
+h.Use(logging.HertzAccessLog())
+```
+
+### Canary Release
+
+```bash
+ncgo add infra canary --root .
+```
+
+Adds canary release helpers for traffic splitting and A/B testing.
+
+### Observability
+
+```bash
+ncgo add infra observability --root .
+```
+
+Adds OpenTelemetry tracing and metrics setup.
+
 ## Contents
 
 `hertz-template/*.yaml` mirrors the built-in ncgo hertz template set:

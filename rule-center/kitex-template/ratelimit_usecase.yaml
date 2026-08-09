@@ -97,11 +97,11 @@ body: |-
           Enabled:           cfg.Enabled,
           KeyBy:             cfg.KeyBy,
           Strategy:          cfg.Strategy,
-          WindowSeconds:     int32(cfg.WindowSeconds),
-          MaxRequests:       int32(cfg.MaxRequests),
-          RequestsPerSecond: float64Ptr(cfg.RequestsPerSecond),
-          Burst:             int32Ptr(cfg.Burst),
-          ClientTtlSeconds:  int32Ptr(cfg.ClientTtlSeconds),
+          WindowSeconds:     cfg.WindowSeconds,
+          MaxRequests:       cfg.MaxRequests,
+          RequestsPerSecond: cfg.RequestsPerSecond,
+          Burst:             cfg.Burst,
+          ClientTtlSeconds:  cfg.ClientTtlSeconds,
       })
   }
 
@@ -200,15 +200,15 @@ body: |-
           Path:              r.Path,
           PathPattern:       r.PathPattern,
           AppKey:            r.AppKey,
-          Priority:          int32(r.Priority),
+          Priority:          r.Priority,
           Enabled:           r.Enabled,
           KeyBy:             r.KeyBy,
           Strategy:          r.Strategy,
-          WindowSeconds:     int32(r.WindowSeconds),
-          MaxRequests:       int32(r.MaxRequests),
-          RequestsPerSecond: derefFloat64(r.RequestsPerSecond),
-          Burst:             derefInt32(r.Burst),
-          ClientTtlSeconds:  derefInt32(r.ClientTtlSeconds),
+          WindowSeconds:     r.WindowSeconds,
+          MaxRequests:       r.MaxRequests,
+          RequestsPerSecond: r.RequestsPerSecond,
+          Burst:             r.Burst,
+          ClientTtlSeconds:  r.ClientTtlSeconds,
       }
   }
 
@@ -217,30 +217,6 @@ body: |-
           return nil
       }
       return &s
-  }
-
-  // float64Ptr converts a plain float64 to a pointer, matching sqlc's
-  // nullable *float64 CreateRateLimitRuleParams fields.
-  func float64Ptr(v float64) *float64 { return &v }
-
-  // int32Ptr converts a plain int32 to a pointer, matching sqlc's nullable
-  // *int32 CreateRateLimitRuleParams fields (burst, client_ttl_seconds).
-  func int32Ptr(v int32) *int32 { return &v }
-
-  // derefFloat64 returns the value of a nullable *float64, or 0 when nil.
-  func derefFloat64(v *float64) float64 {
-      if v == nil {
-          return 0
-      }
-      return *v
-  }
-
-  // derefInt32 returns the value of a nullable *int32, or 0 when nil.
-  func derefInt32(v *int32) int32 {
-      if v == nil {
-          return 0
-      }
-      return *v
   }
 
   func pickBestPattern(rules []gen.RateLimitRule, path string) *gen.RateLimitRule {

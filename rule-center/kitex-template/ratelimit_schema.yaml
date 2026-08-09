@@ -1,10 +1,11 @@
-# Kitex custom template — initial goose migration template
-path: internal/db/migrations/000001_init.sql
+# Kitex rule-center preset — sqlc schema definition for rate_limit_rules
+# This file is read by sqlc to generate type-safe Go code.
+path: internal/db/schema/000001_rate_limit_rules.sql
 update_behavior:
-  type: skip
+  type: cover
 body: |-
-  -- +goose Up
   -- Rate limit rules table for rule-center service
+  -- This schema is used by sqlc to generate type-safe query code.
   CREATE TABLE rate_limit_rules (
       id BIGSERIAL PRIMARY KEY,
       service TEXT NOT NULL,
@@ -26,10 +27,3 @@ body: |-
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-
-  -- Index for efficient rule lookups
-  CREATE INDEX idx_rate_limit_rules_lookup ON rate_limit_rules (service, phase, method, match_kind, enabled, priority DESC);
-  CREATE INDEX idx_rate_limit_rules_app_key ON rate_limit_rules (app_key) WHERE app_key IS NOT NULL;
-
-  -- +goose Down
-  DROP TABLE IF EXISTS rate_limit_rules;

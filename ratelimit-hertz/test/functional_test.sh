@@ -164,6 +164,16 @@ else
   fail "断言2 失败：期望同时出现 200 与 429，实际序列:${codes}；末次 body=${body}"
 fi
 
+# 断言 3：确凿区分 Redis vs 内存 —— 限流计数必须真的写进了 Redis。
+# 内存后端不会在 Redis 留下任何 key；只有 backend=redis 真正生效才会有计数 key。
+RKEYS=$(docker exec "$RD_CID" redis-cli dbsize 2>/dev/null | tr -dc '0-9')
+if [ -n "$RKEYS" ] && [ "$RKEYS" -ge 1 ]; then
+  log "断言3 通过：Redis dbsize=${RKEYS} ⇒ 限流计数确实存储于 Redis（非内存回退）。样例 key："
+  docker exec "$RD_CID" redis-cli --scan 2>/dev/null | head -5 | sed 's/^/    /'
+else
+  fail "断言3 失败：Redis 无任何 key（dbsize=${RKEYS:-0}）⇒ 限流疑似回退到内存后端"
+fi
+
 # ---------- 结果 ----------
 if [ "$FAILS" -ne 0 ]; then log "共 ${FAILS} 项失败"; exit 1; fi
 log "功能测试全部通过（PG 连接 + Redis 限流均已真实验证）"

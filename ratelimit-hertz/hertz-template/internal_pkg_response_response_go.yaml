@@ -1,23 +1,28 @@
-# ncgo exported template — internal/pkg/response/response.go
+# Hertz custom template — pkg/response/response.go
+# Generates the HTTP response helpers using go-framework/hertz.Responder.
+# Must maintain backward compatibility with handler template calls:
+#   response.OK(c, resp)     — 2 args
+#   response.Err(c, err)     — 2 args
+#   response.BindError(c, err) — 2 args
 path: internal/pkg/response/response.go
 update_behavior:
     type: cover
 body: |-
     package response
-
+    
     import (
         "context"
         "sync"
-
+    
         goerror "github.com/byx-darwin/go-tools/go-common/error"
         frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
         hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
         "github.com/cloudwego/hertz/pkg/app"
         "github.com/cloudwego/hertz/pkg/protocol/consts"
     )
-
+    
     // ── Error codes (scaffold-level, maps to frameworkerror codes) ──
-
+    
     const (
         CodeOK                    = 0
         CodeSystem                = frameworkerror.CodeSystem
@@ -27,13 +32,13 @@ body: |-
         CodeRPCUnavailable        = frameworkerror.CodeRPCUnavailable
         CodeRPCTimeout            = frameworkerror.CodeRPCTimeout
     )
-
+    
     const (
         CodeInternalError         = frameworkerror.CodeSystem
         CodeRequestBindFailed     = frameworkerror.CodeParamInvalid
         CodeRequestParamInvalid   = frameworkerror.CodeParamInvalid
         CodeRequestTimeout        = frameworkerror.CodeRPCTimeout
-
+    
         CodeUnauthorized          = frameworkerror.CodeAuthFailed
         CodeSignatureMissing      = frameworkerror.CodeAuthFailed
         CodeSignatureExpired      = frameworkerror.CodeAuthFailed
@@ -44,7 +49,7 @@ body: |-
         CodeClaimsInvalid         = frameworkerror.CodeAuthFailed
         CodeAppKeyInvalid         = frameworkerror.CodeAuthFailed
         CodeSessionInvalid        = frameworkerror.CodeAuthFailed
-
+    
         CodeCacheUnavailable      = 10304
         CodeDatabaseUnavailable   = 10303
         CodePermissionDenied      = 10108
@@ -53,78 +58,78 @@ body: |-
         CodeReplayRequest         = 10202
         CodeIdempotencyKeyMissing = 10203
         CodeIdempotencyConflict   = 10204
-
+    
         CodeDependencyError       = 10300
         CodeRPCFailed             = 10301
         CodeRouteNotFound         = 10008
         CodeMethodNotAllowed      = 10009
         CodeNotImplemented        = 10010
     )
-
+    
     var (
         registryMu sync.RWMutex
-        registry   = map[int]Definition{{ "{" }}{{ "}" }}
+        registry   = map[int]Definition{}
     )
-
-    type Definition struct {{ "{" }}
+    
+    type Definition struct {
         Code   int
         Msg    string
         Status int
-    {{ "}" }}
-
-    type ErrBody struct {{ "{" }}
+    }
+    
+    type ErrBody struct {
         Code int    `json:"code"`
         Msg  string `json:"msg"`
-    {{ "}" }}
-
-    type Body struct {{ "{" }}
+    }
+    
+    type Body struct {
         Code int    `json:"code"`
         Msg  string `json:"msg"`
         Data any    `json:"data,omitempty"`
-    {{ "}" }}
-
+    }
+    
     // NewResponder creates a Responder instance (called by server.Run).
-    func NewResponder() *hertzframework.Responder {{ "{" }}
+    func NewResponder() *hertzframework.Responder {
         return hertzframework.NewResponder()
-    {{ "}" }}
-
+    }
+    
     // OK writes a success response using package-level convenience function.
-    func OK(c *app.RequestContext, data any) {{ "{" }}
+    func OK(c *app.RequestContext, data any) {
         hertzframework.Success(c, data)
-    {{ "}" }}
-
+    }
+    
     // Err writes an error response using package-level convenience function.
-    func Err(c *app.RequestContext, err error) {{ "{" }}
+    func Err(c *app.RequestContext, err error) {
         hertzframework.Error(context.Background(), c, err, "")
-    {{ "}" }}
-
+    }
+    
     // BindError writes a 400 bind-validation error response.
-    func BindError(c *app.RequestContext, err error) {{ "{" }}
+    func BindError(c *app.RequestContext, err error) {
         hertzframework.Error(context.Background(), c, err, "bind_error")
-    {{ "}" }}
-
+    }
+    
     // ErrorCode writes an error response using the given business code.
-    func ErrorCode(c *app.RequestContext, code int) {{ "{" }}
-        hertzframework.Reply(c, StatusFromCode(code), ErrBody{{ "{" }}Code: code, Msg: MsgFromCode(code){{ "}" }})
-    {{ "}" }}
-
+    func ErrorCode(c *app.RequestContext, code int) {
+        hertzframework.Reply(c, StatusFromCode(code), ErrBody{Code: code, Msg: MsgFromCode(code)})
+    }
+    
     // Reply writes an arbitrary response.
-    func Reply(c *app.RequestContext, status int, payload any) {{ "{" }}
+    func Reply(c *app.RequestContext, status int, payload any) {
         c.JSON(status, payload)
-    {{ "}" }}
-
+    }
+    
     // CodeMsg extracts business code and message from an error.
-    func CodeMsg(err error) (int, string) {{ "{" }}
+    func CodeMsg(err error) (int, string) {
         code, public := goerror.Extract(err)
-        if code == 0 {{ "{" }}
+        if code == 0 {
             return CodeInternalError, "internal_error"
-        {{ "}" }}
+        }
         return code, public
-    {{ "}" }}
-
+    }
+    
     // StatusFromCode returns HTTP status for a known error code.
-    func StatusFromCode(code int) int {{ "{" }}
-        switch code {{ "{" }}
+    func StatusFromCode(code int) int {
+        switch code {
         case CodeOK:
             return consts.StatusOK
         case CodeRouteNotFound:
@@ -149,12 +154,12 @@ body: |-
             return consts.StatusServiceUnavailable
         default:
             return consts.StatusInternalServerError
-        {{ "}" }}
-    {{ "}" }}
-
+        }
+    }
+    
     // MsgFromCode returns a default message for a known code.
-    func MsgFromCode(code int) string {{ "{" }}
-        switch code {{ "{" }}
+    func MsgFromCode(code int) string {
+        switch code {
         case CodeOK:
             return "ok"
         case CodeSystem:
@@ -193,18 +198,18 @@ body: |-
             return "cache_unavailable"
         default:
             return "internal_error"
-        {{ "}" }}
-    {{ "}" }}
-
+        }
+    }
+    
     // Register adds a business error code definition.
-    func Register(def Definition) {{ "{" }}
+    func Register(def Definition) {
         registryMu.Lock()
         defer registryMu.Unlock()
         registry[def.Code] = def
-    {{ "}" }}
-
+    }
+    
     // MustRegister registers a definition and returns it.
-    func MustRegister(def Definition) Definition {{ "{" }}
+    func MustRegister(def Definition) Definition {
         Register(def)
         return def
-    {{ "}" }}
+    }

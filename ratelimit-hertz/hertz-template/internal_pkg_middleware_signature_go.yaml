@@ -1,8 +1,9 @@
-# ncgo exported template — internal/pkg/middleware/signature.go
+# Hertz custom template — internal/pkg/middleware/signature.go
+# Generates the signature-verification middleware.
 path: internal/pkg/middleware/signature.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package middleware
 
     import (
@@ -26,204 +27,204 @@ body: |
     	"{{.Module}}/internal/pkg/response"
     )
 
-    type SecretResolver interface {{ "{" }}
+    type SecretResolver interface {
     	Secret(ctx context.Context, appKey string) (string, error)
-    {{ "}" }}
+    }
 
-    type StaticSecretResolver struct {{ "{" }}
+    type StaticSecretResolver struct {
     	SecretValue string
-    {{ "}" }}
+    }
 
-    type signatureNonceStore interface {{ "{" }}
+    type signatureNonceStore interface {
     	Mark(ctx context.Context, key string, ttl time.Duration) (bool, error)
-    {{ "}" }}
+    }
 
-    type memorySignatureNonceStore struct {{ "{" }}
+    type memorySignatureNonceStore struct {
     	mu    sync.Mutex
-    	cache *hot.HotCache[string, struct{{ "{" }}{{ "}" }}]
-    {{ "}" }}
+    	cache *hot.HotCache[string, struct{}]
+    }
 
-    type redisSignatureNonceStore struct {{ "{" }}
+    type redisSignatureNonceStore struct {
     	client redis.UniversalClient
-    {{ "}" }}
+    }
 
-    func (r StaticSecretResolver) Secret(ctx context.Context, appKey string) (string, error) {{ "{" }}
+    func (r StaticSecretResolver) Secret(ctx context.Context, appKey string) (string, error) {
     	_ = ctx
     	_ = appKey
-    	if r.SecretValue == "" {{ "{" }}
+    	if r.SecretValue == "" {
     		return "", goerror.In("signature").Code(response.CodeConfigInvalid).Public(response.MsgFromCode(response.CodeConfigInvalid)).New("signature secret is empty")
-    	{{ "}" }}
+    	}
     	return r.SecretValue, nil
-    {{ "}" }}
+    }
 
-    func SignatureAuth(cfg conf.SignatureConfig, resolver SecretResolver) app.HandlerFunc {{ "{" }}
+    func SignatureAuth(cfg conf.SignatureConfig, resolver SecretResolver) app.HandlerFunc {
     	cfg = normalizeSignatureConfig(cfg)
     	nonceStore := newSignatureNonceStore(cfg.Nonce)
     	nonceTTL := cfg.Nonce.TTLSeconds.Duration
-    	return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    		if !cfg.Enabled {{ "{" }}
+    	return func(ctx context.Context, c *app.RequestContext) {
+    		if !cfg.Enabled {
     			c.Next(ctx)
     			return
-    		{{ "}" }}
+    		}
     		appKey := c.Request.Header.Get(cfg.HeaderAppKey)
     		timestamp := c.Request.Header.Get(cfg.HeaderTimestamp)
     		nonce := c.Request.Header.Get(cfg.HeaderNonce)
     		signature := c.Request.Header.Get(cfg.HeaderSignature)
-    		if appKey == "" || timestamp == "" || nonce == "" || signature == "" {{ "{" }}
+    		if appKey == "" || timestamp == "" || nonce == "" || signature == "" {
     			abort(c, response.CodeSignatureMissing)
     			return
-    		{{ "}" }}
-    		if !validTimestamp(timestamp, int64(cfg.MaxClockSkewSeconds.Seconds())) {{ "{" }}
+    		}
+    		if !validTimestamp(timestamp, int64(cfg.MaxClockSkewSeconds.Seconds())) {
     			abort(c, response.CodeSignatureExpired)
     			return
-    		{{ "}" }}
+    		}
     		secret, err := resolver.Secret(ctx, appKey)
-    		if err != nil {{ "{" }}
+    		if err != nil {
     			code, _ := response.CodeMsg(err)
     			abort(c, code)
     			return
-    		{{ "}" }}
+    		}
     		expected := ComputeSignature(secret, CanonicalRequest(c, timestamp, nonce))
-    		if subtle.ConstantTimeCompare([]byte(strings.ToLower(signature)), []byte(expected)) != 1 {{ "{" }}
+    		if subtle.ConstantTimeCompare([]byte(strings.ToLower(signature)), []byte(expected)) != 1 {
     			abort(c, response.CodeSignatureInvalid)
     			return
-    		{{ "}" }}
-    		if cfg.Nonce.Enabled {{ "{" }}
+    		}
+    		if cfg.Nonce.Enabled {
     			ok, err := nonceStore.Mark(ctx, signatureNonceKey(cfg.Nonce.KeyPrefix, appKey, nonce), nonceTTL)
-    			if err != nil {{ "{" }}
-    				if cfg.Nonce.FailOpen {{ "{" }}
+    			if err != nil {
+    				if cfg.Nonce.FailOpen {
     					c.Next(ctx)
     					return
-    				{{ "}" }}
+    				}
     				abort(c, response.CodeCacheUnavailable)
     				return
-    			{{ "}" }}
-    			if !ok {{ "{" }}
+    			}
+    			if !ok {
     				abort(c, response.CodeReplayRequest)
     				return
-    			{{ "}" }}
-    		{{ "}" }}
+    			}
+    		}
     		c.Next(ctx)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func newSignatureNonceStore(cfg conf.SignatureNonceConfig) signatureNonceStore {{ "{" }}
-    	if cfg.Enabled && cfg.Backend == "redis" {{ "{" }}
-    		return &redisSignatureNonceStore{{ "{" }}client: sharedRedisClient(cfg.Redis){{ "}" }}
-    	{{ "}" }}
+    func newSignatureNonceStore(cfg conf.SignatureNonceConfig) signatureNonceStore {
+    	if cfg.Enabled && cfg.Backend == "redis" {
+    		return &redisSignatureNonceStore{client: sharedRedisClient(cfg.Redis)}
+    	}
     	return newMemorySignatureNonceStore(cfg.Memory.MaxEntries)
-    {{ "}" }}
+    }
 
-    func newMemorySignatureNonceStore(maxEntries int) *memorySignatureNonceStore {{ "{" }}
-    	return &memorySignatureNonceStore{{ "{" }}cache: hot.NewHotCache[string, struct{{ "{" }}{{ "}" }}](hot.LRU, memoryCacheMaxEntries(maxEntries)).Build(){{ "}" }}
-    {{ "}" }}
+    func newMemorySignatureNonceStore(maxEntries int) *memorySignatureNonceStore {
+    	return &memorySignatureNonceStore{cache: hot.NewHotCache[string, struct{}](hot.LRU, memoryCacheMaxEntries(maxEntries)).Build()}
+    }
 
-    func (s *memorySignatureNonceStore) Mark(ctx context.Context, key string, ttl time.Duration) (bool, error) {{ "{" }}
+    func (s *memorySignatureNonceStore) Mark(ctx context.Context, key string, ttl time.Duration) (bool, error) {
     	_ = ctx
-    	if ttl <= 0 {{ "{" }}
+    	if ttl <= 0 {
     		ttl = 300 * time.Second
-    	{{ "}" }}
+    	}
     	s.mu.Lock()
     	defer s.mu.Unlock()
-    	if _, found, err := s.cache.Get(key); err != nil {{ "{" }}
+    	if _, found, err := s.cache.Get(key); err != nil {
     		return false, err
-    	{{ "}" }} else if found {{ "{" }}
+    	} else if found {
     		return false, nil
-    	{{ "}" }}
-    	s.cache.SetWithTTL(key, struct{{ "{" }}{{ "}" }}{{ "{" }}{{ "}" }}, ttl)
+    	}
+    	s.cache.SetWithTTL(key, struct{}{}, ttl)
     	return true, nil
-    {{ "}" }}
+    }
 
-    func (s *redisSignatureNonceStore) Mark(ctx context.Context, key string, ttl time.Duration) (bool, error) {{ "{" }}
-    	if ttl <= 0 {{ "{" }}
+    func (s *redisSignatureNonceStore) Mark(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+    	if ttl <= 0 {
     		ttl = 300 * time.Second
-    	{{ "}" }}
+    	}
     	return s.client.SetNX(ctx, key, "1", ttl).Result()
-    {{ "}" }}
+    }
 
-    func signatureNonceKey(prefix, appKey, nonce string) string {{ "{" }}
+    func signatureNonceKey(prefix, appKey, nonce string) string {
     	replacer := strings.NewReplacer(":", "_", " ", "_", "\n", "_")
-    	parts := []string{{ "{" }}prefix, "signature_nonce", appKey, nonce{{ "}" }}
+    	parts := []string{prefix, "signature_nonce", appKey, nonce}
     	safe := make([]string, 0, len(parts))
-    	for _, part := range parts {{ "{" }}
+    	for _, part := range parts {
     		part = strings.TrimSpace(part)
-    		if part == "" {{ "{" }}
+    		if part == "" {
     			continue
-    		{{ "}" }}
+    		}
     		safe = append(safe, replacer.Replace(part))
-    	{{ "}" }}
+    	}
     	return strings.Join(safe, ":")
-    {{ "}" }}
+    }
 
-    func CanonicalRequest(c *app.RequestContext, timestamp, nonce string) string {{ "{" }}
-    	return strings.Join([]string{{ "{" }}
+    func CanonicalRequest(c *app.RequestContext, timestamp, nonce string) string {
+    	return strings.Join([]string{
     		string(c.Method()),
     		string(c.Path()),
     		string(c.Request.URI().QueryString()),
     		timestamp,
     		nonce,
     		string(c.Request.Body()),
-    	{{ "}" }}, "\n")
-    {{ "}" }}
+    	}, "\n")
+    }
 
-    func ComputeSignature(secret, canonical string) string {{ "{" }}
+    func ComputeSignature(secret, canonical string) string {
     	mac := hmac.New(sha256.New, []byte(secret))
     	_, _ = mac.Write([]byte(canonical))
     	return hex.EncodeToString(mac.Sum(nil))
-    {{ "}" }}
+    }
 
-    func validTimestamp(value string, skew int64) bool {{ "{" }}
-    	if skew <= 0 {{ "{" }}
+    func validTimestamp(value string, skew int64) bool {
+    	if skew <= 0 {
     		skew = 300
-    	{{ "}" }}
+    	}
     	ts, err := strconv.ParseInt(value, 10, 64)
-    	if err != nil {{ "{" }}
+    	if err != nil {
     		return false
-    	{{ "}" }}
+    	}
     	delta := time.Now().Unix() - ts
     	return delta <= skew && delta >= -skew
-    {{ "}" }}
+    }
 
-    func normalizeSignatureConfig(cfg conf.SignatureConfig) conf.SignatureConfig {{ "{" }}
-    	if cfg.HeaderAppKey == "" {{ "{" }}
+    func normalizeSignatureConfig(cfg conf.SignatureConfig) conf.SignatureConfig {
+    	if cfg.HeaderAppKey == "" {
     		cfg.HeaderAppKey = "X-App-Key"
-    	{{ "}" }}
-    	if cfg.HeaderTimestamp == "" {{ "{" }}
+    	}
+    	if cfg.HeaderTimestamp == "" {
     		cfg.HeaderTimestamp = "X-Timestamp"
-    	{{ "}" }}
-    	if cfg.HeaderNonce == "" {{ "{" }}
+    	}
+    	if cfg.HeaderNonce == "" {
     		cfg.HeaderNonce = "X-Nonce"
-    	{{ "}" }}
-    	if cfg.HeaderSignature == "" {{ "{" }}
+    	}
+    	if cfg.HeaderSignature == "" {
     		cfg.HeaderSignature = "X-Signature"
-    	{{ "}" }}
-    	if cfg.MaxClockSkewSeconds.Duration <= 0 {{ "{" }}
-    		cfg.MaxClockSkewSeconds = config.Duration{{ "{" }}Duration: 300 * time.Second{{ "}" }}
-    	{{ "}" }}
+    	}
+    	if cfg.MaxClockSkewSeconds.Duration <= 0 {
+    		cfg.MaxClockSkewSeconds = config.Duration{Duration: 300 * time.Second}
+    	}
     	cfg.Nonce = normalizeSignatureNonceConfig(cfg.Nonce)
     	return cfg
-    {{ "}" }}
+    }
 
-    func normalizeSignatureNonceConfig(cfg conf.SignatureNonceConfig) conf.SignatureNonceConfig {{ "{" }}
-    	if cfg.Backend == "" {{ "{" }}
+    func normalizeSignatureNonceConfig(cfg conf.SignatureNonceConfig) conf.SignatureNonceConfig {
+    	if cfg.Backend == "" {
     		cfg.Backend = "memory"
-    	{{ "}" }}
-    	if cfg.KeyPrefix == "" {{ "{" }}
+    	}
+    	if cfg.KeyPrefix == "" {
     		cfg.KeyPrefix = "signature_nonce"
-    	{{ "}" }}
-    	if cfg.TTLSeconds.Duration <= 0 {{ "{" }}
-    		cfg.TTLSeconds = config.Duration{{ "{" }}Duration: 300 * time.Second{{ "}" }}
-    	{{ "}" }}
-    	if cfg.Memory.MaxEntries <= 0 {{ "{" }}
+    	}
+    	if cfg.TTLSeconds.Duration <= 0 {
+    		cfg.TTLSeconds = config.Duration{Duration: 300 * time.Second}
+    	}
+    	if cfg.Memory.MaxEntries <= 0 {
     		cfg.Memory.MaxEntries = defaultMemoryCacheMaxEntries
-    	{{ "}" }}
-    	if cfg.Backend == "redis" && len(cfg.Redis.Addrs) == 0 {{ "{" }}
-    		cfg.Redis.Addrs = []string{{ "{" }}"127.0.0.1:6379"{{ "}" }}
-    	{{ "}" }}
+    	}
+    	if cfg.Backend == "redis" && len(cfg.Redis.Addrs) == 0 {
+    		cfg.Redis.Addrs = []string{"127.0.0.1:6379"}
+    	}
     	return cfg
-    {{ "}" }}
+    }
 
-    func abort(c *app.RequestContext, code int) {{ "{" }}
-    	response.Reply(c, response.StatusFromCode(code), response.ErrBody{{ "{" }}Code: code, Msg: response.MsgFromCode(code){{ "}" }})
+    func abort(c *app.RequestContext, code int) {
+    	response.Reply(c, response.StatusFromCode(code), response.ErrBody{Code: code, Msg: response.MsgFromCode(code)})
     	c.Abort()
-    {{ "}" }}
+    }

@@ -1,8 +1,9 @@
-# ncgo exported template — internal/pkg/middleware/observability.go
+# Hertz custom template — internal/pkg/middleware/observability.go
+# Generates observability middleware helpers.
 path: internal/pkg/middleware/observability.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package middleware
 
     // Placeholder: filled by `ncgo add infra logging`.

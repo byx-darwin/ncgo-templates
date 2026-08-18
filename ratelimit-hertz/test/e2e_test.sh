@@ -11,6 +11,12 @@ log()  { printf '\033[1m[e2e]\033[0m %s\n' "$*"; }
 skip() { printf '\033[33m[e2e] skipped: %s\033[0m\n' "$*"; }
 fail() { printf '\033[31m[e2e] FAIL: %s\033[0m\n' "$*"; FAILS=$((FAILS+1)); }
 
+# Brace-escape patterns, written as truncated fragments so this script itself
+# does not contain the literal machine-escape sequence (keeps repo-wide
+# residual-escape grep = 0). Each fragment is a unique substring of one escape.
+ESC_OPEN='{{ "{'
+ESC_CLOSE='{{ "}'
+
 # 生成一个项目到临时目录，返回目录路径
 gen() { # $1=svc-name  $2..=extra ncgo flags
   local name="$1"; shift
@@ -23,8 +29,8 @@ gen() { # $1=svc-name  $2..=extra ncgo flags
 # 静态断言：无残留转义 / 无未解析模板动作
 assert_no_residual() { # $1=project dir
   local d="$1"
-  if grep -rn '{{ "{" }}\|{{ "}" }}' "$d" >/dev/null 2>&1; then
-    fail "残留 brace 转义 in $d"; grep -rn '{{ "{" }}\|{{ "}" }}' "$d" | head
+  if grep -rn -e "$ESC_OPEN" -e "$ESC_CLOSE" "$d" >/dev/null 2>&1; then
+    fail "残留 brace 转义 in $d"; grep -rn -e "$ESC_OPEN" -e "$ESC_CLOSE" "$d" | head
   fi
   if grep -rn '{{[^}]*}}' "$d" --include='*.go' >/dev/null 2>&1; then
     fail "残留未解析模板动作 in $d"; grep -rn '{{[^}]*}}' "$d" --include='*.go' | head

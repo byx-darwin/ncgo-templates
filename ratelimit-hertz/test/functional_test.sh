@@ -62,8 +62,10 @@ docker exec "$RD_CID" redis-cli ping >/dev/null 2>&1 || { fail "Redis 未就绪"
 # ---------- 生成项目 ----------
 WORKDIR=$(mktemp -d)
 PROJ="$WORKDIR/fnsvc"
-log "ncgo 生成项目（--db postgres --infra redis）"
-ncgo new fnsvc --module example.com/fnsvc --kind hertz --db postgres --infra redis \
+# 注意：不加 --infra redis —— ratelimit 模板已自带 internal/base/data/redis.go，
+# 再 --infra redis 会因文件已存在而报错。redis 支持随模板生成，conf 里已有 redis 段。
+log "ncgo 生成项目（--db postgres；redis 由模板自带）"
+ncgo new fnsvc --module example.com/fnsvc --kind hertz --db postgres \
   --template-dir "$TPL_DIR" --dir "$PROJ" >/dev/null || { fail "ncgo 生成失败"; exit 1; }
 
 log "make sqlc + go mod tidy + go build"
@@ -76,34 +78,36 @@ for f in "$PROJ"/internal/db/schema/*.sql; do
 done
 
 # ---------- 改写测试配置 ----------
-# 直接修改生成项目的 conf/dev/conf.yaml（渲染后是纯 YAML，PyYAML 可安全往返）。
+# 用 python 标准库做定向文本替换（不依赖 PyYAML —— 系统 python3 常无 yaml 模块）。
+# 依赖生成配置里各目标值的唯一性：port "8080"/dsn ""/redis 6379 地址/backend memory
+# /max_requests 100(仅 pre_auth) 均全局唯一；database、rate_limit 的 enabled 用分节锚定。
 log "写入测试配置（PG/Redis 指向容器；开启 redis 后端限流；/healthz、/readyz 加入 skip）"
 CONF="$PROJ/conf/dev/conf.yaml"
-PG_PORT="$PG_PORT" RD_PORT="$RD_PORT" HTTP_PORT="$HTTP_PORT" MAX_REQ="$MAX_REQ" CONF="$CONF" python3 - <<'PY'
-import os, yaml
-p = os.environ["CONF"]
-d = yaml.safe_load(open(p))
-d.setdefault("server", {}).setdefault("http", {})["port"] = os.environ["HTTP_PORT"]
-db = d.setdefault("database", {})
-db["enabled"] = True
-db["dsn"] = f'postgres://app:pass@127.0.0.1:{os.environ["PG_PORT"]}/appdb?sslmode=disable'
-d.setdefault("redis", {})["addrs"] = [f'127.0.0.1:{os.environ["RD_PORT"]}']
-rl = d.setdefault("rate_limit", {})
-rl["enabled"] = True
-rl["backend"] = "redis"
-# /healthz、/readyz 探活不占限流预算（key_by=[ip] 时它们与 /ping 共享计数）
-rl["skip_paths"] = ["/healthz", "/readyz"]
-pre = rl.setdefault("pre_auth", {})
-pre["enabled"] = True
-rule = pre.setdefault("default_rule", {})
-rule["enabled"] = True
-rule["key_by"] = ["ip"]
-rule["strategy"] = "fixed_window"
-rule["window_seconds"] = "60s"
-rule["max_requests"] = int(os.environ["MAX_REQ"])
-yaml.safe_dump(d, open(p, "w"), allow_unicode=True, sort_keys=False)
+PG_PORT="$PG_PORT" RD_PORT="$RD_PORT" HTTP_PORT="$HTTP_PORT" MAX_REQ="$MAX_REQ" CONF="$CONF" python3 - <<'PY' || { echo "conf patch python 失败"; exit 3; }
+import os, re, sys
+p, pg, rd = os.environ["CONF"], os.environ["PG_PORT"], os.environ["RD_PORT"]
+http, mx = os.environ["HTTP_PORT"], os.environ["MAX_REQ"]
+t = open(p).read()
+def once(old, new):
+    global t
+    if old not in t:
+        sys.exit(f"配置里未找到锚点: {old!r}")
+    t = t.replace(old, new, 1)
+once('port: "8080"',    f'port: "{http}"')
+once('dsn: ""',         f'dsn: "postgres://app:pass@127.0.0.1:{pg}/appdb?sslmode=disable"')
+once('- 127.0.0.1:6379', f'- 127.0.0.1:{rd}')
+once('backend: memory', 'backend: redis\n  skip_paths:\n    - /healthz\n    - /readyz')
+once('max_requests: 100', f'max_requests: {mx}')  # 仅 pre_auth 默认规则为 100
+# database / rate_limit 的 enabled: false 分节锚定（非贪婪，各取其后第一个）
+t = re.sub(r'(database:.*?)enabled: false', r'\1enabled: true', t, count=1, flags=re.S)
+t = re.sub(r'(rate_limit:.*?)enabled: false', r'\1enabled: true', t, count=1, flags=re.S)
+open(p, "w").write(t)
 print("conf patched")
 PY
+# 校验关键值确实写入（防止静默失配）
+grep -q "port: \"$HTTP_PORT\"" "$CONF" && grep -q "backend: redis" "$CONF" \
+  && grep -q "127.0.0.1:$RD_PORT" "$CONF" && grep -q "max_requests: $MAX_REQ" "$CONF" \
+  || { fail "配置改写校验失败（关键值未写入 $CONF）"; exit 1; }
 
 # ---------- 启动服务 ----------
 log "启动服务"
@@ -111,18 +115,27 @@ log "启动服务"
 ( cd "$PROJ" && exec ./fnsvc-bin >"$WORKDIR/server.log" 2>&1 ) &
 SRV_PID=$!
 
-# 断言 1：服务能起来 + /healthz 200 ⇒ 真连上了 PG（database.enabled=true 下 pool.Ping 成功）
-up=0
-for _ in $(seq 1 30); do
-  curl -sf "$BASE/healthz" >/dev/null 2>&1 && { up=1; break; }
-  kill -0 "$SRV_PID" 2>/dev/null || break   # 进程已退出（多半是 PG 连接失败）
+# 断言 1：从日志解析真实监听地址。框架可能绑定 LAN IP 而非 127.0.0.1；且监听发生在
+# NewPostgres→pool.Ping 成功之后，故能拿到监听地址本身即证明 PG 连接成功。
+ADDR=""
+for _ in $(seq 1 40); do
+  ADDR=$(grep -oE 'address=[0-9.]+:[0-9]+' "$WORKDIR/server.log" 2>/dev/null | head -1 | sed 's/address=//')
+  [ -n "$ADDR" ] && break
+  kill -0 "$SRV_PID" 2>/dev/null || break   # 进程已退出（多半是 PG 连接失败 → log.Fatalf）
   sleep 1
 done
-if [ "$up" = 1 ]; then
-  log "断言1 通过：服务启动 + /healthz OK ⇒ PostgreSQL 连接成功"
+if [ -z "$ADDR" ]; then
+  fail "断言1 失败：服务未监听（很可能 database.enabled=true 下 PG 连接失败）。server.log 末尾："
+  tail -25 "$WORKDIR/server.log" || true
+  exit 1
+fi
+BASE="http://$ADDR"
+log "服务监听于 ${ADDR}（监听发生在 pool.Ping 之后 ⇒ PostgreSQL 连接成功）"
+if curl -sf "$BASE/healthz" >/dev/null 2>&1; then
+  log "断言1 通过：/healthz OK ⇒ 服务健康、PG 已连接"
 else
-  fail "断言1 失败：服务未起（很可能 PG 连接失败）。server.log 末尾："
-  tail -20 "$WORKDIR/server.log" || true
+  fail "断言1 失败：/healthz 不可达 @ ${BASE}"
+  tail -25 "$WORKDIR/server.log" || true
   exit 1
 fi
 

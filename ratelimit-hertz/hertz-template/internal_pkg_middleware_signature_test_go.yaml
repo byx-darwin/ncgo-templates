@@ -21,7 +21,7 @@ body: |-
     )
 
     func TestSignatureNonceRejectsReplay(t *testing.T) {
-    	cfg := conf.SignatureConfig{Enabled: true, StaticSecret: "secret", Nonce: conf.SignatureNonceConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", TTLSeconds: config.Duration{Duration: 300 * time.Second{{ "}}" }}}
+    	cfg := conf.SignatureConfig{Enabled: true, StaticSecret: "secret", Nonce: conf.SignatureNonceConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", TTLSeconds: config.Duration{Duration: 300 * time.Second}}}
     	mw := SignatureAuth(cfg, StaticSecretResolver{SecretValue: "secret"})
     	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 
@@ -42,7 +42,7 @@ body: |-
     }
 
     func TestSignatureInvalidDoesNotConsumeNonce(t *testing.T) {
-    	cfg := conf.SignatureConfig{Enabled: true, StaticSecret: "secret", Nonce: conf.SignatureNonceConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", TTLSeconds: config.Duration{Duration: 300 * time.Second{{ "}}" }}}
+    	cfg := conf.SignatureConfig{Enabled: true, StaticSecret: "secret", Nonce: conf.SignatureNonceConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", TTLSeconds: config.Duration{Duration: 300 * time.Second}}}
     	mw := SignatureAuth(cfg, StaticSecretResolver{SecretValue: "secret"})
     	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 

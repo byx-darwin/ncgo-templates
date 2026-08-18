@@ -18,7 +18,7 @@ body: |-
     )
 
     func TestResolverMatchesLocalRuleByAppKeyAndPath(t *testing.T) {
-    	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{ "{{" }}AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 100, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 2{{ "}}" }}{{ "}}" }}}, Options{})
+    	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{"{{"}}AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 100, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 2}}}}}, Options{})
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Method: "GET", Path: "/orders"})
     	if err != nil {
     		t.Fatalf("Resolve: %v", err)
@@ -29,7 +29,7 @@ body: |-
     }
 
     func TestResolverPrefersMoreSpecificLocalRule(t *testing.T) {
-    	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{ "{{" }}MatchKind: "prefix", PathPattern: "/orders", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 8{{ "}}" }}, {MatchKind: "exact", Path: "/orders", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 6{{ "}}" }}, {AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 30, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 4{{ "}}" }}, {AppKey: "app-1", Method: "GET", MatchKind: "exact", Path: "/orders", Priority: 40, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 2{{ "}}" }}{{ "}}" }}}, Options{})
+    	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{"{{"}}MatchKind: "prefix", PathPattern: "/orders", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 8}}, {MatchKind: "exact", Path: "/orders", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 6}}, {AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 30, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 4}}, {AppKey: "app-1", Method: "GET", MatchKind: "exact", Path: "/orders", Priority: 40, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 2}}}}}, Options{})
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Method: "GET", Path: "/orders"})
     	if err != nil {
     		t.Fatalf("Resolve: %v", err)
@@ -40,7 +40,7 @@ body: |-
     }
 
     func TestResolverFallsBackToDefaultRule(t *testing.T) {
-    	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 9{{ "}}" }}}, Options{})
+    	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 9}}}, Options{})
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "missing", Path: "/unknown"})
     	if err != nil {
     		t.Fatalf("Resolve: %v", err)
@@ -52,9 +52,9 @@ body: |-
 
     func TestResolverSupportsGlobAndRegexLocalRules(t *testing.T) {
     	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 100}, Rules: []conf.RateLimitMatchConfig{
-    		{MatchKind: "glob", PathPattern: "/orders/*/items", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 8{{ "}}" }},
-    		{MatchKind: "regex", PathPattern: "^/orders/[0-9]+$", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 6{{ "}}" }},
-    	{{ "}}" }}}, Options{})
+    		{MatchKind: "glob", PathPattern: "/orders/*/items", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 8}},
+    		{MatchKind: "regex", PathPattern: "^/orders/[0-9]+$", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 6}},
+    	}}}, Options{})
 
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", Method: "GET", Path: "/orders/42/items"})
     	if err != nil {
@@ -67,8 +67,8 @@ body: |-
 
     func TestResolverSupportsPathPrefixCompatibilityAlias(t *testing.T) {
     	resolver := NewResolver(conf.RateLimitConfig{PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{
-    		{PathPrefix: "/orders/", Priority: 5, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 3{{ "}}" }},
-    	{{ "}}" }}}, Options{})
+    		{PathPrefix: "/orders/", Priority: 5, Rule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 3}},
+    	}}}, Options{})
 
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", Method: "GET", Path: "/orders/42"})
     	if err != nil {
@@ -80,7 +80,7 @@ body: |-
     }
 
     func TestResolverUsesDynamicRuleWhenPresent(t *testing.T) {
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true{{ "}}" }}, Options{GRPC: fakeGRPCClient{rule: &conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 3}, found: true{{ "}}" }})
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}}, Options{GRPC: fakeGRPCClient{rule: &conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 3}, found: true}})
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Path: "/orders"})
     	if err != nil {
     		t.Fatalf("Resolve: %v", err)
@@ -91,7 +91,7 @@ body: |-
     }
 
     func TestResolverFallsBackWhenDynamicSourceErrors(t *testing.T) {
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 8{{ "}}" }}}, Options{GRPC: fakeGRPCClient{err: errors.New("boom"){{ "}}" }})
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, PreAuth: conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 8}}}, Options{GRPC: fakeGRPCClient{err: errors.New("boom")}})
     	got, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Path: "/orders"})
     	if err != nil {
     		t.Fatalf("Resolve: %v", err)
@@ -102,7 +102,7 @@ body: |-
     }
 
     func TestResolverReturnsErrorWhenDynamicSourceErrorsAndFallbackDisabled(t *testing.T) {
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: false{{ "}}" }}, Options{GRPC: fakeGRPCClient{err: errors.New("boom"){{ "}}" }})
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: false}}, Options{GRPC: fakeGRPCClient{err: errors.New("boom")}})
     	if _, err := resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Path: "/orders"}); err == nil {
     		t.Fatalf("Resolve error = nil, want propagated dynamic source error")
     	}
@@ -129,7 +129,7 @@ body: |-
 
     func TestResolverCachesNegativeLookup(t *testing.T) {
     	client := &countingGRPCClient{}
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true{{ "}}" }}, Options{GRPC: client})
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}}, Options{GRPC: client})
     	_, _ = resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Path: "/orders"})
     	_, _ = resolver.Resolve(context.Background(), Lookup{Phase: "pre_auth", AppKey: "app-1", Path: "/orders"})
     	if client.calls != 1 {
@@ -140,7 +140,7 @@ body: |-
     func TestResolverCachesPositiveLookupUntilTTLExpires(t *testing.T) {
     	calls := 0
     	maxRequests := 3
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 1 * time.Second}, FallbackOnError: true{{ "}}" }}, Options{GRPC: ResolveFunc(func(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 1 * time.Second}, FallbackOnError: true}}, Options{GRPC: ResolveFunc(func(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {
     		_ = ctx
     		_ = lookup
     		calls++
@@ -183,7 +183,7 @@ body: |-
 
     func TestResolverCacheKeySeparatesPhaseAndMethod(t *testing.T) {
     	calls := 0
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true{{ "}}" }}, Options{GRPC: ResolveFunc(func(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}}, Options{GRPC: ResolveFunc(func(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {
     		_ = ctx
     		calls++
     		return &conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: len(lookup.Phase) + len(lookup.Method)}, true, nil
@@ -202,7 +202,7 @@ body: |-
 
     func TestResolverCacheKeySeparatesService(t *testing.T) {
     	calls := 0
-    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true{{ "}}" }}, Options{GRPC: ResolveFunc(func(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {
+    	resolver := NewResolver(conf.RateLimitConfig{Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}}, Options{GRPC: ResolveFunc(func(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {
     		_ = ctx
     		calls++
     		return nil, false, nil

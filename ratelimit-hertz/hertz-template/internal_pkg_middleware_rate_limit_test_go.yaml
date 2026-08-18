@@ -22,7 +22,7 @@ body: |-
     )
 
     func TestRateLimitRejectsAfterBurst(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "token_bucket", RequestsPerSecond: 1, Burst: 1, ClientTTLSeconds: config.Duration{Duration: 300 * time.Second{{ "}}" }}}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "token_bucket", RequestsPerSecond: 1, Burst: 1, ClientTTLSeconds: config.Duration{Duration: 300 * time.Second}}}
     	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
 
@@ -43,7 +43,7 @@ body: |-
     }
 
     func TestRateLimitRejectsAfterFixedWindowLimit(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1, ClientTTLSeconds: config.Duration{Duration: 300 * time.Second{{ "}}" }}}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1, ClientTTLSeconds: config.Duration{Duration: 300 * time.Second}}}
     	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
 
@@ -61,7 +61,7 @@ body: |-
     }
 
     func TestRateLimitSkipPath(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1{{ "}}" }}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}}
     	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", SkipPaths: []string{"/healthz"}, PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
     	for i := 0; i < 3; i++ {
@@ -74,7 +74,7 @@ body: |-
     }
 
     func TestRateLimitUsesMostSpecificLocalRule(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{ "{{" }}MatchKind: "prefix", PathPattern: "/orders", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}, {AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1{{ "}}" }}{{ "}}" }}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{"{{"}}MatchKind: "prefix", PathPattern: "/orders", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}, {AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}}}}
     	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
 
@@ -94,8 +94,8 @@ body: |-
     }
 
     func TestRateLimitUsesPostAuthPhaseConfig(t *testing.T) {
-    	pre := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10{{ "}}" }}
-    	post := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"user_uuid"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1{{ "}}" }}
+    	pre := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}}
+    	post := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"user_uuid"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}}
     	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: pre, PostAuth: post}
     	mw := RateLimit("post_auth", cfg, post, nil)
 
@@ -115,9 +115,9 @@ body: |-
     }
 
     func TestRateLimitUsesDynamicResolverRule(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}
     	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, PreAuth: phase}
-    	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{rule: &conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}, found: true{{ "}}" }})
+    	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{rule: &conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}, found: true}})
     	mw := RateLimit("pre_auth", cfg, phase, resolver)
 
     	first := newRateLimitContext("/orders")
@@ -136,8 +136,8 @@ body: |-
     }
 
     func TestRateLimitUsesDatabaseResolverRule(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
-    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{Type: "database", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, Database: conf.RateLimitDatabaseConfig{QueryTimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond{{ "}}" }}, PreAuth: phase}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{Type: "database", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, Database: conf.RateLimitDatabaseConfig{QueryTimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond}}, PreAuth: phase}
     	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{Database: ratelimit.ResolveFunc(func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {
     		_ = ctx
     		_ = lookup
@@ -161,10 +161,10 @@ body: |-
     }
 
     func TestRateLimitResolverErrorRespectsFailOpen(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}
     	base := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: false}, PreAuth: phase}
 
-    	closedResolver := ratelimit.NewResolver(base, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{err: errors.New("boom"){{ "}}" }})
+    	closedResolver := ratelimit.NewResolver(base, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{err: errors.New("boom")}})
     	closed := RateLimit("pre_auth", base, phase, closedResolver)
     	closedCtx := newRateLimitContext("/orders")
     	closed(context.Background(), closedCtx)
@@ -177,7 +177,7 @@ body: |-
 
     	openCfg := base
     	openCfg.FailOpen = true
-    	openResolver := ratelimit.NewResolver(openCfg, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{err: errors.New("boom"){{ "}}" }})
+    	openResolver := ratelimit.NewResolver(openCfg, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{err: errors.New("boom")}})
     	opened := RateLimit("pre_auth", openCfg, phase, openResolver)
     	openCtx := newRateLimitContext("/orders")
     	opened(context.Background(), openCtx)
@@ -190,7 +190,7 @@ body: |-
     }
 
     func TestRateLimitStoreErrorRespectsFailOpen(t *testing.T) {
-    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}
     	base := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase}
 
     	closedStore := &fakeRateLimitStore{err: errors.New("store boom")}

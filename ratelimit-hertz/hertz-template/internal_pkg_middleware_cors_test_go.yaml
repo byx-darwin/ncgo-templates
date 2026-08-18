@@ -24,7 +24,7 @@ body: |-
     	req.Header.Set("Access-Control-Request-Method", "GET")
     	req.CopyTo(&c.Request)
 
-    	CORS(conf.CORSConfig{Enabled: true, AllowOrigins: []string{"https://app.example.com"{{ "}}" }})(context.Background(), c)
+    	CORS(conf.CORSConfig{Enabled: true, AllowOrigins: []string{"https://app.example.com"}})(context.Background(), c)
 
     	if c.Response.StatusCode() != consts.StatusNoContent {
     		t.Fatalf("status = %d, want %d", c.Response.StatusCode(), consts.StatusNoContent)
@@ -41,7 +41,7 @@ body: |-
     	req.Header.Set("Access-Control-Request-Method", "GET")
     	req.CopyTo(&c.Request)
 
-    	CORS(conf.CORSConfig{Enabled: true, AllowOrigins: []string{"https://app.example.com"{{ "}}" }})(context.Background(), c)
+    	CORS(conf.CORSConfig{Enabled: true, AllowOrigins: []string{"https://app.example.com"}})(context.Background(), c)
 
     	if c.Response.StatusCode() != consts.StatusForbidden {
     		t.Fatalf("status = %d, want %d", c.Response.StatusCode(), consts.StatusForbidden)

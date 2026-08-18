@@ -89,8 +89,8 @@ body: |-
     }
 
     func TestMemoryStoreEvictsLRU(t *testing.T) {
-    	store := NewStore(conf.RateLimitConfig{Backend: "memory", Memory: conf.MemoryCacheConfig{MaxEntries: 1{{ "}}" }}, nil)
-    	rule := conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1, ClientTTLSeconds: config.Duration{Duration: 60 * time.Second{{ "}}" }}
+    	store := NewStore(conf.RateLimitConfig{Backend: "memory", Memory: conf.MemoryCacheConfig{MaxEntries: 1}}, nil)
+    	rule := conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1, ClientTTLSeconds: config.Duration{Duration: 60 * time.Second}}
     	if ok, err := store.Allow(context.Background(), "k1", rule); err != nil || !ok {
     		t.Fatalf("allow k1 = %v, %v", ok, err)
     	}

@@ -450,7 +450,7 @@ body: |-
     	if ttl <= 0 {
     		ttl = 60 * time.Second
     	}
-    	return &cachedSource{next: next, ttl: ttl, values: map[string]cacheEntry{{{ "}}" }}
+    	return &cachedSource{next: next, ttl: ttl, values: map[string]cacheEntry{}}
     }
 
     func (s *cachedSource) ResolveRateLimitRule(ctx context.Context, lookup Lookup) (*conf.RateLimitRuleConfig, bool, error) {

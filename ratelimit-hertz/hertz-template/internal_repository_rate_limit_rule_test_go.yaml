@@ -51,7 +51,7 @@ body: |-
     		WindowSeconds:    60,
     		MaxRequests:      9,
     		ClientTTLSeconds: 90,
-    	{{ "}}" }})
+    	}})
     	rule, found, err := hook.ResolveRateLimitRule(context.Background(), ratelimit.Lookup{Service: "order-api", Phase: "post_auth", Method: "GET", Path: "/orders", AppKey: "app-1"})
     	if err != nil || !found || rule == nil {
     		t.Fatalf("got rule=%v found=%v err=%v, want mapped rule", rule, found, err)
@@ -77,7 +77,7 @@ body: |-
     		_ = method
     		_ = path
     		_ = appKey
-    	{{ "}}" }})
+    	}})
 
     	_, _, _ = hook.ResolveRateLimitRule(context.Background(), ratelimit.Lookup{Service: "order-api", Phase: "pre_auth", Method: "GET", Path: "/orders"})
     	if gotService != "order-api" {

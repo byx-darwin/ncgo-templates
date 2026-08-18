@@ -1,37 +1,112 @@
 # ratelimit-hertz
 
-Official Hertz HTTP service template with built-in rate limiting support.
+Official **Hertz HTTP** service template with built-in rate limiting support —
+memory/Redis backends and fixed-window / token-bucket algorithms, aligned with
+the base-hertz template style.
+
+## Use
+
+```bash
+ncgo template pull ratelimit-hertz
+
+# With database support
+ncgo new my-api --module github.com/acme/my-api --kind hertz --db postgres --template ratelimit-hertz
+
+# Without database support (limited functionality)
+ncgo new my-api --module github.com/acme/my-api --kind hertz --template ratelimit-hertz
+```
+
+## Contents
+
+`hertz-template/*.yaml` includes the base-hertz template set (`main`, `conf`,
+`data`, `server`, `middleware`, `errcode`, `response`, `makefile`) plus
+rate-limit specific files:
+
+- Middleware: `cors`, `error`, `idempotency`, `memory_cache`, `observability`,
+  `rate_limit`, `redis_client`, `signature`, `skip`, `token`
+- Rate-limit core: `internal/pkg/ratelimit/resolver.go`, `internal/pkg/ratelimit/store.go`
+- Repository: `internal/repository/rate_limit_rule.go`
+- Assembly: `handler/health`, `handler/pb`, `router/register`, `router/pb`, `i18n`
+- Test templates for each package
+
+Variables: `{{.Module}}`, `{{.ServiceName}}`, `{{ToLower .ServiceName}}`.
 
 ## Features
 
-- **Rate Limiting**: Built-in rate limiting middleware with multiple algorithms
-  - Fixed window
-  - Sliding window  
-  - Token bucket
-- **Storage Backends**: Support for both memory and Redis backends
-- **Flexible Configuration**: Configurable rate limit rules per route/path
-- **Health Checks**: Built-in `/healthz` and `/readyz` endpoints
-- **Standard Layout**: Follows ncgo's standard layered architecture
+### Rate Limiting
 
-## Usage
+Built-in rate limiting middleware wired in `internal/base/server/server.go`
+(pre-auth and post-auth phases) with multiple algorithms:
 
-Create a new project using this template:
+- **fixed_window**: Simple counter per time window
+- **sliding_window**: More accurate, smooths traffic at window boundaries
+- **token_bucket**: Allows bursts while maintaining average rate
 
-```bash
-ncgo new my-service \
-  --module github.com/yourorg/my-service \
-  --kind hertz \
-  --template ratelimit-hertz
+### Storage Backends
+
+- **memory**: Single-instance deployment, counters reset on restart
+- **redis**: Distributed deployment, shared counters across instances
+
+### Health Check Endpoints
+
+Built-in health check and readiness probe endpoints for Kubernetes and load
+balancers:
+
+- **`GET /healthz`** - Liveness probe
+- **`GET /readyz`** - Readiness probe
+
+These endpoints are registered in `internal/base/server/server.go` via:
+
+```go
+health.Register(h)
 ```
 
-## Rate Limiting Configuration
+They are excluded from rate limiting by default (`rate_limit.skip_paths`).
 
-The template includes rate limiting configuration in `conf/dev/conf.yaml`:
+### Other Features
+
+- **Standard Layout**: Follows ncgo's layered architecture
+- **Middleware Stack**: CORS, error handling, signature/token auth, idempotency
+- **i18n**: Built-in catalog helpers with locale fallback
+
+## Project Structure
+
+```
+my-api/
+├── cmd/
+│   └── main.go              # Application entry point
+├── internal/
+│   ├── base/
+│   │   ├── conf/            # Configuration loading
+│   │   ├── data/            # Database and infrastructure clients
+│   │   └── server/          # HTTP server setup
+│   ├── handler/
+│   │   ├── health/          # Health check handlers
+│   │   └── pb/              # Protocol buffer handlers
+│   ├── middleware/          # HTTP middleware (incl. rate limit)
+│   ├── pkg/
+│   │   ├── ratelimit/       # Rate limit core (resolver + store)
+│   │   └── i18n/            # i18n catalog helpers
+│   ├── repository/          # Data access layer (incl. rate_limit_rule)
+│   └── router/              # Route registration
+├── conf/
+│   └── dev/conf.yaml        # Development configuration
+├── idl/
+│   └── *.proto              # Protocol buffer definitions
+└── template/
+    └── hertz-template/      # Template files
+```
+
+## Configuration
+
+Edit `conf/dev/conf.yaml` to configure rate limiting:
 
 ```yaml
 rate_limit:
   enabled: true
   backend: memory  # or "redis"
+  source:
+    type: config
   pre_auth:
     enabled: true
     default_rule:
@@ -42,58 +117,25 @@ rate_limit:
       max_requests: 100
 ```
 
-### Storage Backends
+Other configuration available in the same file:
 
-- **memory**: Single-instance deployment, counters reset on restart
-- **redis**: Distributed deployment, shared counters across instances
+- Server port and address
+- Database connection
+- Redis connection
+- Logging levels
 
-### Algorithms
-
-- **fixed_window**: Simple counter per time window
-- **sliding_window**: More accurate, smooths traffic at window boundaries
-- **token_bucket**: Allows bursts while maintaining average rate
-
-## Project Structure
-
-```
-my-service/
-├── cmd/
-│   └── main.go              # Application entry point
-├── internal/
-│   ├── handler/             # HTTP handlers
-│   ├── middleware/          # Rate limit middleware
-│   ├── model/              # Data models
-│   ├── repository/         # Data access layer
-│   ├── service/            # Business logic
-│   └── ratelimit/          # Rate limit implementation
-├── conf/
-│   └── dev/conf.yaml       # Configuration with rate limit settings
-├── idl/
-│   └── *.proto             # Protocol buffer definitions
-└── template/
-    └── hertz-template/     # Template files
-```
-
-## Health Check Endpoints
-
-- `GET /healthz` - Liveness probe
-- `GET /readyz` - Readiness probe
-
-These endpoints are excluded from rate limiting by default.
-
-## Example: Testing Rate Limits
+## Development
 
 ```bash
-# Send 10 rapid requests
-for i in {1..10}; do
-  curl -s "http://localhost:8080/ping?name=test$i"
-  echo
-done
-```
+# Run in development mode
+make dev
 
-Expected behavior:
-- First 5 requests: 200 OK
-- Remaining requests: 429 Too Many Requests
+# Build binary
+make build
+
+# Run tests
+make test
+```
 
 ## License
 

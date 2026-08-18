@@ -1,4 +1,5 @@
-# ncgo exported template — conf/dev/conf.yaml
+# Hertz custom template — conf/dev/conf.yaml
+# Dev environment configuration sample.
 path: conf/dev/conf.yaml
 update_behavior:
     type: skip
@@ -14,7 +15,7 @@ body: |-
         network: "tcp"
         mode: 0
       registry:
-        name: ""
+        name: "{{ToLower .ServiceName}}"
       # 链路追踪（go-framework OTLP gRPC → Jaeger/collector）
       jaeger:
         # 默认关闭；置 true 并填写 collector 地址以启用
@@ -84,10 +85,36 @@ body: |-
         - "*"
     # 限流配置
     rate_limit:
+      # 是否启用限流（总开关）
       enabled: false
+      # 限流存储后端：memory（单实例）或 redis（分布式共享计数）
+      backend: memory
+      # 规则来源：config / grpc / database / rule_center
+      source:
+        type: config
+        cache_ttl_seconds: "60s"
+        fallback_on_error: true
       # 可选：仅当需要覆盖顶层 redis 连接时填写；留空则复用顶层 redis
       # 结构与顶层 redis 完全一致
-      redis: {{ "{" }}{{ "}" }}
+      redis: {}
+      # 认证前阶段：在鉴权之前生效（默认按 IP 限流）
+      pre_auth:
+        enabled: true
+        default_rule:
+          enabled: true
+          key_by: [ip]
+          strategy: fixed_window
+          window_seconds: "60s"
+          max_requests: 100
+      # 认证后阶段：在鉴权之后生效（默认按用户维度限流）
+      post_auth:
+        enabled: false
+        default_rule:
+          enabled: true
+          key_by: [ak_user_uuid, user_uuid, ak]
+          strategy: fixed_window
+          window_seconds: "60s"
+          max_requests: 50
     # 鉴权配置
     auth:
       public_paths:

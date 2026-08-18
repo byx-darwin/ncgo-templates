@@ -1,14 +1,15 @@
-# ncgo exported template — internal/pkg/response/response_test.go
+# Hertz custom template — internal/pkg/response/response_test.go
+# Generates tests for internal/pkg/response/response_test.go.
 path: internal/pkg/response/response_test.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package response
 
     import "testing"
 
-    func TestCodeNotImplementedIsDefined(t *testing.T) {{ "{" }}
-    	if CodeNotImplemented != 10010 {{ "{" }}
+    func TestCodeNotImplementedIsDefined(t *testing.T) {
+    	if CodeNotImplemented != 10010 {
     		t.Fatalf("CodeNotImplemented = %d, want 10010", CodeNotImplemented)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }

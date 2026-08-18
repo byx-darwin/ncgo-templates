@@ -1,5 +1,133 @@
-# ncgo exported template — internal/base/server/server.go
+# Hertz custom template — base/server.go
+# Generates the server entry point using go-framework/hertz.NewHTTPServer.
+# Includes database initialization when WithDatabase is enabled and rate-limit
+# middleware wiring (pre_auth / post_auth) derived from conf.RateLimitConfig.
 path: internal/base/server/server.go
 update_behavior:
     type: cover
-body: "package server\n\nimport (\n    \"context\"\n    \"log\"\n\n\n    hertzframework \"github.com/byx-darwin/go-tools/go-framework/hertz\"\n    gfconfig \"github.com/byx-darwin/go-tools/go-framework/config\"\n    hertzobs \"github.com/byx-darwin/go-tools/go-framework/hertz/observability\"\n\n    \"{{.Module}}/internal/base/conf\"\n\n    \"{{.Module}}/internal/pkg/middleware\"\n    \"{{.Module}}/internal/pkg/response\"\n)\n\nfunc Run() {{ \"{\" }}\n    cfg := conf.Get()\n\n    // ncgo:wire:logging:init\n    ctx := context.Background()\n    h, err := hertzframework.NewHTTPServer(ctx, &cfg.Server)\n    if err != nil {{ \"{\" }}\n        log.Fatalf(\"create server: %v\", err)\n    {{ \"}\" }}\n\n    // Responder middleware — injects RequestID / Lang / Responder into context\n    responder := response.NewResponder()\n    h.Use(responder.Middleware())\n\n    // AccessLog middleware — uses go-tools AccessLog\n    h.Use(middleware.AccessLog())\n\n    // OTel tracing — enabled when server.jaeger config is present\n    if cfg.Server.Jaeger != nil && cfg.Server.Jaeger.Enable {{ \"{\" }}\n        provider, obsErr := hertzobs.NewProvider(ctx, gfconfig.ObservabilityConfig{{ \"{\" }}\n            Enabled:     true,\n            Endpoint:    cfg.Server.Jaeger.Endpoint,\n            ServiceName: cfg.Server.Registry.Name,\n        {{ \"}\" }})\n        if obsErr != nil {{ \"{\" }}\n            log.Fatalf(\"init observability: %v\", obsErr)\n        {{ \"}\" }}\n        defer func() {{ \"{\" }}\n            if shutdownErr := provider.Shutdown(); shutdownErr != nil {{ \"{\" }}\n                log.Printf(\"shutdown observability: %v\", shutdownErr)\n            {{ \"}\" }}\n        {{ \"}\" }}()\n        h.Use(provider.ServerMiddleware())\n    {{ \"}\" }}\n\n    // Optional structured logging wiring (after `ncgo add infra logging`):\n    // import \"{{.Module}}/internal/base/logging\"\n    // ncgo:wire:logging:server-middleware\n    // h.Use(logging.HertzRecovery())\n    // h.Use(logging.HertzRequestID())\n    // h.Use(logging.HertzAccessLog())\n\n    // Optional release canary wiring (after `ncgo add infra canary`):\n    // import \"{{.Module}}/internal/base/release\"\n    // ncgo:wire:canary:server-traffic\n    // if cfg.Release.Enabled {{ \"{\" }}\n    //     h.Use(release.HertzTraffic())\n    // {{ \"}\" }}\n\n    // ncgo:wire:ddd — Wire DDD layers (data -> repository -> usecase)\n    \n\n    // Register routes\n\n    // Start server\n    h.Spin()\n{{ \"}\" }}"
+body: |-
+    package server
+
+    import (
+        "context"
+        "log"
+    {{if .WithDatabase}}
+        "time"
+
+        "github.com/samber/do"
+    {{end}}
+
+        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
+        gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
+        hertzobs "github.com/byx-darwin/go-tools/go-framework/hertz/observability"
+
+        "{{.Module}}/internal/base/conf"
+    {{if .WithDatabase}}
+        "{{.Module}}/internal/base/data"
+        "{{.Module}}/internal/repository"
+    {{end}}
+        "{{.Module}}/internal/handler/health"
+        "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/ratelimit"
+        "{{.Module}}/internal/pkg/response"
+        "{{.Module}}/internal/router"
+    )
+
+    func Run() {
+        cfg := conf.Get()
+
+        // ncgo:wire:logging:init
+        ctx := context.Background()
+        h, err := hertzframework.NewHTTPServer(ctx, &cfg.Server)
+        if err != nil {
+            log.Fatalf("create server: %v", err)
+        }
+
+        // Responder middleware — injects RequestID / Lang / Responder into context
+        responder := response.NewResponder()
+        h.Use(responder.Middleware())
+
+        // AccessLog middleware — uses go-tools AccessLog
+        h.Use(middleware.AccessLog())
+
+        // OTel tracing — enabled when server.jaeger config is present
+        if cfg.Server.Jaeger != nil && cfg.Server.Jaeger.Enable {
+            provider, obsErr := hertzobs.NewProvider(ctx, gfconfig.ObservabilityConfig{
+                Enabled:     true,
+                Endpoint:    cfg.Server.Jaeger.Endpoint,
+                ServiceName: cfg.Server.Registry.Name,
+            })
+            if obsErr != nil {
+                log.Fatalf("init observability: %v", obsErr)
+            }
+            defer func() {
+                if shutdownErr := provider.Shutdown(); shutdownErr != nil {
+                    log.Printf("shutdown observability: %v", shutdownErr)
+                }
+            }()
+            h.Use(provider.ServerMiddleware())
+        }
+
+        // Rate-limit middleware — pre-auth & post-auth phases (memory/redis backend)
+        if cfg.RateLimit.Enabled {
+            rlResolver := ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{})
+            h.Use(middleware.RateLimit("pre_auth", cfg.RateLimit, cfg.RateLimit.PreAuth, rlResolver))
+            h.Use(middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, rlResolver))
+        }
+
+        // Optional structured logging wiring (after `ncgo add infra logging`):
+        // import "{{.Module}}/internal/base/logging"
+        // ncgo:wire:logging:server-middleware
+        // h.Use(logging.HertzRecovery())
+        // h.Use(logging.HertzRequestID())
+        // h.Use(logging.HertzAccessLog())
+
+        // Optional release canary wiring (after `ncgo add infra canary`):
+        // import "{{.Module}}/internal/base/release"
+        // ncgo:wire:canary:server-traffic
+        // if cfg.Release.Enabled {
+        //     h.Use(release.HertzTraffic())
+        // }
+
+        // ncgo:wire:ddd — Wire DDD layers (data -> repository -> usecase)
+        {{if .WithDatabase}}
+        if cfg.Database.Enabled {
+            injector := do.New()
+
+            startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+            defer cancel()
+
+            pgCfg, err := data.NewPostgresConfigFromDatabase(cfg.Database)
+            if err != nil {
+                log.Fatalf("database config: %v", err)
+            }
+
+            pool, err := data.NewPostgres(startupCtx, pgCfg)
+            if err != nil {
+                log.Fatalf("connect database: %v", err)
+            }
+
+            dbData, cleanup, err := data.New(pool)
+            if err != nil {
+                log.Fatalf("init data: %v", err)
+            }
+            defer cleanup()
+
+            do.ProvideValue[context.Context](injector, startupCtx)
+            do.ProvideValue(injector, pool)
+            do.ProvideValue(injector, dbData)
+
+            dbData = do.MustInvoke[*data.Data](injector)
+            repository.NewRateLimitRuleRepository()
+        }
+        {{end}}
+
+        // Register health check routes
+        health.Register(h)
+
+        // Register business routes
+        router.GeneratedRegister(h)
+
+        // Start server
+        h.Spin()
+    }

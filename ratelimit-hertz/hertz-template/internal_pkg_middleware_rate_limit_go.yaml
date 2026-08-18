@@ -1,8 +1,9 @@
-# ncgo exported template — internal/pkg/middleware/rate_limit.go
+# Hertz custom template — internal/pkg/middleware/rate_limit.go
+# Generates the rate-limit middleware (pre/post auth phases).
 path: internal/pkg/middleware/rate_limit.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package middleware
 
     import (
@@ -17,25 +18,25 @@ body: |
     	"{{.Module}}/internal/pkg/response"
     )
 
-    func RateLimit(phase string, cfg conf.RateLimitConfig, phaseCfg conf.RateLimitPhaseConfig, resolver *ratelimit.Resolver) app.HandlerFunc {{ "{" }}
+    func RateLimit(phase string, cfg conf.RateLimitConfig, phaseCfg conf.RateLimitPhaseConfig, resolver *ratelimit.Resolver) app.HandlerFunc {
     	return rateLimitWithStore(phase, cfg, phaseCfg, resolver, nil)
-    {{ "}" }}
+    }
 
-    func rateLimitWithStore(phase string, cfg conf.RateLimitConfig, phaseCfg conf.RateLimitPhaseConfig, resolver *ratelimit.Resolver, store ratelimit.Store) app.HandlerFunc {{ "{" }}
+    func rateLimitWithStore(phase string, cfg conf.RateLimitConfig, phaseCfg conf.RateLimitPhaseConfig, resolver *ratelimit.Resolver, store ratelimit.Store) app.HandlerFunc {
     	cfg = ratelimit.NormalizeConfig(cfg)
     	skipper := PathSkipper(cfg.SkipPaths...)
-    	if store == nil {{ "{" }}
+    	if store == nil {
     		store = ratelimit.NewStore(cfg, sharedRedisClient(cfg.Redis))
-    	{{ "}" }}
-    	if resolver == nil {{ "{" }}
-    		resolver = ratelimit.NewResolver(cfg, ratelimit.Options{{ "{" }}{{ "}" }})
-    	{{ "}" }}
-    	return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    		if !cfg.Enabled || !phaseCfg.Enabled || skipper(ctx, c) {{ "{" }}
+    	}
+    	if resolver == nil {
+    		resolver = ratelimit.NewResolver(cfg, ratelimit.Options{})
+    	}
+    	return func(ctx context.Context, c *app.RequestContext) {
+    		if !cfg.Enabled || !phaseCfg.Enabled || skipper(ctx, c) {
     			c.Next(ctx)
     			return
-    		{{ "}" }}
-    		lookup := ratelimit.Lookup{{ "{" }}
+    		}
+    		lookup := ratelimit.Lookup{
     			Service:  rateLimitService(cfg),
     			Phase:    phase,
     			AppKey:   rateLimitAppKey(c, cfg),
@@ -43,84 +44,84 @@ body: |
     			Path:     rateLimitPath(c),
     			UserUUID: rateLimitUserUUID(c),
     			ClientIP: requestIP(c),
-    		{{ "}" }}
+    		}
     		resolved, err := resolver.Resolve(ctx, lookup)
-    		if err != nil {{ "{" }}
-    			if cfg.FailOpen {{ "{" }}
+    		if err != nil {
+    			if cfg.FailOpen {
     				c.Next(ctx)
     				return
-    			{{ "}" }}
+    			}
     			response.ErrorCode(c, response.CodeCacheUnavailable)
     			c.Abort()
     			return
-    		{{ "}" }}
+    		}
     		rule := ratelimit.NormalizeRule(resolved.Rule)
-    		if !rule.Enabled {{ "{" }}
+    		if !rule.Enabled {
     			c.Next(ctx)
     			return
-    		{{ "}" }}
+    		}
     		key := ratelimit.BuildKey(lookup, rule.KeyBy, cfg.KeyPrefix)
     		ok, err := store.Allow(ctx, key, rule)
-    		if err != nil {{ "{" }}
-    			if cfg.FailOpen {{ "{" }}
+    		if err != nil {
+    			if cfg.FailOpen {
     				c.Next(ctx)
     				return
-    			{{ "}" }}
+    			}
     			response.ErrorCode(c, response.CodeCacheUnavailable)
     			c.Abort()
     			return
-    		{{ "}" }}
-    		if !ok {{ "{" }}
+    		}
+    		if !ok {
     			response.ErrorCode(c, response.CodeRateLimited)
     			c.Abort()
     			return
-    		{{ "}" }}
+    		}
     		c.Next(ctx)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func rateLimitAppKey(c *app.RequestContext, cfg conf.RateLimitConfig) string {{ "{" }}
+    func rateLimitAppKey(c *app.RequestContext, cfg conf.RateLimitConfig) string {
     	claims, hasClaims := GetClaims(c)
-    	if hasClaims && claims.AK != "" {{ "{" }}
+    	if hasClaims && claims.AK != "" {
     		return strings.TrimSpace(claims.AK)
-    	{{ "}" }}
+    	}
     	return strings.TrimSpace(c.Request.Header.Get(cfg.AppKeyHeader))
-    {{ "}" }}
+    }
 
-    func rateLimitService(cfg conf.RateLimitConfig) string {{ "{" }}
+    func rateLimitService(cfg conf.RateLimitConfig) string {
     	return strings.TrimSpace(cfg.GRPC.ServiceName)
-    {{ "}" }}
+    }
 
-    func rateLimitUserUUID(c *app.RequestContext) string {{ "{" }}
+    func rateLimitUserUUID(c *app.RequestContext) string {
     	claims, hasClaims := GetClaims(c)
-    	if hasClaims {{ "{" }}
+    	if hasClaims {
     		return strings.TrimSpace(claims.UUID)
-    	{{ "}" }}
+    	}
     	return ""
-    {{ "}" }}
+    }
 
-    func rateLimitPath(c *app.RequestContext) string {{ "{" }}
+    func rateLimitPath(c *app.RequestContext) string {
     	return string(c.Path())
-    {{ "}" }}
+    }
 
-    func requestIP(c *app.RequestContext) string {{ "{" }}
-    	if ip := remoteIP(c); ip != nil {{ "{" }}
+    func requestIP(c *app.RequestContext) string {
+    	if ip := remoteIP(c); ip != nil {
     		return ip.String()
-    	{{ "}" }}
-    	if ip := net.ParseIP(c.ClientIP()); ip != nil {{ "{" }}
+    	}
+    	if ip := net.ParseIP(c.ClientIP()); ip != nil {
     		return ip.String()
-    	{{ "}" }}
+    	}
     	return "unknown"
-    {{ "}" }}
+    }
 
-    func joinRateLimitKey(parts ...string) string {{ "{" }}
+    func joinRateLimitKey(parts ...string) string {
     	safe := make([]string, 0, len(parts))
-    	for _, part := range parts {{ "{" }}
+    	for _, part := range parts {
     		part = strings.TrimSpace(part)
-    		if part == "" {{ "{" }}
+    		if part == "" {
     			continue
-    		{{ "}" }}
+    		}
     		safe = append(safe, strings.NewReplacer(":", "_", " ", "_", "\n", "_").Replace(part))
-    	{{ "}" }}
+    	}
     	return strings.Join(safe, ":")
-    {{ "}" }}
+    }

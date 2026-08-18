@@ -1,9 +1,10 @@
-# ncgo exported template — internal/repository/rate_limit_rule.go
+# Hertz custom template — internal/repository/rate_limit_rule.go
+# Generates the rate-limit rule repository and hook.
 path: internal/repository/rate_limit_rule.go
 update_behavior:
     type: skip
 loop_service: true
-body: |
+body: |-
     package repository
 
     import (
@@ -19,7 +20,7 @@ body: |
 
     // RateLimitRuleRecord is the repository-facing shape returned by database
     // queries before mapping into ratelimit's unified config structure.
-    type RateLimitRuleRecord struct {{ "{" }}
+    type RateLimitRuleRecord struct {
     	Enabled           bool
     	KeyBy             []string
     	Strategy          string
@@ -28,45 +29,45 @@ body: |
     	RequestsPerSecond float64
     	Burst             int
     	ClientTTLSeconds  int
-    {{ "}" }}
+    }
 
     // RateLimitRuleFinder is the minimal query contract recommended for Hertz
     // monolith mode. appKey is optional and may be empty.
-    type RateLimitRuleFinder interface {{ "{" }}
+    type RateLimitRuleFinder interface {
     	FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error)
-    {{ "}" }}
+    }
 
-    type normalizedRateLimitLookup struct {{ "{" }}
+    type normalizedRateLimitLookup struct {
     	Service string
     	Phase   string
     	Method  string
     	Path    string
     	AppKey  string
-    {{ "}" }}
+    }
 
-    func normalizeRateLimitLookup(service, phase, method, path, appKey string) (normalizedRateLimitLookup, bool) {{ "{" }}
-    	lookup := normalizedRateLimitLookup{{ "{" }}
+    func normalizeRateLimitLookup(service, phase, method, path, appKey string) (normalizedRateLimitLookup, bool) {
+    	lookup := normalizedRateLimitLookup{
     		Service: strings.TrimSpace(service),
     		Phase:   strings.ToLower(strings.TrimSpace(phase)),
     		Method:  strings.ToUpper(strings.TrimSpace(method)),
     		Path:    strings.TrimSpace(path),
     		AppKey:  strings.TrimSpace(appKey),
-    	{{ "}" }}
-    	if lookup.Service == "" || lookup.Phase == "" || lookup.Method == "" || lookup.Path == "" {{ "{" }}
-    		return normalizedRateLimitLookup{{ "{" }}{{ "}" }}, false
-    	{{ "}" }}
+    	}
+    	if lookup.Service == "" || lookup.Phase == "" || lookup.Method == "" || lookup.Path == "" {
+    		return normalizedRateLimitLookup{}, false
+    	}
     	return lookup, true
-    {{ "}" }}
+    }
 
     // RateLimitRuleRepository remains a no-op placeholder when the project was
     // scaffolded without database support.
-    type RateLimitRuleRepository struct{{ "{" }}{{ "}" }}
+    type RateLimitRuleRepository struct{}
 
-    func NewRateLimitRuleRepository() *RateLimitRuleRepository {{ "{" }}
-    	return &RateLimitRuleRepository{{ "{" }}{{ "}" }}
-    {{ "}" }}
+    func NewRateLimitRuleRepository() *RateLimitRuleRepository {
+    	return &RateLimitRuleRepository{}
+    }
 
-    func (r *RateLimitRuleRepository) FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error) {{ "{" }}
+    func (r *RateLimitRuleRepository) FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error) {
     	_ = ctx
     	_ = service
     	_ = phase
@@ -74,49 +75,49 @@ body: |
     	_ = path
     	_ = appKey
     	return nil, nil
-    {{ "}" }}
+    }
 
     // RateLimitRuleHook adapts a repository query into ratelimit.DatabaseHook.
-    type RateLimitRuleHook struct {{ "{" }}
+    type RateLimitRuleHook struct {
     	finder RateLimitRuleFinder
-    {{ "}" }}
+    }
 
-    func NewRateLimitRuleHook(finder RateLimitRuleFinder) *RateLimitRuleHook {{ "{" }}
-    	return &RateLimitRuleHook{{ "{" }}finder: finder{{ "}" }}
-    {{ "}" }}
+    func NewRateLimitRuleHook(finder RateLimitRuleFinder) *RateLimitRuleHook {
+    	return &RateLimitRuleHook{finder: finder}
+    }
 
-    func (h *RateLimitRuleHook) ResolveRateLimitRule(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
-    	if h == nil || h.finder == nil {{ "{" }}
+    func (h *RateLimitRuleHook) ResolveRateLimitRule(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {
+    	if h == nil || h.finder == nil {
     		return nil, false, nil
-    	{{ "}" }}
+    	}
     	record, err := h.finder.FindRule(ctx, lookup.Service, lookup.Phase, lookup.Method, lookup.Path, lookup.AppKey)
-    	if err != nil {{ "{" }}
+    	if err != nil {
     		return nil, false, err
-    	{{ "}" }}
-    	if record == nil {{ "{" }}
+    	}
+    	if record == nil {
     		return nil, false, nil
-    	{{ "}" }}
+    	}
     	return mapRateLimitRuleRecord(record), true, nil
-    {{ "}" }}
+    }
 
-    func mapRateLimitRuleRecord(record *RateLimitRuleRecord) *conf.RateLimitRuleConfig {{ "{" }}
-    	if record == nil {{ "{" }}
+    func mapRateLimitRuleRecord(record *RateLimitRuleRecord) *conf.RateLimitRuleConfig {
+    	if record == nil {
     		return nil
-    	{{ "}" }}
-    	return &conf.RateLimitRuleConfig{{ "{" }}
+    	}
+    	return &conf.RateLimitRuleConfig{
     		Enabled:           record.Enabled,
     		KeyBy:             append([]string(nil), record.KeyBy...),
     		Strategy:          record.Strategy,
-    		WindowSeconds:     config.Duration{{ "{" }}Duration: time.Duration(record.WindowSeconds) * time.Second{{ "}" }},
+    		WindowSeconds:     config.Duration{Duration: time.Duration(record.WindowSeconds) * time.Second},
     		MaxRequests:       record.MaxRequests,
     		RequestsPerSecond: record.RequestsPerSecond,
     		Burst:             record.Burst,
-    		ClientTTLSeconds:  config.Duration{{ "{" }}Duration: time.Duration(record.ClientTTLSeconds) * time.Second{{ "}" }},
-    	{{ "}" }}
-    {{ "}" }}
+    		ClientTTLSeconds:  config.Duration{Duration: time.Duration(record.ClientTTLSeconds) * time.Second},
+    	}
+    }
 
-    func buildRateLimitRuleRecord(enabled bool, keyBy []string, strategy string, windowSeconds, maxRequests int32, requestsPerSecond float64, burst, clientTTLSeconds int32) *RateLimitRuleRecord {{ "{" }}
-    	return &RateLimitRuleRecord{{ "{" }}
+    func buildRateLimitRuleRecord(enabled bool, keyBy []string, strategy string, windowSeconds, maxRequests int32, requestsPerSecond float64, burst, clientTTLSeconds int32) *RateLimitRuleRecord {
+    	return &RateLimitRuleRecord{
     		Enabled:           enabled,
     		KeyBy:             append([]string(nil), keyBy...),
     		Strategy:          strategy,
@@ -125,5 +126,5 @@ body: |
     		RequestsPerSecond: requestsPerSecond,
     		Burst:             int(burst),
     		ClientTTLSeconds:  int(clientTTLSeconds),
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }

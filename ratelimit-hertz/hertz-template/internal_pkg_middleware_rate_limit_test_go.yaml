@@ -1,8 +1,9 @@
-# ncgo exported template — internal/pkg/middleware/rate_limit_test.go
+# Hertz custom template — internal/pkg/middleware/rate_limit_test.go
+# Generates tests for internal/pkg/middleware/rate_limit_test.go.
 path: internal/pkg/middleware/rate_limit_test.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package middleware
 
     import (
@@ -20,212 +21,212 @@ body: |
     	"{{.Module}}/internal/pkg/ratelimit"
     )
 
-    func TestRateLimitRejectsAfterBurst(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ip"{{ "}" }}, Strategy: "token_bucket", RequestsPerSecond: 1, Burst: 1, ClientTTLSeconds: config.Duration{{ "{" }}Duration: 300 * time.Second{{ "}}" }}{{ "}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: phase{{ "}" }}
+    func TestRateLimitRejectsAfterBurst(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "token_bucket", RequestsPerSecond: 1, Burst: 1, ClientTTLSeconds: config.Duration{Duration: 300 * time.Second{{ "}}" }}}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
 
     	first := newRateLimitContext("/ping")
     	mw(context.Background(), first)
-    	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    	if first.Response.StatusCode() == consts.StatusTooManyRequests {
     		t.Fatalf("first request was rate limited")
-    	{{ "}" }}
+    	}
 
     	second := newRateLimitContext("/ping")
     	mw(context.Background(), second)
-    	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
+    	if second.Response.StatusCode() != consts.StatusTooManyRequests {
     		t.Fatalf("status = %d, want %d", second.Response.StatusCode(), consts.StatusTooManyRequests)
-    	{{ "}" }}
-    	if got, want := string(second.Response.Body()), `{{ "{" }}"code":10200,"msg":"rate_limited"{{ "}" }}`; got != want {{ "{" }}
+    	}
+    	if got, want := string(second.Response.Body()), `{"code":10200,"msg":"rate_limited"}`; got != want {
     		t.Fatalf("body = %s, want %s", got, want)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitRejectsAfterFixedWindowLimit(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ip"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 1, ClientTTLSeconds: config.Duration{{ "{" }}Duration: 300 * time.Second{{ "}}" }}{{ "}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase{{ "}" }}
+    func TestRateLimitRejectsAfterFixedWindowLimit(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1, ClientTTLSeconds: config.Duration{Duration: 300 * time.Second{{ "}}" }}}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
 
     	first := newRateLimitContext("/orders")
     	mw(context.Background(), first)
-    	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    	if first.Response.StatusCode() == consts.StatusTooManyRequests {
     		t.Fatalf("first request was rate limited")
-    	{{ "}" }}
+    	}
 
     	second := newRateLimitContext("/orders")
     	mw(context.Background(), second)
-    	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
+    	if second.Response.StatusCode() != consts.StatusTooManyRequests {
     		t.Fatalf("status = %d, want %d", second.Response.StatusCode(), consts.StatusTooManyRequests)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitSkipPath(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 1{{ "}}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", SkipPaths: []string{{ "{" }}"/healthz"{{ "}" }}, PreAuth: phase{{ "}" }}
+    func TestRateLimitSkipPath(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1{{ "}}" }}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", SkipPaths: []string{"/healthz"}, PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
-    	for i := 0; i < 3; i++ {{ "{" }}
+    	for i := 0; i < 3; i++ {
     		c := newRateLimitContext("/healthz")
     		mw(context.Background(), c)
-    		if c.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    		if c.Response.StatusCode() == consts.StatusTooManyRequests {
     			t.Fatalf("skip path was rate limited")
-    		{{ "}" }}
-    	{{ "}" }}
-    {{ "}" }}
+    		}
+    	}
+    }
 
-    func TestRateLimitUsesMostSpecificLocalRule(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 10{{ "}" }}, Rules: []conf.RateLimitMatchConfig{{ "{{" }}MatchKind: "prefix", PathPattern: "/orders", Priority: 10, Rule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 5{{ "}}" }}, {{ "{" }}AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 20, Rule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 1{{ "}}" }}{{ "}}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: phase{{ "}" }}
+    func TestRateLimitUsesMostSpecificLocalRule(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10}, Rules: []conf.RateLimitMatchConfig{{ "{{" }}MatchKind: "prefix", PathPattern: "/orders", Priority: 10, Rule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}, {AppKey: "app-1", MatchKind: "exact", Path: "/orders", Priority: 20, Rule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1{{ "}}" }}{{ "}}" }}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: phase}
     	mw := RateLimit("pre_auth", cfg, phase, nil)
 
     	first := newRateLimitContext("/orders")
     	first.Request.Header.Set("X-App-Key", "app-1")
     	mw(context.Background(), first)
-    	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    	if first.Response.StatusCode() == consts.StatusTooManyRequests {
     		t.Fatalf("first request was rate limited")
-    	{{ "}" }}
+    	}
 
     	second := newRateLimitContext("/orders")
     	second.Request.Header.Set("X-App-Key", "app-1")
     	mw(context.Background(), second)
-    	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
+    	if second.Response.StatusCode() != consts.StatusTooManyRequests {
     		t.Fatalf("status = %d, want %d; expected more specific app+path rule to win", second.Response.StatusCode(), consts.StatusTooManyRequests)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitUsesPostAuthPhaseConfig(t *testing.T) {{ "{" }}
-    	pre := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ip"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 10{{ "}}" }}
-    	post := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"user_uuid"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 1{{ "}}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: pre, PostAuth: post{{ "}" }}
+    func TestRateLimitUsesPostAuthPhaseConfig(t *testing.T) {
+    	pre := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 10{{ "}}" }}
+    	post := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"user_uuid"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1{{ "}}" }}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", PreAuth: pre, PostAuth: post}
     	mw := RateLimit("post_auth", cfg, post, nil)
 
     	first := newRateLimitContext("/orders")
-    	first.Set(ContextKeyTokenClaims, &Claims{{ "{" }}UUID: "user-1"{{ "}" }})
+    	first.Set(ContextKeyTokenClaims, &Claims{UUID: "user-1"})
     	mw(context.Background(), first)
-    	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    	if first.Response.StatusCode() == consts.StatusTooManyRequests {
     		t.Fatalf("first post_auth request was rate limited")
-    	{{ "}" }}
+    	}
 
     	second := newRateLimitContext("/orders")
-    	second.Set(ContextKeyTokenClaims, &Claims{{ "{" }}UUID: "user-1"{{ "}" }})
+    	second.Set(ContextKeyTokenClaims, &Claims{UUID: "user-1"})
     	mw(context.Background(), second)
-    	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
+    	if second.Response.StatusCode() != consts.StatusTooManyRequests {
     		t.Fatalf("status = %d, want %d; expected post_auth phase rule to apply", second.Response.StatusCode(), consts.StatusTooManyRequests)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitUsesDynamicResolverRule(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 5{{ "}}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{{ "{" }}Type: "grpc", CacheTTLSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, FallbackOnError: true{{ "}" }}, PreAuth: phase{{ "}" }}
-    	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{{ "{" }}GRPC: fakeMiddlewareGRPCClient{{ "{" }}rule: &conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 1{{ "}" }}, found: true{{ "}}" }})
+    func TestRateLimitUsesDynamicResolverRule(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, PreAuth: phase}
+    	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{rule: &conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}, found: true{{ "}}" }})
     	mw := RateLimit("pre_auth", cfg, phase, resolver)
 
     	first := newRateLimitContext("/orders")
     	first.Request.Header.Set("X-App-Key", "app-1")
     	mw(context.Background(), first)
-    	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    	if first.Response.StatusCode() == consts.StatusTooManyRequests {
     		t.Fatalf("first dynamic-rule request was rate limited")
-    	{{ "}" }}
+    	}
 
     	second := newRateLimitContext("/orders")
     	second.Request.Header.Set("X-App-Key", "app-1")
     	mw(context.Background(), second)
-    	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
+    	if second.Response.StatusCode() != consts.StatusTooManyRequests {
     		t.Fatalf("status = %d, want %d; expected dynamic rule to override local fallback", second.Response.StatusCode(), consts.StatusTooManyRequests)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitUsesDatabaseResolverRule(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 5{{ "}}" }}
-    	cfg := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{{ "{" }}Type: "database", CacheTTLSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, FallbackOnError: true{{ "}" }}, Database: conf.RateLimitDatabaseConfig{{ "{" }}QueryTimeoutMilliseconds: config.Duration{{ "{" }}Duration: 200 * time.Millisecond{{ "}}" }}, PreAuth: phase{{ "}" }}
-    	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{{ "{" }}Database: ratelimit.ResolveFunc(func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
+    func TestRateLimitUsesDatabaseResolverRule(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", AppKeyHeader: "X-App-Key", Source: conf.RateLimitSourceConfig{Type: "database", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: true}, Database: conf.RateLimitDatabaseConfig{QueryTimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond{{ "}}" }}, PreAuth: phase}
+    	resolver := ratelimit.NewResolver(cfg, ratelimit.Options{Database: ratelimit.ResolveFunc(func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {
     		_ = ctx
     		_ = lookup
-    		return &conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ak_path"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 1{{ "}" }}, true, nil
-    	{{ "}" }}){{ "}" }})
+    		return &conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ak_path"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1}, true, nil
+    	})})
     	mw := RateLimit("pre_auth", cfg, phase, resolver)
 
     	first := newRateLimitContext("/orders")
     	first.Request.Header.Set("X-App-Key", "app-1")
     	mw(context.Background(), first)
-    	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
+    	if first.Response.StatusCode() == consts.StatusTooManyRequests {
     		t.Fatalf("first database-rule request was rate limited")
-    	{{ "}" }}
+    	}
 
     	second := newRateLimitContext("/orders")
     	second.Request.Header.Set("X-App-Key", "app-1")
     	mw(context.Background(), second)
-    	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
+    	if second.Response.StatusCode() != consts.StatusTooManyRequests {
     		t.Fatalf("status = %d, want %d; expected database rule to override local fallback", second.Response.StatusCode(), consts.StatusTooManyRequests)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitResolverErrorRespectsFailOpen(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ip"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 5{{ "}}" }}
-    	base := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", Source: conf.RateLimitSourceConfig{{ "{" }}Type: "grpc", CacheTTLSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, FallbackOnError: false{{ "}" }}, PreAuth: phase{{ "}" }}
+    func TestRateLimitResolverErrorRespectsFailOpen(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	base := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", Source: conf.RateLimitSourceConfig{Type: "grpc", CacheTTLSeconds: config.Duration{Duration: 60 * time.Second}, FallbackOnError: false}, PreAuth: phase}
 
-    	closedResolver := ratelimit.NewResolver(base, ratelimit.Options{{ "{" }}GRPC: fakeMiddlewareGRPCClient{{ "{" }}err: errors.New("boom"){{ "}}" }})
+    	closedResolver := ratelimit.NewResolver(base, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{err: errors.New("boom"){{ "}}" }})
     	closed := RateLimit("pre_auth", base, phase, closedResolver)
     	closedCtx := newRateLimitContext("/orders")
     	closed(context.Background(), closedCtx)
-    	if closedCtx.Response.StatusCode() != consts.StatusServiceUnavailable {{ "{" }}
+    	if closedCtx.Response.StatusCode() != consts.StatusServiceUnavailable {
     		t.Fatalf("status = %d, want %d", closedCtx.Response.StatusCode(), consts.StatusServiceUnavailable)
-    	{{ "}" }}
-    	if got, want := string(closedCtx.Response.Body()), `{{ "{" }}"code":10304,"msg":"cache_unavailable"{{ "}" }}`; got != want {{ "{" }}
+    	}
+    	if got, want := string(closedCtx.Response.Body()), `{"code":10304,"msg":"cache_unavailable"}`; got != want {
     		t.Fatalf("body = %s, want %s", got, want)
-    	{{ "}" }}
+    	}
 
     	openCfg := base
     	openCfg.FailOpen = true
-    	openResolver := ratelimit.NewResolver(openCfg, ratelimit.Options{{ "{" }}GRPC: fakeMiddlewareGRPCClient{{ "{" }}err: errors.New("boom"){{ "}}" }})
+    	openResolver := ratelimit.NewResolver(openCfg, ratelimit.Options{GRPC: fakeMiddlewareGRPCClient{err: errors.New("boom"){{ "}}" }})
     	opened := RateLimit("pre_auth", openCfg, phase, openResolver)
     	openCtx := newRateLimitContext("/orders")
     	opened(context.Background(), openCtx)
-    	if openCtx.Response.StatusCode() == consts.StatusServiceUnavailable {{ "{" }}
+    	if openCtx.Response.StatusCode() == consts.StatusServiceUnavailable {
     		t.Fatalf("fail_open request returned service unavailable")
-    	{{ "}" }}
-    	if got := string(openCtx.Response.Body()); got != "" {{ "{" }}
+    	}
+    	if got := string(openCtx.Response.Body()); got != "" {
     		t.Fatalf("body = %q, want empty body when fail_open lets request pass", got)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRateLimitStoreErrorRespectsFailOpen(t *testing.T) {{ "{" }}
-    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, KeyBy: []string{{ "{" }}"ip"{{ "}" }}, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, MaxRequests: 5{{ "}}" }}
-    	base := conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase{{ "}" }}
+    func TestRateLimitStoreErrorRespectsFailOpen(t *testing.T) {
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5{{ "}}" }}
+    	base := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase}
 
-    	closedStore := &fakeRateLimitStore{{ "{" }}err: errors.New("store boom"){{ "}" }}
+    	closedStore := &fakeRateLimitStore{err: errors.New("store boom")}
     	closed := rateLimitWithStore("pre_auth", base, phase, nil, closedStore)
     	closedCtx := newRateLimitContext("/orders")
     	closed(context.Background(), closedCtx)
-    	if closedCtx.Response.StatusCode() != consts.StatusServiceUnavailable {{ "{" }}
+    	if closedCtx.Response.StatusCode() != consts.StatusServiceUnavailable {
     		t.Fatalf("status = %d, want %d", closedCtx.Response.StatusCode(), consts.StatusServiceUnavailable)
-    	{{ "}" }}
-    	if got, want := string(closedCtx.Response.Body()), `{{ "{" }}"code":10304,"msg":"cache_unavailable"{{ "}" }}`; got != want {{ "{" }}
+    	}
+    	if got, want := string(closedCtx.Response.Body()), `{"code":10304,"msg":"cache_unavailable"}`; got != want {
     		t.Fatalf("body = %s, want %s", got, want)
-    	{{ "}" }}
-    	if closedStore.calls != 1 {{ "{" }}
+    	}
+    	if closedStore.calls != 1 {
     		t.Fatalf("calls = %d, want 1", closedStore.calls)
-    	{{ "}" }}
+    	}
 
     	openCfg := base
     	openCfg.FailOpen = true
-    	openStore := &fakeRateLimitStore{{ "{" }}err: errors.New("store boom"){{ "}" }}
+    	openStore := &fakeRateLimitStore{err: errors.New("store boom")}
     	opened := rateLimitWithStore("pre_auth", openCfg, phase, nil, openStore)
     	openCtx := newRateLimitContext("/orders")
     	opened(context.Background(), openCtx)
-    	if openCtx.Response.StatusCode() == consts.StatusServiceUnavailable {{ "{" }}
+    	if openCtx.Response.StatusCode() == consts.StatusServiceUnavailable {
     		t.Fatalf("fail_open request returned service unavailable")
-    	{{ "}" }}
-    	if got := string(openCtx.Response.Body()); got != "" {{ "{" }}
+    	}
+    	if got := string(openCtx.Response.Body()); got != "" {
     		t.Fatalf("body = %q, want empty body when fail_open lets request pass", got)
-    	{{ "}" }}
-    	if openStore.calls != 1 {{ "{" }}
+    	}
+    	if openStore.calls != 1 {
     		t.Fatalf("calls = %d, want 1", openStore.calls)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func TestRedisConfigToMiddleware(t *testing.T) {{ "{" }}
-    	mwCfg := conf.RedisConfig{{ "{" }}
-    		Addrs:            []string{{ "{" }}"redis-1:6379", "redis-2:6379"{{ "}" }},
+    func TestRedisConfigToMiddleware(t *testing.T) {
+    	mwCfg := conf.RedisConfig{
+    		Addrs:            []string{"redis-1:6379", "redis-2:6379"},
     		ClientName:       "api",
     		Username:         "default",
     		Password:         "secret",
@@ -235,57 +236,57 @@ body: |
     		SentinelPassword: "sentinel-secret",
     		Protocol:         3,
     		MaxRetries:       4,
-    		MinRetryBackoff:  config.Duration{{ "{" }}Duration: 9 * time.Millisecond{{ "}" }},
-    		MaxRetryBackoff:  config.Duration{{ "{" }}Duration: 600 * time.Millisecond{{ "}" }},
-    		DialTimeout:      config.Duration{{ "{" }}Duration: 6 * time.Second{{ "}" }},
-    		ReadTimeout:      config.Duration{{ "{" }}Duration: 4 * time.Second{{ "}" }},
-    		WriteTimeout:     config.Duration{{ "{" }}Duration: 5 * time.Second{{ "}" }},
+    		MinRetryBackoff:  config.Duration{Duration: 9 * time.Millisecond},
+    		MaxRetryBackoff:  config.Duration{Duration: 600 * time.Millisecond},
+    		DialTimeout:      config.Duration{Duration: 6 * time.Second},
+    		ReadTimeout:      config.Duration{Duration: 4 * time.Second},
+    		WriteTimeout:     config.Duration{Duration: 5 * time.Second},
     		PoolSize:         20,
     		MinIdleConns:     3,
-    		PoolTimeout:      config.Duration{{ "{" }}Duration: 7 * time.Second{{ "}" }},
-    		ConnMaxIdleTime:  config.Duration{{ "{" }}Duration: 301 * time.Second{{ "}" }},
-    		ConnMaxLifetime:  config.Duration{{ "{" }}Duration: 1801 * time.Second{{ "}" }},
-    	{{ "}" }}.ToMiddlewareConfig()
-    	if len(mwCfg.Addrs) != 2 || mwCfg.DB != 2 || mwCfg.MasterName != "mymaster" {{ "{" }}
+    		PoolTimeout:      config.Duration{Duration: 7 * time.Second},
+    		ConnMaxIdleTime:  config.Duration{Duration: 301 * time.Second},
+    		ConnMaxLifetime:  config.Duration{Duration: 1801 * time.Second},
+    	}.ToMiddlewareConfig()
+    	if len(mwCfg.Addrs) != 2 || mwCfg.DB != 2 || mwCfg.MasterName != "mymaster" {
     		t.Fatalf("unexpected redis config: %+v", mwCfg)
-    	{{ "}" }}
-    	if mwCfg.DialTimeout != 6*time.Second || mwCfg.MinRetryBackoff != 9*time.Millisecond {{ "{" }}
+    	}
+    	if mwCfg.DialTimeout != 6*time.Second || mwCfg.MinRetryBackoff != 9*time.Millisecond {
     		t.Fatalf("unexpected redis durations: dial=%s min_retry=%s", mwCfg.DialTimeout, mwCfg.MinRetryBackoff)
-    	{{ "}" }}
-    	if mwCfg.PoolSize != 20 {{ "{" }}
+    	}
+    	if mwCfg.PoolSize != 20 {
     		t.Fatalf("unexpected redis pool options: %+v", mwCfg)
-    	{{ "}" }}
-    {{ "}" }}
+    	}
+    }
 
-    func newRateLimitContext(path string) *app.RequestContext {{ "{" }}
+    func newRateLimitContext(path string) *app.RequestContext {
     	c := app.NewContext(0)
     	req := protocol.NewRequest("GET", path, nil)
     	req.CopyTo(&c.Request)
     	return c
-    {{ "}" }}
+    }
 
-    type fakeMiddlewareGRPCClient struct {{ "{" }}
+    type fakeMiddlewareGRPCClient struct {
     	rule  *conf.RateLimitRuleConfig
     	found bool
     	err   error
-    {{ "}" }}
+    }
 
-    func (c fakeMiddlewareGRPCClient) ResolveRateLimitRule(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
+    func (c fakeMiddlewareGRPCClient) ResolveRateLimitRule(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {
     	_ = ctx
     	_ = lookup
     	return c.rule, c.found, c.err
-    {{ "}" }}
+    }
 
-    type fakeRateLimitStore struct {{ "{" }}
+    type fakeRateLimitStore struct {
     	calls int
     	ok    bool
     	err   error
-    {{ "}" }}
+    }
 
-    func (s *fakeRateLimitStore) Allow(ctx context.Context, key string, rule conf.RateLimitRuleConfig) (bool, error) {{ "{" }}
+    func (s *fakeRateLimitStore) Allow(ctx context.Context, key string, rule conf.RateLimitRuleConfig) (bool, error) {
     	_ = ctx
     	_ = key
     	_ = rule
     	s.calls++
     	return s.ok, s.err
-    {{ "}" }}
+    }

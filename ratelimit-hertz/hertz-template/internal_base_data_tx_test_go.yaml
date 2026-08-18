@@ -1,10 +1,11 @@
-# ncgo exported template — internal/base/data/tx_test.go
+# Hertz custom template — internal/base/data/tx_test.go
+# Generates tests for internal/base/data/tx_test.go.
 path: internal/base/data/tx_test.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package data
 
     import "testing"
 
-    func TestWithTxRejectsNilPool(t *testing.T) {{ "{" }}{{ "}" }}
+    func TestWithTxRejectsNilPool(t *testing.T) {}

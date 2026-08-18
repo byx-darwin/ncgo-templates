@@ -23,7 +23,6 @@ body: |-
       "{{.Module}}/internal/base/conf"
   {{if .WithDatabase}}
       "{{.Module}}/internal/base/data"
-      "{{.Module}}/internal/repository"
   {{end}}
       "{{.Module}}/internal/handler/health"
       "{{.Module}}/internal/pkg/middleware"
@@ -108,8 +107,10 @@ body: |-
           do.ProvideValue(injector, pool)
           do.ProvideValue(injector, dbData)
 
-          dbData = do.MustInvoke[*data.Data](injector)
-          repository.NewRateLimitRuleRepository(dbData)
+          // ncgo:wire:ddd — resolve dependencies from the injector and wire
+          // your repository/usecase here, e.g.:
+          //   dbData = do.MustInvoke[*data.Data](injector)
+          //   repo := <svc>repo.New(gen.New(dbData.Pool()), dbData.Pool())
       }
       {{end}}
 

@@ -1,0 +1,67 @@
+# rbac-kitex template — internal/infrastructure/token/redis.go
+path: internal/infrastructure/token/redis.go
+update_behavior:
+  type: cover
+body: |-
+  package token
+
+  import (
+  	"context"
+  	"time"
+  )
+
+  // RedisStore is the production seam for token persistence. The type and key
+  // scheme document the intended layout; a real redis client is NOT wired in v1
+  // (the hermetic MemoryStore is the default). Wire go-redis and implement the
+  // Store methods against:
+  //
+  //	refresh:{token}   → uid   (SETEX, TTL = refresh token lifetime)
+  //	blacklist:{token} → 1     (SETEX, TTL = access token lifetime)
+  type RedisStore struct {
+  	addr      string
+  	keyPrefix string
+  }
+
+  // NewRedisStore creates a RedisStore seam. keyPrefix scopes all keys, e.g.
+  // "{{.ServiceName}}".
+  func NewRedisStore(redisAddr, keyPrefix string) *RedisStore {
+  	return &RedisStore{addr: redisAddr, keyPrefix: keyPrefix}
+  }
+
+  // Addr returns the configured Redis address.
+  func (s *RedisStore) Addr() string { return s.addr }
+
+  // KeyPrefix returns the configured key prefix.
+  func (s *RedisStore) KeyPrefix() string { return s.keyPrefix }
+
+  // TODO(redis): implement Store methods with a real client. Until then the
+  // methods below satisfy the interface but report the seam as unwired.
+
+  func (s *RedisStore) SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error {
+  	return errRedisSeam
+  }
+
+  func (s *RedisStore) GetRefresh(ctx context.Context, refreshToken string) (int64, error) {
+  	return 0, errRedisSeam
+  }
+
+  func (s *RedisStore) DeleteRefresh(ctx context.Context, refreshToken string) error {
+  	return errRedisSeam
+  }
+
+  func (s *RedisStore) Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error {
+  	return errRedisSeam
+  }
+
+  func (s *RedisStore) IsBlacklisted(ctx context.Context, accessToken string) (bool, error) {
+  	return false, errRedisSeam
+  }
+
+  var errRedisSeam = &seamError{}
+
+  type seamError struct{}
+
+  func (*seamError) Error() string {
+  	return "token: redis store is a documented seam — wire a redis client to enable"
+  }
+

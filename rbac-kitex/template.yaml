@@ -1,0 +1,22 @@
+name: rbac-kitex
+kind: kitex
+description: "Official RBAC + auth authority Kitex RPC template (DDD: users/roles/permissions/menus, Casbin enforcement, JWT login, audit)"
+version: "1"
+skip_default_templates:
+  - handler.yaml
+  - usecase.yaml
+  - repository.yaml
+  - server.yaml
+  # Embedded rule-center preset fragments would otherwise leak into any
+  # non-rule-center template package (overlay retains all embedded yamls not
+  # listed here), generating internal/handler/rulecenter + kitex_gen/api/ratelimit/v1
+  # references that do not exist in the rbac-kitex proto.
+  - ratelimit_handler.yaml
+  - ratelimit_middleware_test.yaml
+  - ratelimit_middleware.yaml
+  - ratelimit_proto.yaml
+  - ratelimit_repository.yaml
+  - ratelimit_schema.yaml
+  - ratelimit_server.yaml
+  - ratelimit_sqlc_queries.yaml
+  - ratelimit_usecase.yaml

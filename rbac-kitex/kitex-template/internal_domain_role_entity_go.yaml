@@ -1,0 +1,55 @@
+# ncgo exported template — internal/domain/role/entity.go
+path: internal/domain/role/entity.go
+update_behavior:
+    type: skip
+body: |
+    package role
+
+    import (
+    	"context"
+    	"fmt"
+    	"strings"
+    )
+
+    // Role is the aggregate root for the role aggregate.
+    type Role struct {{ "{" }}
+    	ID   int64
+    	Code string
+    	Name string
+    {{ "}" }}
+
+    // New creates a Role with validated invariants: the code must be non-empty.
+    func New(code, name string) (*Role, error) {{ "{" }}
+    	code = strings.TrimSpace(code)
+    	if code == "" {{ "{" }}
+    		return nil, ValidationError("role code is required")
+    	{{ "}" }}
+    	return &Role{{ "{" }}Code: code, Name: name{{ "}" }}, nil
+    {{ "}" }}
+
+    // NotFoundError reports that a role does not exist.
+    type NotFoundError struct {{ "{" }}
+    	ID   int64
+    	Code string
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }}
+    	if e.ID != 0 {{ "{" }}
+    		return fmt.Sprintf("role %d not found", e.ID)
+    	{{ "}" }}
+    	return fmt.Sprintf("role %q not found", e.Code)
+    {{ "}" }}
+
+    // ValidationError reports an invalid role operation.
+    type ValidationError string
+
+    func (e ValidationError) Error() string {{ "{" }} return string(e) {{ "}" }}
+
+    // Repository is the persistence port for the role aggregate.
+    type Repository interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*Role, error)
+    	GetByCode(ctx context.Context, code string) (*Role, error)
+    	List(ctx context.Context, limit, offset int32) ([]*Role, error)
+    	Save(ctx context.Context, r *Role) error
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}

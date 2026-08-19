@@ -1,0 +1,80 @@
+# ncgo exported template — internal/domain/permission/entity.go
+path: internal/domain/permission/entity.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    import (
+    	"context"
+    	"fmt"
+    	"strings"
+    )
+
+    // Kind constants for a permission.
+    const (
+    	KindMenu   = "menu"
+    	KindButton = "button"
+    	KindAPI    = "api"
+    )
+
+    // Permission is the aggregate root for the permission aggregate. Code is the
+    // unified permission code: it equals the Casbin obj and the menu/button
+    // perm_code, so one code drives frontend menus and backend API enforcement.
+    type Permission struct {{ "{" }}
+    	ID     int64
+    	Code   string
+    	Name   string
+    	Kind   string
+    	Method string
+    {{ "}" }}
+
+    // New creates a Permission with validated invariants. Kind must be one of
+    // menu/button/api. Method is normalized to "*" for menu/button and defaults to
+    // "GET" for api when empty.
+    func New(code, name, kind, method string) (*Permission, error) {{ "{" }}
+    	code = strings.TrimSpace(code)
+    	if code == "" {{ "{" }}
+    		return nil, ValidationError("permission code is required")
+    	{{ "}" }}
+    	switch kind {{ "{" }}
+    	case KindMenu, KindButton:
+    		method = "*"
+    	case KindAPI:
+    		if method == "" {{ "{" }}
+    			method = "GET"
+    		{{ "}" }}
+    	default:
+    		return nil, ValidationError("permission kind must be menu, button, or api")
+    	{{ "}" }}
+    	return &Permission{{ "{" }}Code: code, Name: name, Kind: kind, Method: method{{ "}" }}, nil
+    {{ "}" }}
+
+    // NotFoundError reports that a permission does not exist.
+    type NotFoundError struct {{ "{" }}
+    	ID   int64
+    	Code string
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }}
+    	if e.ID != 0 {{ "{" }}
+    		return fmt.Sprintf("permission %d not found", e.ID)
+    	{{ "}" }}
+    	return fmt.Sprintf("permission %q not found", e.Code)
+    {{ "}" }}
+
+    // ValidationError reports an invalid permission operation.
+    type ValidationError string
+
+    func (e ValidationError) Error() string {{ "{" }} return string(e) {{ "}" }}
+
+    // Repository is the persistence port for the permission aggregate.
+    type Repository interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*Permission, error)
+    	GetByCode(ctx context.Context, code string) (*Permission, error)
+    	ListByIDs(ctx context.Context, ids []int64) ([]*Permission, error)
+    	List(ctx context.Context, limit, offset int32) ([]*Permission, error)
+    	ListByCodes(ctx context.Context, codes []string) ([]*Permission, error)
+    	Save(ctx context.Context, p *Permission) error
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}

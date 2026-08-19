@@ -1,0 +1,14 @@
+# ncgo exported template — internal/domain/user/valueobject.go
+path: internal/domain/user/valueobject.go
+update_behavior:
+    type: skip
+body: |
+    package user
+
+    // PasswordHash is a value object wrapping an argon2id-encoded password hash.
+    // It exists so password hashing stays explicit and cannot be confused with a
+    // plaintext password at call sites.
+    type PasswordHash string
+
+    // Value returns the raw hash string.
+    func (p PasswordHash) Value() string {{ "{" }} return string(p) {{ "}" }}

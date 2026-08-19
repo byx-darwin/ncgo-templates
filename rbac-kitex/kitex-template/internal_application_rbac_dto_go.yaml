@@ -1,0 +1,18 @@
+# ncgo exported template — internal/application/rbac/dto.go
+path: internal/application/rbac/dto.go
+update_behavior:
+    type: skip
+body: |
+    package rbacsvc
+
+    // EnforceInput carries an authorization request.
+    type EnforceInput struct {{ "{" }}
+    	UID int64
+    	Obj string
+    	Act string
+    {{ "}" }}
+
+    // EnforceOutput carries the authorization result.
+    type EnforceOutput struct {{ "{" }}
+    	Allowed bool
+    {{ "}" }}

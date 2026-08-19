@@ -1,0 +1,53 @@
+# ncgo exported template — internal/domain/menu/entity.go
+path: internal/domain/menu/entity.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import (
+    	"context"
+    	"fmt"
+    )
+
+    // Kind constants for a menu node.
+    const (
+    	KindDir    = "dir"
+    	KindMenu   = "menu"
+    	KindButton = "button"
+    )
+
+    // Menu is the aggregate root for the menu aggregate. PermCode is the unified
+    // permission code that ties a menu/button to a permission and a Casbin obj.
+    type Menu struct {{ "{" }}
+    	ID        int64
+    	ParentID  int64
+    	Type      string
+    	Name      string
+    	Path      string
+    	Component string
+    	PermCode  string
+    	SortOrder int32
+    {{ "}" }}
+
+    // Node is a menu tree node: a menu plus its sorted children.
+    type Node struct {{ "{" }}
+    	Menu     *Menu
+    	Children []*Node
+    {{ "}" }}
+
+    // NotFoundError reports that a menu does not exist.
+    type NotFoundError struct {{ "{" }}
+    	ID int64
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }} return fmt.Sprintf("menu %d not found", e.ID) {{ "}" }}
+
+    // Repository is the persistence port for the menu aggregate.
+    type Repository interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*Menu, error)
+    	List(ctx context.Context) ([]*Menu, error)
+    	ListByPermCodes(ctx context.Context, codes []string) ([]*Menu, error)
+    	Save(ctx context.Context, m *Menu) error
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}

@@ -1,0 +1,197 @@
+# ncgo exported template — internal/application/user/user_service_test.go
+path: internal/application/user/user_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package usersvc
+
+    import (
+    	"context"
+    	"fmt"
+    	"sync"
+    	"testing"
+
+    	casbin "github.com/casbin/casbin/v2"
+
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	authinfra "{{.Module}}/internal/infrastructure/auth"
+    	casbinstore "{{.Module}}/internal/infrastructure/casbin"
+    )
+
+    type fakeUserRepo struct {{ "{" }}
+    	mu          sync.Mutex
+    	users       map[int64]*user.User
+    	roles       map[int64][]*role.Role
+    	roleCatalog map[int64]*role.Role
+    	next        int64
+    {{ "}" }}
+
+    func newFakeUserRepo() *fakeUserRepo {{ "{" }}
+    	return &fakeUserRepo{{ "{" }}
+    		users:       map[int64]*user.User{{ "{" }}{{ "}" }},
+    		roles:       map[int64][]*role.Role{{ "{" }}{{ "}" }},
+    		roleCatalog: map[int64]*role.Role{{ "{" }}{{ "}" }},
+    		next:        1,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func (f *fakeUserRepo) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	u, ok := f.users[id]
+    	if !ok {{ "{" }}
+    		return nil, user.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    	{{ "}" }}
+    	return u, nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	out := make([]*user.User, 0, len(f.users))
+    	for _, u := range f.users {{ "{" }}
+    		out = append(out, u)
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	return int64(len(f.users)), nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) Save(ctx context.Context, u *user.User) error {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	if u.ID == 0 {{ "{" }}
+    		u.ID = f.next
+    		f.next++
+    	{{ "}" }}
+    	f.users[u.ID] = u
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	delete(f.users, id)
+    	delete(f.roles, id)
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) SetStatus(ctx context.Context, id int64, status string) error {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	u, ok := f.users[id]
+    	if !ok {{ "{" }}
+    		return user.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    	{{ "}" }}
+    	u.Status = status
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	var roles []*role.Role
+    	for _, rid := range roleIDs {{ "{" }}
+    		if r, ok := f.roleCatalog[rid]; ok {{ "{" }}
+    			roles = append(roles, r)
+    		{{ "}" }}
+    	{{ "}" }}
+    	f.roles[uid] = roles
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) ClearRoles(ctx context.Context, uid int64) error {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	f.roles[uid] = nil
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeUserRepo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	f.mu.Lock()
+    	defer f.mu.Unlock()
+    	return f.roles[uid], nil
+    {{ "}" }}
+
+    type fakeRoleRepo struct {{ "{" }}
+    	byID map[int64]*role.Role
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) GetByID(ctx context.Context, id int64) (*role.Role, error) {{ "{" }}
+    	r, ok := f.byID[id]
+    	if !ok {{ "{" }}
+    		return nil, role.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    	{{ "}" }}
+    	return r, nil
+    {{ "}" }}
+
+    func newTestEnforcer(t *testing.T) *casbin.Enforcer {{ "{" }}
+    	t.Helper()
+    	e, err := casbinstore.NewEnforcer(casbinstore.NewMemoryPolicyStore())
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	e.EnableLog(false)
+    	return e
+    {{ "}" }}
+
+    func TestCreateHashesPassword(t *testing.T) {{ "{" }}
+    	users := newFakeUserRepo()
+    	roles := &fakeRoleRepo{{ "{" }}byID: map[int64]*role.Role{{ "{" }}{{ "}}" }}
+    	enforcer := newTestEnforcer(t)
+    	memAudit := audit.NewMemoryWriter()
+    	svc := New(users, roles, enforcer, memAudit)
+
+    	u, err := svc.Create(context.Background(), CreateUserInput{{ "{" }}Username: "bob", Password: "hunter2"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if u.Status != user.StatusActive {{ "{" }}
+    		t.Fatalf("Status = %q, want active", u.Status)
+    	{{ "}" }}
+    	if u.PasswordHash == "hunter2" {{ "{" }}
+    		t.Fatal("password stored in plaintext")
+    	{{ "}" }}
+    	ok, err := authinfra.VerifyPassword(u.PasswordHash, "hunter2")
+    	if err != nil || !ok {{ "{" }}
+    		t.Fatalf("VerifyPassword = %v,%v, want true,nil", ok, err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestAssignRolesSyncsEnforcer(t *testing.T) {{ "{" }}
+    	users := newFakeUserRepo()
+    	users.roleCatalog[1] = &role.Role{{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}" }}
+    	roles := &fakeRoleRepo{{ "{" }}byID: map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }}
+    	enforcer := newTestEnforcer(t)
+    	// the role is granted this permission (as role svc would write it)
+    	if _, err := enforcer.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
+    		t.Fatalf("AddPolicy: %v", err)
+    	{{ "}" }}
+    	memAudit := audit.NewMemoryWriter()
+    	svc := New(users, roles, enforcer, memAudit)
+
+    	u, err := svc.Create(context.Background(), CreateUserInput{{ "{" }}Username: "bob", Password: "hunter2"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if err := svc.AssignRoles(context.Background(), u.ID, []int64{{ "{" }}1{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("AssignRoles: %v", err)
+    	{{ "}" }}
+    	ok, err := enforcer.Enforce(fmt.Sprint(u.ID), "user:create", "POST")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Enforce: %v", err)
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		t.Fatal("enforcer should allow after AssignRoles granted the role")
+    	{{ "}" }}
+    	entries := memAudit.Entries()
+    	if len(entries) == 0 || entries[len(entries)-1].Action != "user.assign_roles" {{ "{" }}
+    		t.Fatalf("audit entries = %+v, want user.assign_roles", entries)
+    	{{ "}" }}
+    {{ "}" }}

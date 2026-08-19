@@ -1,0 +1,67 @@
+# rbac-kitex template — internal/infrastructure/token/memory_test.go
+path: internal/infrastructure/token/memory_test.go
+update_behavior:
+  type: skip
+body: |-
+  package token
+  
+  import (
+  	"context"
+  	"testing"
+  	"time"
+  )
+  
+  func TestMemoryStoreRefreshRoundTrip(t *testing.T) {{ "{" }}
+  	s := NewMemoryStore()
+  	ctx := context.Background()
+  	if err := s.SetRefresh(ctx, 7, "rt-1", time.Hour); err != nil {{ "{" }}
+  		t.Fatalf("SetRefresh: %v", err)
+  	{{ "}" }}
+  	uid, err := s.GetRefresh(ctx, "rt-1")
+  	if err != nil {{ "{" }}
+  		t.Fatalf("GetRefresh: %v", err)
+  	{{ "}" }}
+  	if uid != 7 {{ "{" }}
+  		t.Fatalf("uid = %d, want 7", uid)
+  	{{ "}" }}
+  	if err := s.DeleteRefresh(ctx, "rt-1"); err != nil {{ "{" }}
+  		t.Fatalf("DeleteRefresh: %v", err)
+  	{{ "}" }}
+  	if _, err := s.GetRefresh(ctx, "rt-1"); err != ErrNotFound {{ "{" }}
+  		t.Fatalf("GetRefresh after delete = %v, want ErrNotFound", err)
+  	{{ "}" }}
+  {{ "}" }}
+  
+  func TestMemoryStoreRefreshExpiry(t *testing.T) {{ "{" }}
+  	s := NewMemoryStore()
+  	ctx := context.Background()
+  	if err := s.SetRefresh(ctx, 1, "rt-exp", -time.Minute); err != nil {{ "{" }}
+  		t.Fatalf("SetRefresh: %v", err)
+  	{{ "}" }}
+  	if _, err := s.GetRefresh(ctx, "rt-exp"); err != ErrNotFound {{ "{" }}
+  		t.Fatalf("GetRefresh(expired) = %v, want ErrNotFound", err)
+  	{{ "}" }}
+  {{ "}" }}
+  
+  func TestMemoryStoreBlacklist(t *testing.T) {{ "{" }}
+  	s := NewMemoryStore()
+  	ctx := context.Background()
+  	if err := s.Blacklist(ctx, "at-1", time.Hour); err != nil {{ "{" }}
+  		t.Fatalf("Blacklist: %v", err)
+  	{{ "}" }}
+  	ok, err := s.IsBlacklisted(ctx, "at-1")
+  	if err != nil {{ "{" }}
+  		t.Fatalf("IsBlacklisted: %v", err)
+  	{{ "}" }}
+  	if !ok {{ "{" }}
+  		t.Fatal("at-1 should be blacklisted")
+  	{{ "}" }}
+  	ok, err = s.IsBlacklisted(ctx, "at-2")
+  	if err != nil {{ "{" }}
+  		t.Fatalf("IsBlacklisted(at-2): %v", err)
+  	{{ "}" }}
+  	if ok {{ "{" }}
+  		t.Fatal("at-2 should not be blacklisted")
+  	{{ "}" }}
+  {{ "}" }}
+  

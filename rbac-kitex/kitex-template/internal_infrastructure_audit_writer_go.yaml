@@ -1,0 +1,84 @@
+# rbac-kitex template — internal/infrastructure/audit/writer.go
+path: internal/infrastructure/audit/writer.go
+update_behavior:
+  type: cover
+body: |-
+  package audit
+
+  import (
+  	"context"
+  	"sync"
+
+  	"{{.Module}}/internal/db/gen"
+  )
+
+  // Writer records RBAC mutation audit events (who/what/when).
+  type Writer interface {
+  	Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error
+  }
+
+  // SQLWriter persists audit events to the audit_log table.
+  type SQLWriter struct {
+  	q *gen.Queries
+  }
+
+  // NewSQLWriter creates an audit writer backed by sqlc queries.
+  func NewSQLWriter(q *gen.Queries) *SQLWriter {
+  	return &SQLWriter{q: q}
+  }
+
+  // Write inserts an audit_log row. An empty detailJSON becomes "{}".
+  func (w *SQLWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
+  	if detailJSON == "" {
+  		detailJSON = "{}"
+  	}
+  	_, err := w.q.InsertAuditLog(ctx, gen.InsertAuditLogParams{
+  		ActorUid:   &actorUID,
+  		Action:     action,
+  		Target:     target,
+  		DetailJson: detailJSON,
+  	})
+  	return err
+  }
+
+  // Entry is an in-memory audit record.
+  type Entry struct {
+  	ActorUID   int64
+  	Action     string
+  	Target     string
+  	DetailJSON string
+  }
+
+  // MemoryWriter is a test-only audit sink.
+  type MemoryWriter struct {
+  	mu      sync.Mutex
+  	entries []Entry
+  }
+
+  // NewMemoryWriter creates an empty in-memory audit sink.
+  func NewMemoryWriter() *MemoryWriter {
+  	return &MemoryWriter{}
+  }
+
+  // Write appends an entry.
+  func (w *MemoryWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
+  	w.mu.Lock()
+  	defer w.mu.Unlock()
+  	w.entries = append(w.entries, Entry{
+  		ActorUID:   actorUID,
+  		Action:     action,
+  		Target:     target,
+  		DetailJSON: detailJSON,
+  	})
+  	return nil
+  }
+
+  // Entries returns a copy of the recorded entries.
+  func (w *MemoryWriter) Entries() []Entry {
+  	w.mu.Lock()
+  	defer w.mu.Unlock()
+  	out := make([]Entry, len(w.entries))
+  	copy(out, w.entries)
+  	return out
+  }
+

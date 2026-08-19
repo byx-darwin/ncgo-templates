@@ -1,0 +1,177 @@
+# ncgo exported template — internal/application/menu/menu_service_test.go
+path: internal/application/menu/menu_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package menusvc
+
+    import (
+    	"context"
+    	"testing"
+
+    	"{{.Module}}/internal/domain/menu"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/infrastructure/audit"
+    )
+
+    type fakeMenuRepo struct {{ "{" }}
+    	menus []*menu.Menu
+    {{ "}" }}
+
+    func (f *fakeMenuRepo) GetByID(ctx context.Context, id int64) (*menu.Menu, error) {{ "{" }}
+    	for _, m := range f.menus {{ "{" }}
+    		if m.ID == id {{ "{" }}
+    			return m, nil
+    		{{ "}" }}
+    	{{ "}" }}
+    	return nil, menu.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    {{ "}" }}
+
+    func (f *fakeMenuRepo) List(ctx context.Context) ([]*menu.Menu, error) {{ "{" }} return f.menus, nil {{ "}" }}
+
+    func (f *fakeMenuRepo) ListByPermCodes(ctx context.Context, codes []string) ([]*menu.Menu, error) {{ "{" }}
+    	set := make(map[string]bool, len(codes))
+    	for _, c := range codes {{ "{" }}
+    		set[c] = true
+    	{{ "}" }}
+    	out := make([]*menu.Menu, 0, len(f.menus))
+    	for _, m := range f.menus {{ "{" }}
+    		if set[m.PermCode] {{ "{" }}
+    			out = append(out, m)
+    		{{ "}" }}
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (f *fakeMenuRepo) Save(ctx context.Context, m *menu.Menu) error {{ "{" }}
+    	for i, existing := range f.menus {{ "{" }}
+    		if existing.ID == m.ID {{ "{" }}
+    			f.menus[i] = m
+    			return nil
+    		{{ "}" }}
+    	{{ "}" }}
+    	f.menus = append(f.menus, m)
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeMenuRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	for i, m := range f.menus {{ "{" }}
+    		if m.ID == id {{ "{" }}
+    			f.menus = append(f.menus[:i], f.menus[i+1:]...)
+    			return nil
+    		{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    type fakeUserRepo struct {{ "{" }}
+    	roles map[int64][]*role.Role
+    {{ "}" }}
+
+    func (f *fakeUserRepo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	return f.roles[uid], nil
+    {{ "}" }}
+
+    type fakeRoleRepo struct {{ "{" }}
+    	rolePerms map[int64][]*permission.Permission
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) ListPermissions(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    	var out []*permission.Permission
+    	for _, rid := range roleIDs {{ "{" }}
+    		out = append(out, f.rolePerms[rid]...)
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    type fakePermRepo struct {{ "{" }}
+    	perms []*permission.Permission
+    {{ "}" }}
+
+    func (f *fakePermRepo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	return f.perms, nil
+    {{ "}" }}
+
+    func TestUserPermCodesUnion(t *testing.T) {{ "{" }}
+    	users := &fakeUserRepo{{ "{" }}roles: map[int64][]*role.Role{{ "{" }}
+    		1: {{ "{{" }}ID: 2, Code: "ops", Name: "Ops"{{ "}}" }},
+    	{{ "}}" }}
+    	roles := &fakeRoleRepo{{ "{" }}rolePerms: map[int64][]*permission.Permission{{ "{" }}
+    		2: {{ "{{" }}Code: "user:create"{{ "}" }}, {{ "{" }}Code: "user:view"{{ "}}" }},
+    	{{ "}}" }}
+    	svc := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, users, roles, &fakePermRepo{{ "{" }}{{ "}" }}, audit.NewMemoryWriter())
+
+    	codes, err := svc.UserPermCodes(context.Background(), 1)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("UserPermCodes: %v", err)
+    	{{ "}" }}
+    	if len(codes) != 2 {{ "{" }}
+    		t.Fatalf("codes = %v, want 2 entries", codes)
+    	{{ "}" }}
+    	has := map[string]bool{{ "{" }}{{ "}" }}
+    	for _, c := range codes {{ "{" }}
+    		has[c] = true
+    	{{ "}" }}
+    	if !has["user:create"] || !has["user:view"] {{ "{" }}
+    		t.Fatalf("codes = %v, want user:create + user:view", codes)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUserPermCodesAdminSeesAll(t *testing.T) {{ "{" }}
+    	users := &fakeUserRepo{{ "{" }}roles: map[int64][]*role.Role{{ "{" }}
+    		1: {{ "{{" }}ID: 1, Code: AdminRoleCode, Name: "Admin"{{ "}}" }},
+    	{{ "}}" }}
+    	perms := &fakePermRepo{{ "{" }}perms: []*permission.Permission{{ "{{" }}Code: "a"{{ "}" }}, {{ "{" }}Code: "b"{{ "}}" }}{{ "}" }}
+    	svc := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, users, &fakeRoleRepo{{ "{" }}{{ "}" }}, perms, audit.NewMemoryWriter())
+
+    	codes, err := svc.UserPermCodes(context.Background(), 1)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("UserPermCodes: %v", err)
+    	{{ "}" }}
+    	if len(codes) != 2 {{ "{" }}
+    		t.Fatalf("codes = %v, want all 2", codes)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUserMenuTreeFiltersByPermCodes(t *testing.T) {{ "{" }}
+    	menus := &fakeMenuRepo{{ "{" }}menus: []*menu.Menu{{ "{" }}
+    		{{ "{" }}ID: 1, ParentID: 0, Name: "user list", PermCode: "user:view", SortOrder: 0{{ "}" }},
+    		{{ "{" }}ID: 2, ParentID: 0, Name: "role list", PermCode: "role:view", SortOrder: 0{{ "}" }},
+    	{{ "}}" }}
+    	users := &fakeUserRepo{{ "{" }}roles: map[int64][]*role.Role{{ "{" }}
+    		1: {{ "{{" }}ID: 2, Code: "ops", Name: "Ops"{{ "}}" }},
+    	{{ "}}" }}
+    	roles := &fakeRoleRepo{{ "{" }}rolePerms: map[int64][]*permission.Permission{{ "{" }}
+    		2: {{ "{{" }}Code: "user:view"{{ "}}" }},
+    	{{ "}}" }}
+    	svc := New(menus, users, roles, &fakePermRepo{{ "{" }}{{ "}" }}, audit.NewMemoryWriter())
+
+    	nodes, err := svc.UserMenuTree(context.Background(), 1)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("UserMenuTree: %v", err)
+    	{{ "}" }}
+    	if len(nodes) != 1 || nodes[0].Menu.PermCode != "user:view" {{ "{" }}
+    		t.Fatalf("tree = %+v, want only user:view menu", nodes)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUserMenuTreeAdminSeesAllMenus(t *testing.T) {{ "{" }}
+    	menus := &fakeMenuRepo{{ "{" }}menus: []*menu.Menu{{ "{" }}
+    		{{ "{" }}ID: 1, ParentID: 0, Name: "a", PermCode: "a", SortOrder: 0{{ "}" }},
+    		{{ "{" }}ID: 2, ParentID: 0, Name: "b", PermCode: "b", SortOrder: 1{{ "}" }},
+    	{{ "}}" }}
+    	users := &fakeUserRepo{{ "{" }}roles: map[int64][]*role.Role{{ "{" }}
+    		1: {{ "{{" }}ID: 1, Code: AdminRoleCode, Name: "Admin"{{ "}}" }},
+    	{{ "}}" }}
+    	perms := &fakePermRepo{{ "{" }}perms: []*permission.Permission{{ "{{" }}Code: "a"{{ "}" }}, {{ "{" }}Code: "b"{{ "}}" }}{{ "}" }}
+    	svc := New(menus, users, &fakeRoleRepo{{ "{" }}{{ "}" }}, perms, audit.NewMemoryWriter())
+
+    	nodes, err := svc.UserMenuTree(context.Background(), 1)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("UserMenuTree: %v", err)
+    	{{ "}" }}
+    	if len(nodes) != 2 {{ "{" }}
+    		t.Fatalf("tree = %+v, want 2 menus", nodes)
+    	{{ "}" }}
+    {{ "}" }}

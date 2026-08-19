@@ -1,0 +1,62 @@
+# ncgo exported template — internal/domain/user/entity_test.go
+path: internal/domain/user/entity_test.go
+update_behavior:
+    type: skip
+body: |
+    package user
+
+    import "testing"
+
+    func TestNewRejectsShortUsername(t *testing.T) {{ "{" }}
+    	for _, name := range []string{{ "{" }}"", "ab"{{ "}" }} {{ "{" }}
+    		if _, err := New(name, "hash"); err == nil {{ "{" }}
+    			t.Fatalf("New(%q) expected error", name)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewAcceptsValidUsername(t *testing.T) {{ "{" }}
+    	u, err := New("alice", "hash")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New() unexpected error: %v", err)
+    	{{ "}" }}
+    	if u.Username != "alice" {{ "{" }}
+    		t.Fatalf("Username = %q, want alice", u.Username)
+    	{{ "}" }}
+    	if u.PasswordHash != "hash" {{ "{" }}
+    		t.Fatalf("PasswordHash = %q, want hash", u.PasswordHash)
+    	{{ "}" }}
+    	if u.Status != StatusActive {{ "{" }}
+    		t.Fatalf("Status = %q, want %q", u.Status, StatusActive)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewRejectsEmptyPasswordHash(t *testing.T) {{ "{" }}
+    	if _, err := New("alice", ""); err == nil {{ "{" }}
+    		t.Fatal("New with empty password hash expected error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestSetStatusValidatesEnum(t *testing.T) {{ "{" }}
+    	u, err := New("alice", "hash")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New() unexpected error: %v", err)
+    	{{ "}" }}
+    	if err := u.SetStatus(StatusDisabled); err != nil {{ "{" }}
+    		t.Fatalf("SetStatus(disabled) unexpected error: %v", err)
+    	{{ "}" }}
+    	if err := u.SetStatus("bogus"); err == nil {{ "{" }}
+    		t.Fatal("SetStatus(bogus) expected error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestSetPasswordHash(t *testing.T) {{ "{" }}
+    	u, err := New("alice", "old")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New() unexpected error: %v", err)
+    	{{ "}" }}
+    	u.SetPasswordHash("new")
+    	if u.PasswordHash != "new" {{ "{" }}
+    		t.Fatalf("PasswordHash = %q, want new", u.PasswordHash)
+    	{{ "}" }}
+    {{ "}" }}

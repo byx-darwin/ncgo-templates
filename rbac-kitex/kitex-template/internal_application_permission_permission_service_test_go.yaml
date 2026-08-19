@@ -1,0 +1,120 @@
+# ncgo exported template — internal/application/permission/permission_service_test.go
+path: internal/application/permission/permission_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package permsvc
+
+    import (
+    	"context"
+    	"testing"
+
+    	casbin "github.com/casbin/casbin/v2"
+
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	casbinstore "{{.Module}}/internal/infrastructure/casbin"
+    )
+
+    type fakePermRepo struct {{ "{" }}
+    	perms map[int64]*permission.Permission
+    	next  int64
+    {{ "}" }}
+
+    func newFakePermRepo() *fakePermRepo {{ "{" }}
+    	return &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}" }}, next: 100{{ "}" }}
+    {{ "}" }}
+
+    func (f *fakePermRepo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    	p, ok := f.perms[id]
+    	if !ok {{ "{" }}
+    		return nil, permission.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    	{{ "}" }}
+    	return p, nil
+    {{ "}" }}
+
+    func (f *fakePermRepo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	out := make([]*permission.Permission, 0, len(f.perms))
+    	for _, p := range f.perms {{ "{" }}
+    		out = append(out, p)
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (f *fakePermRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.perms)), nil {{ "}" }}
+
+    func (f *fakePermRepo) ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error) {{ "{" }}
+    	return nil, nil
+    {{ "}" }}
+
+    func (f *fakePermRepo) Save(ctx context.Context, p *permission.Permission) error {{ "{" }}
+    	if p.ID == 0 {{ "{" }}
+    		p.ID = f.next
+    		f.next++
+    	{{ "}" }}
+    	f.perms[p.ID] = p
+    	return nil
+    {{ "}" }}
+
+    func (f *fakePermRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	delete(f.perms, id)
+    	return nil
+    {{ "}" }}
+
+    func newTestEnforcer(t *testing.T) *casbin.Enforcer {{ "{" }}
+    	t.Helper()
+    	e, err := casbinstore.NewEnforcer(casbinstore.NewMemoryPolicyStore())
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	e.EnableLog(false)
+    	return e
+    {{ "}" }}
+
+    func TestCreateRejectsUnknownKind(t *testing.T) {{ "{" }}
+    	perms := newFakePermRepo()
+    	svc := New(perms, newTestEnforcer(t), audit.NewMemoryWriter())
+    	if _, err := svc.Create(context.Background(), CreatePermissionInput{{ "{" }}
+    		Code: "x", Name: "X", Kind: "bogus",
+    	{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Create with unknown kind expected error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestCreateNormalizesMethod(t *testing.T) {{ "{" }}
+    	perms := newFakePermRepo()
+    	svc := New(perms, newTestEnforcer(t), audit.NewMemoryWriter())
+    	p, err := svc.Create(context.Background(), CreatePermissionInput{{ "{" }}
+    		Code: "user:create", Name: "Create user", Kind: permission.KindButton, Method: "POST",
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if p.Method != "*" {{ "{" }}
+    		t.Fatalf("Method = %q, want *", p.Method)
+    	{{ "}" }}
+    	if p.ID == 0 {{ "{" }}
+    		t.Fatal("Create did not assign an ID")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestDeleteRemovesCasbinPolicy(t *testing.T) {{ "{" }}
+    	perms := newFakePermRepo()
+    	perms.perms[5] = &permission.Permission{{ "{" }}ID: 5, Code: "user:create", Name: "Create", Kind: permission.KindAPI, Method: "POST"{{ "}" }}
+    	enforcer := newTestEnforcer(t)
+    	if _, err := enforcer.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
+    		t.Fatalf("AddPolicy: %v", err)
+    	{{ "}" }}
+    	svc := New(perms, enforcer, audit.NewMemoryWriter())
+
+    	if err := svc.Delete(context.Background(), 5); err != nil {{ "{" }}
+    		t.Fatalf("Delete: %v", err)
+    	{{ "}" }}
+    	ok, err := enforcer.Enforce("admin", "user:create", "POST")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Enforce: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("policy should be removed after permission delete")
+    	{{ "}" }}
+    {{ "}" }}

@@ -1,0 +1,32 @@
+# rbac-kitex template — internal/infrastructure/casbin/enforcer.go
+path: internal/infrastructure/casbin/enforcer.go
+update_behavior:
+  type: cover
+body: |-
+  package casbin
+
+  import (
+  	_ "embed"
+
+  	"github.com/casbin/casbin/v2"
+  	"github.com/casbin/casbin/v2/model"
+  )
+
+  //go:embed model.conf
+  var modelConf string
+
+  // NewEnforcer builds a Casbin enforcer over the given PolicyStore using the
+  // embedded RBAC model (sub, obj, act). Policies are loaded from the store on
+  // startup; management mutations route through the same adapter.
+  func NewEnforcer(store PolicyStore) (*casbin.Enforcer, error) {
+  	m, err := model.NewModelFromString(modelConf)
+  	if err != nil {
+  		return nil, err
+  	}
+  	e, err := casbin.NewEnforcer(m, NewAdapter(store))
+  	if err != nil {
+  		return nil, err
+  	}
+  	return e, nil
+  }
+

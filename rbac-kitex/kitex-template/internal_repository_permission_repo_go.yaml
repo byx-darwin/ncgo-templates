@@ -1,0 +1,170 @@
+# ncgo exported template — internal/repository/permission/repo.go
+path: internal/repository/permission/repo.go
+update_behavior:
+    type: skip
+
+body: |
+    package permissionrepo
+
+    import (
+    	"context"
+    	"errors"
+
+    	goerror "github.com/byx-darwin/go-tools/go-common/error"
+    	frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/permission"
+    )
+
+    // Repo implements permission.Repository on top of sqlc-generated queries.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a Repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    // GetByID returns a permission or permission.NotFoundError.
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    	row, err := r.q.GetPermissionByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    			return nil, permission.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    		{{ "}" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapPermission(row), nil
+    {{ "}" }}
+
+    // GetByCode returns a permission or permission.NotFoundError.
+    func (r *Repo) GetByCode(ctx context.Context, code string) (*permission.Permission, error) {{ "{" }}
+    	row, err := r.q.GetPermissionByCode(ctx, code)
+    	if err != nil {{ "{" }}
+    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    			return nil, permission.NotFoundError{{ "{" }}Code: code{{ "}" }}
+    		{{ "}" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapPermission(row), nil
+    {{ "}" }}
+
+    // ListByIDs returns the permissions matching the given ids.
+    func (r *Repo) ListByIDs(ctx context.Context, ids []int64) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByIDs(ctx, ids)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapPermissions(rows), nil
+    {{ "}" }}
+
+    // List returns permissions with offset pagination.
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissions(ctx, gen.ListPermissionsParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapPermissions(rows), nil
+    {{ "}" }}
+
+    // Count returns the total number of permissions.
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountPermissions(ctx)
+    {{ "}" }}
+
+    // ListByCodes returns the permissions matching the given unified codes.
+    func (r *Repo) ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByCodes(ctx, codes)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapPermissions(rows), nil
+    {{ "}" }}
+
+    // Save creates a permission and assigns the generated ID. Permissions are
+    // immutable after creation (no update RPC); change is delete + re-create.
+    func (r *Repo) Save(ctx context.Context, p *permission.Permission) error {{ "{" }}
+    	row, err := r.q.CreatePermission(ctx, gen.CreatePermissionParams{{ "{" }}
+    		Code: p.Code, Name: p.Name, Kind: p.Kind, Method: p.Method,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	p.ID = row.ID
+    	return nil
+    {{ "}" }}
+
+    // Delete removes a permission. Menu perm_code references are set NULL via FK.
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeletePermission(ctx, id)
+    {{ "}" }}
+
+    // WithTx runs fn inside a database transaction, rolling back on error/panic.
+    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
+    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return goerror.
+    			In("permission.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "begin transaction")
+    	{{ "}" }}
+    	committed := false
+    	defer func() {{ "{" }}
+    		if committed {{ "{" }}
+    			return
+    		{{ "}" }}
+    		if p := recover(); p != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    			panic(p)
+    		{{ "}" }}
+    		if err != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    		{{ "}" }}
+    	{{ "}" }}()
+    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
+    	if err := fn(txRepo); err != nil {{ "{" }}
+    		return goerror.
+    			In("permission.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "transaction callback")
+    	{{ "}" }}
+    	if err := tx.Commit(ctx); err != nil {{ "{" }}
+    		return goerror.
+    			In("permission.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "commit transaction")
+    	{{ "}" }}
+    	committed = true
+    	return nil
+    {{ "}" }}
+
+    var _ permission.Repository = (*Repo)(nil)
+
+    func mapPermissions(rows []gen.Permission) []*permission.Permission {{ "{" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for i := range rows {{ "{" }}
+    		out = append(out, mapPermission(rows[i]))
+    	{{ "}" }}
+    	return out
+    {{ "}" }}
+
+    func mapPermission(row gen.Permission) *permission.Permission {{ "{" }}
+    	return &permission.Permission{{ "{" }}
+    		ID:     row.ID,
+    		Code:   row.Code,
+    		Name:   row.Name,
+    		Kind:   row.Kind,
+    		Method: row.Method,
+    	{{ "}" }}
+    {{ "}" }}

@@ -1,0 +1,76 @@
+# rbac-kitex template — internal/infrastructure/auth/jwt_test.go
+path: internal/infrastructure/auth/jwt_test.go
+update_behavior:
+  type: skip
+body: |-
+  package auth
+  
+  import (
+  	"strings"
+  	"testing"
+  	"time"
+  )
+  
+  func TestJWTSignParseRoundTrip(t *testing.T) {{ "{" }}
+  	m := NewJWTManager("test-secret")
+  	token, err := m.Sign(42, []string{{ "{" }}"admin", "ops"{{ "}" }}, time.Hour)
+  	if err != nil {{ "{" }}
+  		t.Fatalf("Sign: %v", err)
+  	{{ "}" }}
+  	claims, err := m.Parse(token)
+  	if err != nil {{ "{" }}
+  		t.Fatalf("Parse: %v", err)
+  	{{ "}" }}
+  	if claims.Uid != 42 {{ "{" }}
+  		t.Fatalf("Uid = %d, want 42", claims.Uid)
+  	{{ "}" }}
+  	if len(claims.Roles) != 2 || claims.Roles[0] != "admin" || claims.Roles[1] != "ops" {{ "{" }}
+  		t.Fatalf("Roles = %v, want [admin ops]", claims.Roles)
+  	{{ "}" }}
+  {{ "}" }}
+  
+  func TestJWTExpiredTokenRejected(t *testing.T) {{ "{" }}
+  	m := NewJWTManager("test-secret")
+  	token, err := m.Sign(1, nil, -time.Minute)
+  	if err != nil {{ "{" }}
+  		t.Fatalf("Sign: %v", err)
+  	{{ "}" }}
+  	if _, err := m.Parse(token); err == nil {{ "{" }}
+  		t.Fatal("Parse expected error for expired token")
+  	{{ "}" }}
+  {{ "}" }}
+  
+  func TestJWTTamperedSignatureRejected(t *testing.T) {{ "{" }}
+  	m := NewJWTManager("test-secret")
+  	token, err := m.Sign(1, []string{{ "{" }}"admin"{{ "}" }}, time.Hour)
+  	if err != nil {{ "{" }}
+  		t.Fatalf("Sign: %v", err)
+  	{{ "}" }}
+  	parts := strings.Split(token, ".")
+  	if len(parts) != 3 {{ "{" }}
+  		t.Fatalf("unexpected token shape: %q", token)
+  	{{ "}" }}
+  	// Flip the FIRST signature char: it always changes the decoded signature
+  	// bytes (the last base64url char can fall in unused padding bits).
+  	sig := []byte(parts[2])
+  	if sig[0] == 'A' {{ "{" }}
+  		sig[0] = 'B'
+  	{{ "}" }} else {{ "{" }}
+  		sig[0] = 'A'
+  	{{ "}" }}
+  	tampered := parts[0] + "." + parts[1] + "." + string(sig)
+  	if _, err := m.Parse(tampered); err == nil {{ "{" }}
+  		t.Fatal("Parse expected error for tampered signature")
+  	{{ "}" }}
+  {{ "}" }}
+  
+  func TestJWTWrongSecretRejected(t *testing.T) {{ "{" }}
+  	token, err := NewJWTManager("secret-a").Sign(1, nil, time.Hour)
+  	if err != nil {{ "{" }}
+  		t.Fatalf("Sign: %v", err)
+  	{{ "}" }}
+  	if _, err := NewJWTManager("secret-b").Parse(token); err == nil {{ "{" }}
+  		t.Fatal("Parse expected error for wrong secret")
+  	{{ "}" }}
+  {{ "}" }}
+  

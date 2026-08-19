@@ -1,0 +1,48 @@
+# ncgo exported template — internal/domain/permission/entity_test.go
+path: internal/domain/permission/entity_test.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    import "testing"
+
+    func TestNewRejectsUnknownKind(t *testing.T) {{ "{" }}
+    	for _, kind := range []string{{ "{" }}"", "unknown", "page"{{ "}" }} {{ "{" }}
+    		if _, err := New("x", "X", kind, ""); err == nil {{ "{" }}
+    			t.Fatalf("New(kind=%q) expected error", kind)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewNormalizesMenuButtonMethodToStar(t *testing.T) {{ "{" }}
+    	for _, kind := range []string{{ "{" }}KindMenu, KindButton{{ "}" }} {{ "{" }}
+    		p, err := New("user:create", "Create user", kind, "POST")
+    		if err != nil {{ "{" }}
+    			t.Fatalf("New(%s) unexpected error: %v", kind, err)
+    		{{ "}" }}
+    		if p.Method != "*" {{ "{" }}
+    			t.Fatalf("Method = %q, want *", p.Method)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewDefaultsAPIMethodToGET(t *testing.T) {{ "{" }}
+    	p, err := New("user:create", "Create user", KindAPI, "")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New() unexpected error: %v", err)
+    	{{ "}" }}
+    	if p.Method != "GET" {{ "{" }}
+    		t.Fatalf("Method = %q, want GET", p.Method)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewKeepsAPIProvidedMethod(t *testing.T) {{ "{" }}
+    	p, err := New("user:create", "Create user", KindAPI, "POST")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New() unexpected error: %v", err)
+    	{{ "}" }}
+    	if p.Method != "POST" {{ "{" }}
+    		t.Fatalf("Method = %q, want POST", p.Method)
+    	{{ "}" }}
+    {{ "}" }}

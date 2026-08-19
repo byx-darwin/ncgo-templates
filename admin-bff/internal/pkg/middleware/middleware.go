@@ -1,0 +1,17 @@
+package middleware
+
+import (
+    "github.com/byx-darwin/go-tools/go-framework/hertz/middleware"
+    "github.com/cloudwego/hertz/pkg/app"
+)
+
+// Re-export from go-tools for generated project use.
+var (
+    Cors      = middleware.Cors
+    AccessLog = middleware.AccessLog
+)
+
+// Auth wraps middleware.Auth with the required AuthFace parameter.
+func Auth(face middleware.AuthFace) app.HandlerFunc {
+    return middleware.Auth(face)
+}

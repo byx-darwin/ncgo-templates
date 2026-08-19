@@ -1,0 +1,938 @@
+package conf
+
+import (
+    "os"
+    "strings"
+    "sync"
+    "time"
+
+    goerror "github.com/byx-darwin/go-tools/go-common/error"
+    frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+    "github.com/byx-darwin/go-tools/go-framework/config"
+    hertzconfig "github.com/byx-darwin/go-tools/go-framework/config/hertz"
+    mwredis "github.com/byx-darwin/go-tools/go-middleware/redis"
+    "gopkg.in/yaml.v3"
+)
+
+var (
+    current *Config
+    once    sync.Once
+    initErr error
+
+    configCenterMu      sync.RWMutex
+    configCenterLoaders = map[string]ConfigCenterLoader{}
+)
+
+type Config struct {
+    Env string `yaml:"env"`
+    Debug bool `yaml:"debug"`
+    ConfigCenter ConfigCenterConfig `yaml:"config_center"`
+    
+    Database DatabaseConfig `yaml:"database"`
+    
+    Redis       RedisConfig `yaml:"redis"`
+    Server hertzconfig.ServerConfig `yaml:"server"`
+    Swagger SwaggerConfig `yaml:"swagger"`
+    Security SecurityConfig `yaml:"security"`
+    CORS CORSConfig `yaml:"cors"`
+    RateLimit RateLimitConfig `yaml:"rate_limit"`
+    Idempotency IdempotencyConfig `yaml:"idempotency"`
+    Auth AuthConfig `yaml:"auth"`
+    Logging LoggingConfig `yaml:"logging"`
+    Release ReleaseConfig `yaml:"release"`
+    Log LogConfig `yaml:"log"`
+}
+
+type ConfigCenterConfig struct {
+    Enabled             bool                      `yaml:"enabled"`
+    Provider            string                    `yaml:"provider"`
+    DataType            string                    `yaml:"data_type"`
+    TimeoutMilliseconds config.Duration           `yaml:"timeout_milliseconds"`
+    FailFast            bool                      `yaml:"fail_fast"`
+    AllowEmpty          bool                      `yaml:"allow_empty"`
+    Nacos               ConfigCenterNacosConfig   `yaml:"nacos"`
+    Polaris             ConfigCenterPolarisConfig `yaml:"polaris"`
+}
+
+type ConfigCenterNacosConfig struct {
+    ServerAddr  string `json:"server_addr" yaml:"server_addr"`
+    NamespaceID string `json:"namespace_id" yaml:"namespace_id"`
+    GroupName   string `json:"group_name" yaml:"group_name"`
+    DataID      string `json:"data_id" yaml:"data_id"`
+}
+
+type ConfigCenterPolarisConfig struct {
+    Addresses []string `json:"addresses" yaml:"addresses"`
+    Namespace string   `json:"namespace" yaml:"namespace"`
+    Group     string   `json:"group" yaml:"group"`
+    FileName  string   `json:"file_name" yaml:"file_name"`
+}
+
+type ConfigCenterLoader func(ConfigCenterConfig) ([]byte, error)
+
+type SwaggerConfig struct {
+    Enabled  bool   `yaml:"enabled"`
+    Path     string `yaml:"path"`
+    SpecFile string `yaml:"spec_file"`
+}
+
+type SecurityConfig struct {
+    InternalPaths []string `yaml:"internal_paths"`
+    InternalCIDRs []string `yaml:"internal_cidrs"`
+}
+
+type CORSConfig struct {
+    Enabled          bool            `yaml:"enabled"`
+    AllowOrigins     []string        `yaml:"allow_origins"`
+    AllowMethods     []string        `yaml:"allow_methods"`
+    AllowHeaders     []string        `yaml:"allow_headers"`
+    ExposeHeaders    []string        `yaml:"expose_headers"`
+    AllowCredentials bool            `yaml:"allow_credentials"`
+    MaxAgeSeconds    config.Duration `yaml:"max_age_seconds"`
+}
+
+
+type DatabaseConfig struct {
+    Enabled                  bool            `yaml:"enabled"`
+    DSN                      string          `yaml:"dsn"`
+    MaxConns                 int32           `yaml:"max_conns"`
+    MinConns                 int32           `yaml:"min_conns"`
+    MaxConnLifetimeSeconds   config.Duration `yaml:"max_conn_lifetime_seconds"`
+    MaxConnIdleTimeSeconds   config.Duration `yaml:"max_conn_idle_time_seconds"`
+    HealthCheckPeriodSeconds config.Duration `yaml:"health_check_period_seconds"`
+}
+
+
+type LogConfig struct {
+    Level  string `yaml:"level"`
+    Format string `yaml:"format"`
+    Mode   string `yaml:"mode"`
+}
+
+type RateLimitConfig struct {
+    Enabled      bool                    `yaml:"enabled"`
+    Mode         string                  `yaml:"mode"`                 // shadow | enforce
+    Static       StaticLimitConfig       `yaml:"static"`
+    Source       RateLimitSourceConfig   `yaml:"source"`
+    GRPC         RateLimitGRPCConfig     `yaml:"grpc"`
+    RuleCenter   RateLimitDatabaseConfig `yaml:"rule_center"`
+    Database     RateLimitDatabaseConfig `yaml:"database"`
+    Backend      string                  `yaml:"backend"`
+    FailOpen     bool                    `yaml:"fail_open"`
+    KeyPrefix    string                  `yaml:"key_prefix"`
+    AppKeyHeader string                  `yaml:"app_key_header"`
+    SkipPaths    []string                `yaml:"skip_paths"`
+    PreAuth      RateLimitPhaseConfig    `yaml:"pre_auth"`
+    PostAuth     RateLimitPhaseConfig    `yaml:"post_auth"`
+    Memory       MemoryCacheConfig       `yaml:"memory"`
+    Redis        RedisConfig    `yaml:"redis"`
+}
+
+type StaticLimitConfig struct {
+    MaxQPS         int `yaml:"max_qps"`
+    MaxConnections int `yaml:"max_connections"`
+}
+
+type RateLimitSourceConfig struct {
+    Type            string          `yaml:"type"`
+    CacheTTLSeconds config.Duration `yaml:"cache_ttl_seconds"`
+    FallbackOnError bool            `yaml:"fallback_on_error"`
+}
+
+type RateLimitGRPCConfig struct {
+    Target              string          `yaml:"target"`
+    TimeoutMilliseconds config.Duration `yaml:"timeout_milliseconds"`
+    AuthHeader          string          `yaml:"auth_header"`
+    AuthToken           string          `yaml:"auth_token"`
+    ServiceName         string          `yaml:"service_name"`
+}
+
+type RateLimitDatabaseConfig struct {
+    QueryTimeoutMilliseconds config.Duration `yaml:"query_timeout_milliseconds"`
+}
+
+type RateLimitPhaseConfig struct {
+    Enabled     bool                   `yaml:"enabled"`
+    DefaultRule RateLimitRuleConfig    `yaml:"default_rule"`
+    Rules       []RateLimitMatchConfig `yaml:"rules"`
+}
+
+type RateLimitMatchConfig struct {
+    AppKey      string            `yaml:"app_key"`
+    Method      string            `yaml:"method"`
+    MatchKind   string            `yaml:"match_kind"`
+    Path        string            `yaml:"path"`
+    PathPattern string            `yaml:"path_pattern"`
+    PathPrefix  string            `yaml:"path_prefix"`
+    Priority    int               `yaml:"priority"`
+    Rule        RateLimitRuleConfig `yaml:"rule"`
+}
+
+type RateLimitRuleConfig struct {
+    Enabled           bool            `yaml:"enabled"`
+    KeyBy             []string        `yaml:"key_by"`
+    Strategy          string          `yaml:"strategy"`
+    WindowSeconds     config.Duration `yaml:"window_seconds"`
+    MaxRequests       int             `yaml:"max_requests"`
+    RequestsPerSecond float64         `yaml:"requests_per_second"`
+    Burst             int             `yaml:"burst"`
+    ClientTTLSeconds  config.Duration `yaml:"client_ttl_seconds"`
+}
+
+type RedisConfig struct {
+    Addrs              []string        `yaml:"addrs"`
+    Username           string          `yaml:"username"`
+    Password           string          `yaml:"password"`
+    DB                 int             `yaml:"db"`
+    MasterName         string          `yaml:"master_name"`
+    SentinelUsername   string          `yaml:"sentinel_username"`
+    SentinelPassword   string          `yaml:"sentinel_password"`
+    Protocol           int             `yaml:"protocol"`
+    ClientName         string          `yaml:"client_name"`
+    PoolSize           int             `yaml:"pool_size"`
+    MinIdleConns       int             `yaml:"min_idle_conns"`
+    DialTimeout        config.Duration `yaml:"dial_timeout"`
+    ReadTimeout        config.Duration `yaml:"read_timeout"`
+    WriteTimeout       config.Duration `yaml:"write_timeout"`
+    PoolTimeout        config.Duration `yaml:"pool_timeout"`
+    ConnMaxIdleTime    config.Duration `yaml:"conn_max_idle_time"`
+    ConnMaxLifetime    config.Duration `yaml:"conn_max_lifetime"`
+    IdleCheckFrequency config.Duration `yaml:"idle_check_frequency"`
+    MaxRetries         int             `yaml:"max_retries"`
+    MinRetryBackoff    config.Duration `yaml:"min_retry_backoff"`
+    MaxRetryBackoff    config.Duration `yaml:"max_retry_backoff"`
+}
+
+func (c RedisConfig) ToMiddlewareConfig() *mwredis.Config {
+    return &mwredis.Config{
+        Addrs:              c.Addrs,
+        Username:           c.Username,
+        Password:           c.Password,
+        DB:                 c.DB,
+        MasterName:         c.MasterName,
+        SentinelUsername:   c.SentinelUsername,
+        SentinelPassword:   c.SentinelPassword,
+        Protocol:           c.Protocol,
+        ClientName:         c.ClientName,
+        PoolSize:           c.PoolSize,
+        MinIdleConns:       c.MinIdleConns,
+        DialTimeout:        c.DialTimeout.Duration,
+        ReadTimeout:        c.ReadTimeout.Duration,
+        WriteTimeout:       c.WriteTimeout.Duration,
+        PoolTimeout:        c.PoolTimeout.Duration,
+        ConnMaxIdleTime:    c.ConnMaxIdleTime.Duration,
+        ConnMaxLifetime:    c.ConnMaxLifetime.Duration,
+        IdleCheckFrequency: c.IdleCheckFrequency.Duration,
+        MaxRetries:         c.MaxRetries,
+        MinRetryBackoff:    c.MinRetryBackoff.Duration,
+        MaxRetryBackoff:    c.MaxRetryBackoff.Duration,
+    }
+}
+
+type MemoryCacheConfig struct {
+    MaxEntries int `yaml:"max_entries"`
+}
+
+type IdempotencyConfig struct {
+    Enabled       bool                 `yaml:"enabled"`
+    Backend       string               `yaml:"backend"`
+    FailOpen      bool                 `yaml:"fail_open"`
+    Header        string               `yaml:"header"`
+    AppKeyHeader  string               `yaml:"app_key_header"`
+    KeyPrefix     string               `yaml:"key_prefix"`
+    TTLSeconds    config.Duration      `yaml:"ttl_seconds"`
+    MaxBodyBytes  int                  `yaml:"max_body_bytes"`
+    Methods       []string             `yaml:"methods"`
+    SkipPaths     []string             `yaml:"skip_paths"`
+    Memory        MemoryCacheConfig    `yaml:"memory"`
+    Redis         RedisConfig `yaml:"redis"`
+}
+
+type AuthConfig struct {
+    PublicPaths []string       `yaml:"public_paths"`
+    Signature   SignatureConfig `yaml:"signature"`
+    Token       TokenConfig     `yaml:"token"`
+}
+
+type SignatureConfig struct {
+    Enabled             bool                `yaml:"enabled"`
+    HeaderAppKey        string              `yaml:"header_app_key"`
+    HeaderTimestamp     string              `yaml:"header_timestamp"`
+    HeaderNonce         string              `yaml:"header_nonce"`
+    HeaderSignature     string              `yaml:"header_signature"`
+    StaticSecret        string              `yaml:"static_secret"`
+    MaxClockSkewSeconds config.Duration     `yaml:"max_clock_skew_seconds"`
+    Nonce               SignatureNonceConfig `yaml:"nonce"`
+}
+
+type SignatureNonceConfig struct {
+    Enabled    bool                 `yaml:"enabled"`
+    Backend    string               `yaml:"backend"`
+    FailOpen   bool                 `yaml:"fail_open"`
+    KeyPrefix  string               `yaml:"key_prefix"`
+    TTLSeconds config.Duration      `yaml:"ttl_seconds"`
+    Memory     MemoryCacheConfig    `yaml:"memory"`
+    Redis      RedisConfig `yaml:"redis"`
+}
+
+type TokenConfig struct {
+    Enabled        bool            `yaml:"enabled"`
+    Header         string          `yaml:"header"`
+    Issuer         string          `yaml:"issuer"`
+    SigningKey     string          `yaml:"signing_key"`
+    BufferSeconds  config.Duration `yaml:"buffer_seconds"`
+    ExpiresSeconds config.Duration `yaml:"expires_seconds"`
+}
+
+type LoggingConfig struct {
+    Enabled    bool                            `yaml:"enabled"`
+    Mode       string                          `yaml:"mode"`
+    Format     string                          `yaml:"format"`
+    Level      string                          `yaml:"level"`
+    AddSource  bool                            `yaml:"add_source"`
+    Console    LoggingConsoleConfig            `yaml:"console"`
+    File       LoggingFileConfig               `yaml:"file"`
+    Categories map[string]LoggingCategoryConfig `yaml:"categories"`
+}
+
+type LoggingConsoleConfig struct {
+    Enabled bool `yaml:"enabled"`
+}
+
+type LoggingFileConfig struct {
+    Enabled    bool   `yaml:"enabled"`
+    Dir        string `yaml:"dir"`
+    Filename   string `yaml:"filename"`
+    MaxSizeMB  int    `yaml:"max_size_mb"`
+    MaxBackups int    `yaml:"max_backups"`
+    MaxAgeDays int    `yaml:"max_age_days"`
+    Compress   bool   `yaml:"compress"`
+}
+
+type LoggingCategoryConfig struct {
+    Enabled bool   `yaml:"enabled"`
+    File    string `yaml:"file"`
+    Level   string `yaml:"level"`
+}
+
+type ReleaseConfig struct {
+    Enabled   bool                   `yaml:"enabled"`
+    Info      ReleaseInfoConfig      `yaml:"info"`
+    Discovery ReleaseDiscoveryConfig `yaml:"discovery"`
+    Rules     ReleaseRulesConfig     `yaml:"rules"`
+}
+
+type ReleaseInfoConfig struct {
+    Track     string `yaml:"track"`
+    GitSHA    string `yaml:"git_sha"`
+    BuildTime string `yaml:"build_time"`
+    Env       string `yaml:"env"`
+}
+
+type ReleaseDiscoveryConfig struct {
+    Provider string                        `yaml:"provider"`
+    Nacos    ReleaseNacosDiscoveryConfig   `yaml:"nacos"`
+    Polaris  ReleasePolarisDiscoveryConfig `yaml:"polaris"`
+}
+
+type ReleaseNacosDiscoveryConfig struct {
+    ServerAddr  string `yaml:"server_addr"`
+    NamespaceID string `yaml:"namespace_id"`
+    GroupName   string `yaml:"group_name"`
+    ClusterName string `yaml:"cluster_name"`
+    ServiceName string `yaml:"service_name"`
+}
+
+type ReleasePolarisDiscoveryConfig struct {
+    Addresses []string `yaml:"addresses"`
+    Namespace string   `yaml:"namespace"`
+    Service   string   `yaml:"service"`
+}
+
+type ReleaseRulesConfig struct {
+    Provider  string                   `yaml:"provider"`
+    FailOpen  bool                     `yaml:"fail_open"`
+    LocalFile string                   `yaml:"local_file"`
+    Nacos     ReleaseNacosRuleConfig   `yaml:"nacos"`
+    Polaris   ReleasePolarisRuleConfig `yaml:"polaris"`
+}
+
+type ReleaseNacosRuleConfig struct {
+    ServerAddr  string `yaml:"server_addr"`
+    NamespaceID string `yaml:"namespace_id"`
+    GroupName   string `yaml:"group_name"`
+    DataID      string `yaml:"data_id"`
+}
+
+type ReleasePolarisRuleConfig struct {
+    Addresses []string `yaml:"addresses"`
+    Namespace string   `yaml:"namespace"`
+    Group     string   `yaml:"group"`
+    FileName  string   `yaml:"file_name"`
+}
+
+func RegisterConfigCenterLoader(provider string, loader ConfigCenterLoader) {
+    provider = normalizeConfigProvider(provider)
+    if provider == "" || loader == nil {
+        return
+    }
+    configCenterMu.Lock()
+    defer configCenterMu.Unlock()
+    configCenterLoaders[provider] = loader
+}
+
+func UnregisterConfigCenterLoader(provider string) {
+    provider = normalizeConfigProvider(provider)
+    if provider == "" {
+        return
+    }
+    configCenterMu.Lock()
+    defer configCenterMu.Unlock()
+    delete(configCenterLoaders, provider)
+}
+
+func Init() error {
+    once.Do(func() { current, initErr = Load("") })
+    return initErr
+}
+
+func Get() *Config {
+    if current == nil {
+        _ = Init()
+    }
+    return current
+}
+
+func Load(path string) (*Config, error) {
+    cfg := Default()
+    if path == "" {
+        path = os.Getenv("CONFIG_PATH")
+    }
+    configPathFromEnv := path != ""
+    if path == "" {
+        path = "conf/" + Env() + "/conf.yaml"
+    }
+    loaded, err := config.LoadYAML[Config](path)
+    if err != nil {
+        if os.IsNotExist(err) && !configPathFromEnv {
+            return cfg, nil
+        }
+        return nil, goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").Wrap(err)
+    }
+    *cfg = *loaded
+    if err := mergeConfigCenter(cfg); err != nil {
+        return nil, err
+    }
+    if err := cfg.Validate(); err != nil {
+        return nil, err
+    }
+    return cfg, nil
+}
+
+func Default() *Config {
+    return &Config{
+        Env:   Env(),
+        Debug: Env() != "prod",
+        ConfigCenter: ConfigCenterConfig{
+            DataType:            "yaml",
+            TimeoutMilliseconds: config.Duration{Duration: 2000 * time.Millisecond},
+            Nacos: ConfigCenterNacosConfig{
+                GroupName: "DEFAULT_GROUP",
+            },
+            Polaris: ConfigCenterPolarisConfig{
+                Group: "ncgo-config",
+            },
+        },
+        
+        Database: DatabaseConfig{
+            Enabled:                  false,
+            MaxConns:                 20,
+            MinConns:                 2,
+            MaxConnLifetimeSeconds:   config.Duration{Duration: 1800 * time.Second},
+            MaxConnIdleTimeSeconds:   config.Duration{Duration: 300 * time.Second},
+            HealthCheckPeriodSeconds: config.Duration{Duration: 30 * time.Second},
+        },
+        
+        Redis: defaultRedisConfig(),
+        Server: hertzconfig.ServerConfig{
+            Registry: config.RegistryOption{
+                Name: "adminbffservice",
+            },
+            Jaeger: &config.JaegerOption{Enable: false, Endpoint: "127.0.0.1:4317"},
+        },
+        Swagger: SwaggerConfig{
+            Path:     "/swagger",
+            SpecFile: "internal/docs/swagger/openapi.yaml",
+        },
+        Security: SecurityConfig{
+            InternalPaths: []string{"/healthz", "/readyz"},
+            InternalCIDRs: []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"},
+        },
+        CORS: CORSConfig{
+            AllowOrigins:  []string{"*"},
+            AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+            AllowHeaders:  []string{"Content-Type", "Authorization", "X-Authorization", "X-Request-ID", "X-App-Key", "X-Timestamp", "X-Nonce", "X-Signature", "X-Idempotency-Key"},
+            ExposeHeaders: []string{"X-Request-ID"},
+            MaxAgeSeconds: config.Duration{Duration: 600 * time.Second},
+        },
+        RateLimit: RateLimitConfig{
+            Source: RateLimitSourceConfig{
+                Type:            "config",
+                CacheTTLSeconds: config.Duration{Duration: 60 * time.Second},
+                FallbackOnError: true,
+            },
+            GRPC: RateLimitGRPCConfig{
+                TimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond},
+                AuthHeader:          "Authorization",
+            },
+            Database: RateLimitDatabaseConfig{
+                QueryTimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond},
+            },
+            Backend:      "memory",
+            KeyPrefix:    "rate_limit",
+            AppKeyHeader: "X-App-Key",
+            Memory:       MemoryCacheConfig{MaxEntries: 100000},
+            SkipPaths:    []string{"/healthz", "/readyz"},
+            PreAuth: RateLimitPhaseConfig{
+                Enabled: true,
+                DefaultRule: RateLimitRuleConfig{
+                    Enabled:          true,
+                    KeyBy:            []string{"ak_path", "ip"},
+                    Strategy:         "fixed_window",
+                    WindowSeconds:    config.Duration{Duration: 60 * time.Second},
+                    MaxRequests:      100,
+                    ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
+                },
+            },
+            PostAuth: RateLimitPhaseConfig{
+                DefaultRule: RateLimitRuleConfig{
+                    Enabled:          true,
+                    KeyBy:            []string{"ak_user_uuid", "user_uuid", "ak"},
+                    Strategy:         "fixed_window",
+                    WindowSeconds:    config.Duration{Duration: 60 * time.Second},
+                    MaxRequests:      50,
+                    ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
+                },
+            },
+        },
+        Idempotency: IdempotencyConfig{
+            Backend:      "memory",
+            Header:       "X-Idempotency-Key",
+            AppKeyHeader: "X-App-Key",
+            KeyPrefix:    "idempotency",
+            TTLSeconds:   config.Duration{Duration: 86400 * time.Second},
+            MaxBodyBytes: 1048576,
+            Memory:       MemoryCacheConfig{MaxEntries: 100000},
+            Methods:      []string{"POST", "PUT", "PATCH", "DELETE"},
+            SkipPaths:    []string{"/healthz", "/readyz"},
+        },
+        Auth: AuthConfig{
+            PublicPaths: []string{"/healthz", "/readyz", "/swagger/*"},
+            Signature: SignatureConfig{
+                HeaderAppKey:        "X-App-Key",
+                HeaderTimestamp:     "X-Timestamp",
+                HeaderNonce:         "X-Nonce",
+                HeaderSignature:     "X-Signature",
+                MaxClockSkewSeconds: config.Duration{Duration: 300 * time.Second},
+                Nonce: SignatureNonceConfig{
+                    Backend:    "memory",
+                    KeyPrefix:  "signature_nonce",
+                    TTLSeconds: config.Duration{Duration: 300 * time.Second},
+                    Memory:     MemoryCacheConfig{MaxEntries: 100000},
+                },
+            },
+            Token: TokenConfig{
+                Header:         "X-Authorization",
+                BufferSeconds:  config.Duration{Duration: 300 * time.Second},
+                ExpiresSeconds: config.Duration{Duration: 7200 * time.Second},
+            },
+        },
+        Logging: LoggingConfig{
+            Mode:      "console",
+            Format:    "json",
+            Level:     "info",
+            AddSource: true,
+            Console:   LoggingConsoleConfig{Enabled: true},
+            File: LoggingFileConfig{
+                Dir: "logs", Filename: "app.log", MaxSizeMB: 100,
+                MaxBackups: 10, MaxAgeDays: 30, Compress: true,
+            },
+            Categories: map[string]LoggingCategoryConfig{
+                "access":   {Enabled: true, File: "access.log", Level: "info"},
+                "error":    {Enabled: true, File: "error.log", Level: "error"},
+                "biz":      {Enabled: true, File: "biz.log", Level: "warn"},
+                "rpc":      {Enabled: true, File: "rpc.log", Level: "info"},
+                "db":       {Enabled: true, File: "db.log", Level: "warn"},
+                "panic":    {Enabled: true, File: "panic.log", Level: "error"},
+                "audit":    {Enabled: true, File: "audit.log", Level: "info"},
+                "security": {Enabled: true, File: "security.log", Level: "warn"},
+            },
+        },
+        Release: ReleaseConfig{
+            Info: ReleaseInfoConfig{Track: "stable"},
+            Rules: ReleaseRulesConfig{
+                Provider: "config",
+                FailOpen: true,
+                Nacos: ReleaseNacosRuleConfig{
+                    GroupName: "NCGO_CANARY",
+                },
+                Polaris: ReleasePolarisRuleConfig{
+                    Group: "ncgo-canary",
+                },
+            },
+            Discovery: ReleaseDiscoveryConfig{
+                Nacos: ReleaseNacosDiscoveryConfig{
+                    GroupName:   "DEFAULT_GROUP",
+                    ClusterName: "DEFAULT",
+                },
+            },
+        },
+        Log: LogConfig{
+            Level:  "info",
+            Format: "json",
+            Mode:   "both",
+        },
+    }
+}
+
+func defaultRedisConfig() RedisConfig {
+    return RedisConfig{
+        Addrs:           []string{"127.0.0.1:6379"},
+        Protocol:        3,
+        MaxRetries:      3,
+        MinRetryBackoff: config.Duration{Duration: 8 * time.Millisecond},
+        MaxRetryBackoff: config.Duration{Duration: 512 * time.Millisecond},
+        DialTimeout:     config.Duration{Duration: 5 * time.Second},
+        ReadTimeout:     config.Duration{Duration: 3 * time.Second},
+        WriteTimeout:    config.Duration{Duration: 3 * time.Second},
+        PoolSize:        10,
+        MinIdleConns:    2,
+        PoolTimeout:     config.Duration{Duration: 4 * time.Second},
+        ConnMaxIdleTime: config.Duration{Duration: 300 * time.Second},
+        ConnMaxLifetime: config.Duration{Duration: 1800 * time.Second},
+    }
+}
+
+func Env() string {
+    if env := os.Getenv("GO_ENV"); env != "" {
+        return env
+    }
+    return "dev"
+}
+
+func (c *Config) applyRedisFallbacks() {
+    if c == nil {
+        return
+    }
+    c.Redis = mergeRedisConfig(c.Redis, defaultRedisConfig())
+    c.RateLimit.Redis = mergeRedisConfig(c.RateLimit.Redis, c.Redis)
+    c.Idempotency.Redis = mergeRedisConfig(c.Idempotency.Redis, c.Redis)
+    c.Auth.Signature.Nonce.Redis = mergeRedisConfig(c.Auth.Signature.Nonce.Redis, c.Redis)
+}
+
+func mergeRedisConfig(primary, fallback RedisConfig) RedisConfig {
+    if len(primary.Addrs) == 0 && len(fallback.Addrs) > 0 {
+        primary.Addrs = append([]string(nil), fallback.Addrs...)
+    }
+    if primary.ClientName == "" {
+        primary.ClientName = fallback.ClientName
+    }
+    if primary.Username == "" {
+        primary.Username = fallback.Username
+    }
+    if primary.Password == "" {
+        primary.Password = fallback.Password
+    }
+    if primary.DB == 0 {
+        primary.DB = fallback.DB
+    }
+    if primary.MasterName == "" {
+        primary.MasterName = fallback.MasterName
+    }
+    if primary.SentinelUsername == "" {
+        primary.SentinelUsername = fallback.SentinelUsername
+    }
+    if primary.SentinelPassword == "" {
+        primary.SentinelPassword = fallback.SentinelPassword
+    }
+    if primary.Protocol == 0 {
+        primary.Protocol = fallback.Protocol
+    }
+    if primary.MaxRetries == 0 {
+        primary.MaxRetries = fallback.MaxRetries
+    }
+    if primary.MinRetryBackoff.Duration == 0 {
+        primary.MinRetryBackoff = fallback.MinRetryBackoff
+    }
+    if primary.MaxRetryBackoff.Duration == 0 {
+        primary.MaxRetryBackoff = fallback.MaxRetryBackoff
+    }
+    if primary.DialTimeout.Duration == 0 {
+        primary.DialTimeout = fallback.DialTimeout
+    }
+    if primary.ReadTimeout.Duration == 0 {
+        primary.ReadTimeout = fallback.ReadTimeout
+    }
+    if primary.WriteTimeout.Duration == 0 {
+        primary.WriteTimeout = fallback.WriteTimeout
+    }
+    if primary.PoolSize == 0 {
+        primary.PoolSize = fallback.PoolSize
+    }
+    if primary.MinIdleConns == 0 {
+        primary.MinIdleConns = fallback.MinIdleConns
+    }
+    if primary.PoolTimeout.Duration == 0 {
+        primary.PoolTimeout = fallback.PoolTimeout
+    }
+    if primary.ConnMaxIdleTime.Duration == 0 {
+        primary.ConnMaxIdleTime = fallback.ConnMaxIdleTime
+    }
+    if primary.ConnMaxLifetime.Duration == 0 {
+        primary.ConnMaxLifetime = fallback.ConnMaxLifetime
+    }
+    if primary.IdleCheckFrequency.Duration == 0 {
+        primary.IdleCheckFrequency = fallback.IdleCheckFrequency
+    }
+    return primary
+}
+
+func (c *Config) Validate() error {
+    if c == nil {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("config is nil")
+    }
+    c.applyRedisFallbacks()
+    if c.Server.Registry.Name == "" {
+        c.Server.Registry.Name = c.Env
+    }
+    if err := validateServer(c.Server); err != nil {
+        return err
+    }
+    
+    if c.Database.Enabled {
+        if c.Database.DSN == "" {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("database.dsn is empty")
+        }
+        if c.Database.MaxConns < 0 || c.Database.MinConns < 0 || c.Database.MaxConnLifetimeSeconds.Duration < 0 || c.Database.MaxConnIdleTimeSeconds.Duration < 0 || c.Database.HealthCheckPeriodSeconds.Duration < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("database pool settings must not be negative")
+        }
+    }
+    
+    if err := validateConfigCenter(c.ConfigCenter); err != nil {
+        return err
+    }
+    if c.Swagger.Enabled {
+        if !strings.HasPrefix(strings.TrimSpace(c.Swagger.Path), "/") {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("swagger.path must start with /")
+        }
+        if strings.TrimSpace(c.Swagger.SpecFile) == "" {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("swagger.spec_file is empty")
+        }
+    }
+    if c.Auth.Signature.Enabled && c.Auth.Signature.StaticSecret == "" {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.signature.static_secret is empty")
+    }
+    if c.Auth.Signature.Enabled && c.Auth.Signature.Nonce.Enabled {
+        switch c.Auth.Signature.Nonce.Backend {
+        case "", "memory", "redis":
+        default:
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.signature.nonce.backend must be memory or redis")
+        }
+        if c.Auth.Signature.Nonce.Backend == "redis" && len(c.Auth.Signature.Nonce.Redis.Addrs) == 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.signature.nonce.redis.addrs is empty")
+        }
+        if c.Auth.Signature.Nonce.Backend == "memory" && c.Auth.Signature.Nonce.Memory.MaxEntries < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.signature.nonce.memory.max_entries must not be negative")
+        }
+        if c.Auth.Signature.Nonce.TTLSeconds.Duration < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.signature.nonce.ttl_seconds must not be negative")
+        }
+    }
+    if c.Auth.Token.Enabled && c.Auth.Token.SigningKey == "" {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.token.signing_key is empty")
+    }
+    if c.CORS.Enabled && c.CORS.AllowCredentials && hasWildcard(c.CORS.AllowOrigins) {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("cors.allow_credentials cannot be true when allow_origins contains *")
+    }
+    if c.RateLimit.Enabled {
+        switch c.RateLimit.Source.Type {
+        case "", "config", "grpc", "database", "rule_center":
+        default:
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.source.type must be config, grpc, or database")
+        }
+        if c.RateLimit.Source.Type == "grpc" && c.RateLimit.GRPC.TimeoutMilliseconds.Duration <= 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.grpc.timeout_milliseconds must be positive")
+        }
+        if c.RateLimit.Source.Type == "database" && c.RateLimit.Database.QueryTimeoutMilliseconds.Duration <= 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.database.query_timeout_milliseconds must be positive")
+        }
+        switch c.RateLimit.Backend {
+        case "", "memory", "redis":
+        default:
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.backend must be memory or redis")
+        }
+        if c.RateLimit.Backend == "redis" && len(c.RateLimit.Redis.Addrs) == 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.redis.addrs is empty")
+        }
+        if c.RateLimit.Backend == "memory" && c.RateLimit.Memory.MaxEntries < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.memory.max_entries must not be negative")
+        }
+        if !c.RateLimit.PreAuth.Enabled && !c.RateLimit.PostAuth.Enabled {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("at least one rate_limit phase must be enabled")
+        }
+        if err := validateRateLimitPhase("rate_limit.pre_auth", c.RateLimit.PreAuth); err != nil {
+            return err
+        }
+        if err := validateRateLimitPhase("rate_limit.post_auth", c.RateLimit.PostAuth); err != nil {
+            return err
+        }
+    }
+    if c.Idempotency.Enabled {
+        switch c.Idempotency.Backend {
+        case "", "memory", "redis":
+        default:
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.backend must be memory or redis")
+        }
+        if c.Idempotency.Backend == "redis" && len(c.Idempotency.Redis.Addrs) == 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.redis.addrs is empty")
+        }
+        if c.Idempotency.Backend == "memory" && c.Idempotency.Memory.MaxEntries < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.memory.max_entries must not be negative")
+        }
+        if c.Idempotency.TTLSeconds.Duration < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.ttl_seconds must not be negative")
+        }
+        if c.Idempotency.MaxBodyBytes < 0 {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.max_body_bytes must not be negative")
+        }
+    }
+    if err := validateLogging(c.Logging); err != nil {
+        return err
+    }
+    if err := validateRelease(c.Release); err != nil {
+        return err
+    }
+    return nil
+}
+
+func validateServer(srv hertzconfig.ServerConfig) error {
+    _ = srv
+    return nil
+}
+
+func mergeConfigCenter(cfg *Config) error {
+    if cfg == nil || !cfg.ConfigCenter.Enabled {
+        return nil
+    }
+    provider := normalizeConfigProvider(cfg.ConfigCenter.Provider)
+    loader := lookupConfigCenterLoader(provider)
+    if loader == nil {
+        if cfg.ConfigCenter.FailFast {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("config_center loader is not registered")
+        }
+        return nil
+    }
+    payload, err := loader(cfg.ConfigCenter)
+    if err != nil {
+        if cfg.ConfigCenter.FailFast {
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Wrap(err)
+        }
+        return nil
+    }
+    if strings.TrimSpace(string(payload)) == "" {
+        if cfg.ConfigCenter.AllowEmpty {
+            return nil
+        }
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("config_center returned empty payload")
+    }
+    if err := yaml.Unmarshal(payload, cfg); err != nil {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Wrap(err)
+    }
+    return nil
+}
+
+func lookupConfigCenterLoader(provider string) ConfigCenterLoader {
+    configCenterMu.RLock()
+    defer configCenterMu.RUnlock()
+    return configCenterLoaders[provider]
+}
+
+func validateConfigCenter(cc ConfigCenterConfig) error {
+    if !cc.Enabled {
+        return nil
+    }
+    return nil
+}
+
+func validateRateLimitPhase(name string, phase RateLimitPhaseConfig) error {
+    if !phase.Enabled {
+        return nil
+    }
+    if err := validateRateLimitRule(name+".default_rule", phase.DefaultRule); err != nil {
+        return err
+    }
+    for i, rule := range phase.Rules {
+        if err := validateRateLimitMatch(name, i, rule); err != nil {
+            return err
+        }
+    }
+    return nil
+}
+
+func validateRateLimitMatch(name string, index int, match RateLimitMatchConfig) error {
+    normalized, err := normalizeRateLimitMatch(match)
+    if err != nil {
+        _ = index
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").Wrap(err)
+    }
+    if err := validateRateLimitRule(name+".rules["+string(rune('0'+index))+"]", normalized.Rule); err != nil {
+        return err
+    }
+    return nil
+}
+
+func normalizeRateLimitMatch(match RateLimitMatchConfig) (RateLimitMatchConfig, error) {
+    if match.PathPrefix != "" && match.MatchKind == "" {
+        match.MatchKind = "prefix"
+    }
+    return match, nil
+}
+
+func validateRateLimitRule(name string, rule RateLimitRuleConfig) error {
+    if !rule.Enabled {
+        return nil
+    }
+    if len(rule.KeyBy) == 0 {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + ".key_by must not be empty")
+    }
+    if rule.WindowSeconds.Duration <= 0 && rule.MaxRequests <= 0 && rule.RequestsPerSecond <= 0 {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + " must specify window_seconds/max_requests or requests_per_second")
+    }
+    if rule.ClientTTLSeconds.Duration < 0 {
+        return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + ".client_ttl_seconds must not be negative")
+    }
+    return nil
+}
+
+func validateLogging(l LoggingConfig) error {
+    _ = l
+    return nil
+}
+
+func validateRelease(r ReleaseConfig) error {
+    _ = r
+    return nil
+}
+
+func normalizeConfigProvider(provider string) string {
+    return strings.TrimSpace(strings.ToLower(provider))
+}
+
+func hasWildcard(origins []string) bool {
+    for _, o := range origins {
+        if o == "*" {
+            return true
+        }
+    }
+    return false
+}

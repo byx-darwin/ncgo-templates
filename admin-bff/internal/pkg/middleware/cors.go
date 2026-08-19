@@ -1,0 +1,106 @@
+package middleware
+
+import (
+	"context"
+	"strconv"
+	"strings"
+	"time"
+
+	config "github.com/byx-darwin/go-tools/go-framework/config"
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
+
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/base/conf"
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pkg/response"
+)
+
+func CORS(cfg conf.CORSConfig) app.HandlerFunc {
+	cfg = normalizeCORSConfig(cfg)
+	origins := stringSet(cfg.AllowOrigins)
+	allowAll := origins["*"]
+	return func(ctx context.Context, c *app.RequestContext) {
+		if !cfg.Enabled {
+			c.Next(ctx)
+			return
+		}
+		origin := strings.TrimSpace(c.Request.Header.Get("Origin"))
+		if origin == "" {
+			c.Next(ctx)
+			return
+		}
+		allowedOrigin, ok := allowedCORSOrigin(origin, allowAll, origins)
+		if !ok {
+			if isPreflight(c) {
+				response.ErrorCode(c, response.CodePermissionDenied)
+				c.Abort()
+				return
+			}
+			c.Next(ctx)
+			return
+		}
+		writeCORSHeaders(c, cfg, allowedOrigin)
+		if isPreflight(c) {
+			c.SetStatusCode(consts.StatusNoContent)
+			c.Abort()
+			return
+		}
+		c.Next(ctx)
+	}
+}
+
+func isPreflight(c *app.RequestContext) bool {
+	return string(c.Method()) == consts.MethodOptions && c.Request.Header.Get("Access-Control-Request-Method") != ""
+}
+
+func writeCORSHeaders(c *app.RequestContext, cfg conf.CORSConfig, origin string) {
+	c.Response.Header.Set("Access-Control-Allow-Origin", origin)
+	c.Response.Header.Set("Vary", "Origin")
+	c.Response.Header.Set("Access-Control-Allow-Methods", strings.Join(cfg.AllowMethods, ", "))
+	c.Response.Header.Set("Access-Control-Allow-Headers", strings.Join(cfg.AllowHeaders, ", "))
+	if len(cfg.ExposeHeaders) > 0 {
+		c.Response.Header.Set("Access-Control-Expose-Headers", strings.Join(cfg.ExposeHeaders, ", "))
+	}
+	if cfg.AllowCredentials {
+		c.Response.Header.Set("Access-Control-Allow-Credentials", "true")
+	}
+	if cfg.MaxAgeSeconds.Duration > 0 {
+		c.Response.Header.Set("Access-Control-Max-Age", strconv.Itoa(int(cfg.MaxAgeSeconds.Seconds())))
+	}
+}
+
+func allowedCORSOrigin(origin string, allowAll bool, origins map[string]bool) (string, bool) {
+	if allowAll {
+		return "*", true
+	}
+	if origins[origin] {
+		return origin, true
+	}
+	return "", false
+}
+
+func normalizeCORSConfig(cfg conf.CORSConfig) conf.CORSConfig {
+	if len(cfg.AllowOrigins) == 0 {
+		cfg.AllowOrigins = []string{"*"}
+	}
+	if len(cfg.AllowMethods) == 0 {
+		cfg.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	}
+	if len(cfg.AllowHeaders) == 0 {
+		cfg.AllowHeaders = []string{"Content-Type", "Authorization", "X-Authorization", "X-Request-ID"}
+	}
+	if cfg.MaxAgeSeconds.Duration == 0 {
+		cfg.MaxAgeSeconds = config.Duration{Duration: 600 * time.Second}
+	}
+	return cfg
+}
+
+func stringSet(values []string) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = true
+		}
+	}
+	return out
+}

@@ -1,0 +1,11 @@
+ncgo:
+    version: 0.1.0-dev
+    assets_version: 0.1.33
+mode: mono
+module: github.com/byx-darwin/ncgo-templates/admin-bff-hertz
+service:
+    name: admin-bff
+    kind: hertz
+    with_database: true
+    idl: idl/app/admin-bff.proto
+generated_at: 2026-08-19T12:30:32.311083Z

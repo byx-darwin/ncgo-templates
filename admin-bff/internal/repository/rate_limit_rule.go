@@ -1,0 +1,282 @@
+package repository
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	config "github.com/byx-darwin/go-tools/go-framework/config"
+
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/base/data"
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/db/gen"
+
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/base/conf"
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pkg/ratelimit"
+)
+
+// RateLimitRuleRecord is the repository-facing shape returned by database
+// queries before mapping into ratelimit's unified config structure.
+type RateLimitRuleRecord struct {
+	Enabled           bool
+	KeyBy             []string
+	Strategy          string
+	WindowSeconds     int
+	MaxRequests       int
+	RequestsPerSecond float64
+	Burst             int
+	ClientTTLSeconds  int
+}
+
+// RateLimitRuleFinder is the minimal query contract recommended for Hertz
+// monolith mode. appKey is optional and may be empty.
+type RateLimitRuleFinder interface {
+	FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error)
+}
+
+type normalizedRateLimitLookup struct {
+	Service string
+	Phase   string
+	Method  string
+	Path    string
+	AppKey  string
+}
+
+func normalizeRateLimitLookup(service, phase, method, path, appKey string) (normalizedRateLimitLookup, bool) {
+	lookup := normalizedRateLimitLookup{
+		Service: strings.TrimSpace(service),
+		Phase:   strings.ToLower(strings.TrimSpace(phase)),
+		Method:  strings.ToUpper(strings.TrimSpace(method)),
+		Path:    strings.TrimSpace(path),
+		AppKey:  strings.TrimSpace(appKey),
+	}
+	if lookup.Service == "" || lookup.Phase == "" || lookup.Method == "" || lookup.Path == "" {
+		return normalizedRateLimitLookup{}, false
+	}
+	return lookup, true
+}
+
+type rateLimitRuleQuerier interface {
+	GetRateLimitExactRuleByAppKey(ctx context.Context, arg *gen.GetRateLimitExactRuleByAppKeyParams) (*gen.GetRateLimitExactRuleByAppKeyRow, error)
+	GetRateLimitExactRuleFallback(ctx context.Context, arg *gen.GetRateLimitExactRuleFallbackParams) (*gen.GetRateLimitExactRuleFallbackRow, error)
+	GetRateLimitPatternRuleByAppKey(ctx context.Context, arg *gen.GetRateLimitPatternRuleByAppKeyParams) (*gen.GetRateLimitPatternRuleByAppKeyRow, error)
+	GetRateLimitPatternRuleFallback(ctx context.Context, arg *gen.GetRateLimitPatternRuleFallbackParams) (*gen.GetRateLimitPatternRuleFallbackRow, error)
+}
+
+// RateLimitRuleRepository is the generated sqlc-backed repository for
+// dynamic rate-limit rules.
+type RateLimitRuleRepository struct {
+	q rateLimitRuleQuerier
+}
+
+func NewRateLimitRuleRepository(d *data.Data) *RateLimitRuleRepository {
+	if d == nil || d.Queries == nil {
+		return &RateLimitRuleRepository{}
+	}
+	return &RateLimitRuleRepository{q: d.Queries}
+}
+
+func (r *RateLimitRuleRepository) FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error) {
+	if r == nil || r.q == nil {
+		return nil, nil
+	}
+	lookup, ok := normalizeRateLimitLookup(service, phase, method, path, appKey)
+	if !ok {
+		return nil, nil
+	}
+	if lookup.AppKey != "" {
+		record, err := r.findExactRuleByAppKey(ctx, lookup)
+		if err == nil {
+			return record, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	record, err := r.findExactRuleFallback(ctx, lookup)
+	if err == nil {
+		return record, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if lookup.AppKey != "" {
+		record, err = r.findPatternRuleByAppKey(ctx, lookup)
+		if err == nil {
+			return record, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+	}
+	record, err = r.findPatternRuleFallback(ctx, lookup)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return record, err
+}
+
+func (r *RateLimitRuleRepository) findExactRuleByAppKey(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {
+	row, err := r.q.GetRateLimitExactRuleByAppKey(ctx, &gen.GetRateLimitExactRuleByAppKeyParams{
+		Service: lookup.Service,
+		Phase:   lookup.Phase,
+		Method:  lookup.Method,
+		Path:    stringPtr(lookup.Path),
+		AppKey:  stringPtr(lookup.AppKey),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rateLimitRuleRecordFromExactAppKeyRow(row), nil
+}
+
+func (r *RateLimitRuleRepository) findExactRuleFallback(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {
+	row, err := r.q.GetRateLimitExactRuleFallback(ctx, &gen.GetRateLimitExactRuleFallbackParams{
+		Service: lookup.Service,
+		Phase:   lookup.Phase,
+		Method:  lookup.Method,
+		Path:    stringPtr(lookup.Path),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rateLimitRuleRecordFromExactFallbackRow(row), nil
+}
+
+func (r *RateLimitRuleRepository) findPatternRuleByAppKey(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {
+	row, err := r.q.GetRateLimitPatternRuleByAppKey(ctx, &gen.GetRateLimitPatternRuleByAppKeyParams{
+		Service:     lookup.Service,
+		Phase:       lookup.Phase,
+		Method:      lookup.Method,
+		PathPattern: stringPtr(lookup.Path),
+		AppKey:      stringPtr(lookup.AppKey),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rateLimitRuleRecordFromPatternAppKeyRow(row), nil
+}
+
+func (r *RateLimitRuleRepository) findPatternRuleFallback(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {
+	row, err := r.q.GetRateLimitPatternRuleFallback(ctx, &gen.GetRateLimitPatternRuleFallbackParams{
+		Service:     lookup.Service,
+		Phase:       lookup.Phase,
+		Method:      lookup.Method,
+		PathPattern: stringPtr(lookup.Path),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rateLimitRuleRecordFromPatternFallbackRow(row), nil
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func rateLimitRuleRecordFromExactAppKeyRow(row *gen.GetRateLimitExactRuleByAppKeyRow) *RateLimitRuleRecord {
+	return buildRateLimitRuleRecord(
+		row.Enabled,
+		row.KeyBy,
+		row.Strategy,
+		row.WindowSeconds,
+		row.MaxRequests,
+		row.RequestsPerSecond,
+		row.Burst,
+		row.ClientTtlSeconds,
+	)
+}
+
+func rateLimitRuleRecordFromExactFallbackRow(row *gen.GetRateLimitExactRuleFallbackRow) *RateLimitRuleRecord {
+	return buildRateLimitRuleRecord(
+		row.Enabled,
+		row.KeyBy,
+		row.Strategy,
+		row.WindowSeconds,
+		row.MaxRequests,
+		row.RequestsPerSecond,
+		row.Burst,
+		row.ClientTtlSeconds,
+	)
+}
+
+func rateLimitRuleRecordFromPatternAppKeyRow(row *gen.GetRateLimitPatternRuleByAppKeyRow) *RateLimitRuleRecord {
+	return buildRateLimitRuleRecord(
+		row.Enabled,
+		row.KeyBy,
+		row.Strategy,
+		row.WindowSeconds,
+		row.MaxRequests,
+		row.RequestsPerSecond,
+		row.Burst,
+		row.ClientTtlSeconds,
+	)
+}
+
+func rateLimitRuleRecordFromPatternFallbackRow(row *gen.GetRateLimitPatternRuleFallbackRow) *RateLimitRuleRecord {
+	return buildRateLimitRuleRecord(
+		row.Enabled,
+		row.KeyBy,
+		row.Strategy,
+		row.WindowSeconds,
+		row.MaxRequests,
+		row.RequestsPerSecond,
+		row.Burst,
+		row.ClientTtlSeconds,
+	)
+}
+
+// RateLimitRuleHook adapts a repository query into ratelimit.DatabaseHook.
+type RateLimitRuleHook struct {
+	finder RateLimitRuleFinder
+}
+
+func NewRateLimitRuleHook(finder RateLimitRuleFinder) *RateLimitRuleHook {
+	return &RateLimitRuleHook{finder: finder}
+}
+
+func (h *RateLimitRuleHook) ResolveRateLimitRule(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {
+	if h == nil || h.finder == nil {
+		return nil, false, nil
+	}
+	record, err := h.finder.FindRule(ctx, lookup.Service, lookup.Phase, lookup.Method, lookup.Path, lookup.AppKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if record == nil {
+		return nil, false, nil
+	}
+	return mapRateLimitRuleRecord(record), true, nil
+}
+
+func mapRateLimitRuleRecord(record *RateLimitRuleRecord) *conf.RateLimitRuleConfig {
+	if record == nil {
+		return nil
+	}
+	return &conf.RateLimitRuleConfig{
+		Enabled:           record.Enabled,
+		KeyBy:             append([]string(nil), record.KeyBy...),
+		Strategy:          record.Strategy,
+		WindowSeconds:     config.Duration{Duration: time.Duration(record.WindowSeconds) * time.Second},
+		MaxRequests:       record.MaxRequests,
+		RequestsPerSecond: record.RequestsPerSecond,
+		Burst:             record.Burst,
+		ClientTTLSeconds:  config.Duration{Duration: time.Duration(record.ClientTTLSeconds) * time.Second},
+	}
+}
+
+func buildRateLimitRuleRecord(enabled bool, keyBy []string, strategy string, windowSeconds, maxRequests int32, requestsPerSecond float64, burst, clientTTLSeconds int32) *RateLimitRuleRecord {
+	return &RateLimitRuleRecord{
+		Enabled:           enabled,
+		KeyBy:             append([]string(nil), keyBy...),
+		Strategy:          strategy,
+		WindowSeconds:     int(windowSeconds),
+		MaxRequests:       int(maxRequests),
+		RequestsPerSecond: requestsPerSecond,
+		Burst:             int(burst),
+		ClientTTLSeconds:  int(clientTTLSeconds),
+	}
+}

@@ -1,0 +1,69 @@
+package adminbffservicerepo
+
+import (
+    "context"
+
+    goerror "github.com/byx-darwin/go-tools/go-common/error"
+    frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+    "github.com/jackc/pgx/v5"
+    "github.com/jackc/pgx/v5/pgxpool"
+
+    "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/db/gen"
+)
+
+// Repo implements the usecase port interface using sqlc-generated queries.
+// See internal/usecase/adminbffservice/ for the interface definition.
+type Repo struct {
+    q    *gen.Queries
+    pool *pgxpool.Pool
+}
+
+// New creates a Repo backed by the given sqlc Queries and pgx pool.
+func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {
+    return &Repo{q: q, pool: pool}
+}
+
+// WithTx executes fn inside a database transaction.
+func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {
+    tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+    if err != nil {
+        return goerror.
+            In("adminbffservice.repository").
+            Tags("database", "postgres", "transaction").
+            Code(frameworkerror.CodeSystem).
+            Public("database transaction failed").
+            Wrapf(err, "begin transaction")
+    }
+    committed := false
+    defer func() {
+        if committed {
+            return
+        }
+        if p := recover(); p != nil {
+            _ = tx.Rollback(ctx)
+            panic(p)
+        }
+        if err != nil {
+            _ = tx.Rollback(ctx)
+        }
+    }()
+    txRepo := &Repo{q: r.q.WithTx(tx), pool: r.pool}
+    if ferr := fn(txRepo); ferr != nil {
+        return goerror.
+            In("adminbffservice.repository").
+            Tags("database", "postgres", "transaction").
+            Code(frameworkerror.CodeSystem).
+            Public("database transaction failed").
+            Wrapf(ferr, "transaction callback")
+    }
+    if cerr := tx.Commit(ctx); cerr != nil {
+        return goerror.
+            In("adminbffservice.repository").
+            Tags("database", "postgres", "transaction").
+            Code(frameworkerror.CodeSystem).
+            Public("database transaction failed").
+            Wrapf(cerr, "commit transaction")
+    }
+    committed = true
+    return nil
+}

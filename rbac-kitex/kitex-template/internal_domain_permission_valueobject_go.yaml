@@ -5,10 +5,11 @@ update_behavior:
 body: |
     package permission
 
-    // PermissionCode is a value object wrapping the unified permission code. The
-    // code is the single identifier shared by permissions.code, the Casbin obj,
-    // and menu/button perm_code.
-    type PermissionCode string
+    // Code is a value object wrapping the unified permission code.
+    type Code string
 
-    // Value returns the raw code string.
-    func (c PermissionCode) Value() string {{ "{" }} return string(c) {{ "}" }}
+    // String returns the raw code.
+    func (c Code) String() string {{ "{" }} return string(c) {{ "}" }}
+
+    // Empty reports whether the code is unset.
+    func (c Code) Empty() bool {{ "{" }} return c == "" {{ "}" }}

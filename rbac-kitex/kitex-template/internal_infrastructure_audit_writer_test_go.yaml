@@ -1,0 +1,25 @@
+# ncgo exported template — internal/infrastructure/audit/writer_test.go
+path: internal/infrastructure/audit/writer_test.go
+update_behavior:
+    type: cover
+body: |-
+    package audit
+
+    import "testing"
+
+    func TestMemoryWriter(t *testing.T) {
+    	ctx := t.Context()
+    	w := NewMemoryWriter()
+    	if err := w.Write(ctx, 7, "user.create", "user:1", `{"roles":["admin"]}`); err != nil {
+    		t.Fatalf("Write: %v", err)
+    	}
+    	entries := w.Entries()
+    	if len(entries) != 1 {
+    		t.Fatalf("len(entries) = %d, want 1", len(entries))
+    	}
+    	e := entries[0]
+    	if e.ActorUID != 7 || e.Action != "user.create" || e.Target != "user:1" {
+    		t.Fatalf("entry = %+v, want actor=7 action=user.create target=user:1", e)
+    	}
+    }
+

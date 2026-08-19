@@ -9,9 +9,8 @@ body: |
     import (
     	"context"
     	"errors"
+    	"fmt"
 
-    	goerror "github.com/byx-darwin/go-tools/go-common/error"
-    	frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
     	"github.com/jackc/pgx/v5"
     	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -19,107 +18,24 @@ body: |
     	"{{.Module}}/internal/domain/permission"
     )
 
-    // Repo implements permission.Repository on top of sqlc-generated queries.
+    // Repo implements permission.Repository using sqlc queries.
     type Repo struct {{ "{" }}
     	q    *gen.Queries
     	pool *pgxpool.Pool
     {{ "}" }}
 
-    // New creates a Repo backed by sqlc Queries and a pgx pool.
+    // New creates a permission repo backed by sqlc Queries and a pgx pool.
     func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
     	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
     {{ "}" }}
 
-    // GetByID returns a permission or permission.NotFoundError.
-    func (r *Repo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
-    	row, err := r.q.GetPermissionByID(ctx, id)
-    	if err != nil {{ "{" }}
-    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
-    			return nil, permission.NotFoundError{{ "{" }}ID: id{{ "}" }}
-    		{{ "}" }}
-    		return nil, err
-    	{{ "}" }}
-    	return mapPermission(row), nil
-    {{ "}" }}
-
-    // GetByCode returns a permission or permission.NotFoundError.
-    func (r *Repo) GetByCode(ctx context.Context, code string) (*permission.Permission, error) {{ "{" }}
-    	row, err := r.q.GetPermissionByCode(ctx, code)
-    	if err != nil {{ "{" }}
-    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
-    			return nil, permission.NotFoundError{{ "{" }}Code: code{{ "}" }}
-    		{{ "}" }}
-    		return nil, err
-    	{{ "}" }}
-    	return mapPermission(row), nil
-    {{ "}" }}
-
-    // ListByIDs returns the permissions matching the given ids.
-    func (r *Repo) ListByIDs(ctx context.Context, ids []int64) ([]*permission.Permission, error) {{ "{" }}
-    	rows, err := r.q.ListPermissionsByIDs(ctx, ids)
-    	if err != nil {{ "{" }}
-    		return nil, err
-    	{{ "}" }}
-    	return mapPermissions(rows), nil
-    {{ "}" }}
-
-    // List returns permissions with offset pagination.
-    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
-    	rows, err := r.q.ListPermissions(ctx, gen.ListPermissionsParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
-    	if err != nil {{ "{" }}
-    		return nil, err
-    	{{ "}" }}
-    	return mapPermissions(rows), nil
-    {{ "}" }}
-
-    // Count returns the total number of permissions.
-    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
-    	return r.q.CountPermissions(ctx)
-    {{ "}" }}
-
-    // ListByCodes returns the permissions matching the given unified codes.
-    func (r *Repo) ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error) {{ "{" }}
-    	rows, err := r.q.ListPermissionsByCodes(ctx, codes)
-    	if err != nil {{ "{" }}
-    		return nil, err
-    	{{ "}" }}
-    	return mapPermissions(rows), nil
-    {{ "}" }}
-
-    // Save creates a permission and assigns the generated ID. Permissions are
-    // immutable after creation (no update RPC); change is delete + re-create.
-    func (r *Repo) Save(ctx context.Context, p *permission.Permission) error {{ "{" }}
-    	row, err := r.q.CreatePermission(ctx, gen.CreatePermissionParams{{ "{" }}
-    		Code: p.Code, Name: p.Name, Kind: p.Kind, Method: p.Method,
-    	{{ "}" }})
-    	if err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	p.ID = row.ID
-    	return nil
-    {{ "}" }}
-
-    // Delete removes a permission. Menu perm_code references are set NULL via FK.
-    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
-    	return r.q.DeletePermission(ctx, id)
-    {{ "}" }}
-
-    // WithTx runs fn inside a database transaction, rolling back on error/panic.
+    // WithTx executes fn inside a database transaction.
     func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
     	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
-    		return goerror.
-    			In("permission.repository").
-    			Tags("database", "postgres", "transaction").
-    			Code(frameworkerror.CodeSystem).
-    			Public("database transaction failed").
-    			Wrapf(err, "begin transaction")
+    		return fmt.Errorf("permission repository begin transaction: %w", err)
     	{{ "}" }}
-    	committed := false
     	defer func() {{ "{" }}
-    		if committed {{ "{" }}
-    			return
-    		{{ "}" }}
     		if p := recover(); p != nil {{ "{" }}
     			_ = tx.Rollback(ctx)
     			panic(p)
@@ -129,42 +45,269 @@ body: |
     		{{ "}" }}
     	{{ "}" }}()
     	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
-    	if err := fn(txRepo); err != nil {{ "{" }}
-    		return goerror.
-    			In("permission.repository").
-    			Tags("database", "postgres", "transaction").
-    			Code(frameworkerror.CodeSystem).
-    			Public("database transaction failed").
-    			Wrapf(err, "transaction callback")
+    	if err = fn(txRepo); err != nil {{ "{" }}
+    		return err
     	{{ "}" }}
-    	if err := tx.Commit(ctx); err != nil {{ "{" }}
-    		return goerror.
-    			In("permission.repository").
-    			Tags("database", "postgres", "transaction").
-    			Code(frameworkerror.CodeSystem).
-    			Public("database transaction failed").
-    			Wrapf(err, "commit transaction")
+    	if err = tx.Commit(ctx); err != nil {{ "{" }}
+    		return fmt.Errorf("permission repository commit transaction: %w", err)
     	{{ "}" }}
-    	committed = true
     	return nil
     {{ "}" }}
 
-    var _ permission.Repository = (*Repo)(nil)
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    	row, err := r.q.GetPermissionByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, id)
+    	{{ "}" }}
+    	return toDomain(row), nil
+    {{ "}" }}
 
-    func mapPermissions(rows []gen.Permission) []*permission.Permission {{ "{" }}
+    func (r *Repo) GetByCode(ctx context.Context, code string) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.GetPermissionByCode(ctx, code)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
     	out := make([]*permission.Permission, 0, len(rows))
-    	for i := range rows {{ "{" }}
-    		out = append(out, mapPermission(rows[i]))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomain(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) GetByCodeAndType(ctx context.Context, code, typ string) (*permission.Permission, error) {{ "{" }}
+    	row, err := r.q.GetPermissionByCodeAndType(ctx, gen.GetPermissionByCodeAndTypeParams{{ "{" }}Code: code, Type: typ{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, code+":"+typ)
+    	{{ "}" }}
+    	return toDomain(row), nil
+    {{ "}" }}
+
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissions(ctx, gen.ListPermissionsParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainSlice(rows), nil
+    {{ "}" }}
+
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountPermissions(ctx)
+    {{ "}" }}
+
+    func (r *Repo) ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsFiltered(ctx, gen.ListPermissionsFilteredParams{{ "{" }}
+    		Column1: typ,
+    		Column2: parentID,
+    		Column3: status,
+    		Limit:   limit,
+    		Offset:  offset,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainSlice(rows), nil
+    {{ "}" }}
+
+    func (r *Repo) ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByCodes(ctx, codes)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainSlice(rows), nil
+    {{ "}" }}
+
+    func (r *Repo) ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByRoleIDs(ctx, roleIDs)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainSlice(rows), nil
+    {{ "}" }}
+
+    func (r *Repo) ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error) {{ "{" }}
+    	pid := parentID
+    	rows, err := r.q.ListChildPermissionIDs(ctx, &pid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for _, id := range rows {{ "{" }}
+    		p, err := r.q.GetPermissionByID(ctx, id)
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		out = append(out, toDomain(p))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
+    	if p == nil {{ "{" }}
+    		return nil, errors.New("permission repository: nil permission")
+    	{{ "}" }}
+    	var parentID *int64
+    	if p.ParentID != 0 {{ "{" }}
+    		parentID = &p.ParentID
+    	{{ "}" }}
+    	var path, icon, routeName, redirect, method, description *string
+    	if p.Path != "" {{ "{" }}
+    		path = &p.Path
+    	{{ "}" }}
+    	if p.Icon != "" {{ "{" }}
+    		icon = &p.Icon
+    	{{ "}" }}
+    	if p.RouteName != "" {{ "{" }}
+    		routeName = &p.RouteName
+    	{{ "}" }}
+    	if p.Redirect != "" {{ "{" }}
+    		redirect = &p.Redirect
+    	{{ "}" }}
+    	if p.Method != "" {{ "{" }}
+    		method = &p.Method
+    	{{ "}" }}
+    	if p.Description != "" {{ "{" }}
+    		description = &p.Description
+    	{{ "}" }}
+    	var sort *int32
+    	if p.Sort != 0 {{ "{" }}
+    		sort = &p.Sort
+    	{{ "}" }}
+    	row, err := r.q.CreatePermission(ctx, gen.CreatePermissionParams{{ "{" }}
+    		Code:        p.Code,
+    		Type:        p.Type,
+    		Name:        p.Name,
+    		ParentID:    parentID,
+    		Path:        path,
+    		Icon:        icon,
+    		RouteName:   routeName,
+    		Redirect:    redirect,
+    		KeepAlive:   p.KeepAlive,
+    		HideInMenu:  p.HideInMenu,
+    		IsExternal:  p.IsExternal,
+    		Method:      method,
+    		Sort:        sort,
+    		Status:      int32(p.Status),
+    		Description: description,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomain(row), nil
+    {{ "}" }}
+
+    func (r *Repo) Update(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
+    	if p == nil {{ "{" }}
+    		return nil, errors.New("permission repository: nil permission")
+    	{{ "}" }}
+    	var parentID *int64
+    	if p.ParentID != 0 {{ "{" }}
+    		parentID = &p.ParentID
+    	{{ "}" }}
+    	var path, icon, routeName, redirect, method, description *string
+    	if p.Path != "" {{ "{" }}
+    		path = &p.Path
+    	{{ "}" }}
+    	if p.Icon != "" {{ "{" }}
+    		icon = &p.Icon
+    	{{ "}" }}
+    	if p.RouteName != "" {{ "{" }}
+    		routeName = &p.RouteName
+    	{{ "}" }}
+    	if p.Redirect != "" {{ "{" }}
+    		redirect = &p.Redirect
+    	{{ "}" }}
+    	if p.Method != "" {{ "{" }}
+    		method = &p.Method
+    	{{ "}" }}
+    	if p.Description != "" {{ "{" }}
+    		description = &p.Description
+    	{{ "}" }}
+    	var sort *int32
+    	if p.Sort != 0 {{ "{" }}
+    		sort = &p.Sort
+    	{{ "}" }}
+    	row, err := r.q.UpdatePermission(ctx, gen.UpdatePermissionParams{{ "{" }}
+    		ID:          p.ID,
+    		Code:        p.Code,
+    		Type:        p.Type,
+    		Name:        p.Name,
+    		ParentID:    parentID,
+    		Path:        path,
+    		Icon:        icon,
+    		RouteName:   routeName,
+    		Redirect:    redirect,
+    		KeepAlive:   p.KeepAlive,
+    		HideInMenu:  p.HideInMenu,
+    		IsExternal:  p.IsExternal,
+    		Method:      method,
+    		Sort:        sort,
+    		Status:      int32(p.Status),
+    		Description: description,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomain(row), nil
+    {{ "}" }}
+
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeletePermission(ctx, id)
+    {{ "}" }}
+
+    func toDomain(row gen.Permission) *permission.Permission {{ "{" }}
+    	p := &permission.Permission{{ "{" }}
+    		ID:        row.ID,
+    		Code:      row.Code,
+    		Type:      row.Type,
+    		Name:      row.Name,
+    		KeepAlive: row.KeepAlive,
+    		HideInMenu: row.HideInMenu,
+    		IsExternal: row.IsExternal,
+    		Sort:      derefInt32(row.Sort),
+    		Status:    int(row.Status),
+    	{{ "}" }}
+    	if row.ParentID != nil {{ "{" }}
+    		p.ParentID = *row.ParentID
+    	{{ "}" }}
+    	if row.Path != nil {{ "{" }}
+    		p.Path = *row.Path
+    	{{ "}" }}
+    	if row.Icon != nil {{ "{" }}
+    		p.Icon = *row.Icon
+    	{{ "}" }}
+    	if row.RouteName != nil {{ "{" }}
+    		p.RouteName = *row.RouteName
+    	{{ "}" }}
+    	if row.Redirect != nil {{ "{" }}
+    		p.Redirect = *row.Redirect
+    	{{ "}" }}
+    	if row.Method != nil {{ "{" }}
+    		p.Method = *row.Method
+    	{{ "}" }}
+    	if row.Description != nil {{ "{" }}
+    		p.Description = *row.Description
+    	{{ "}" }}
+    	return p
+    {{ "}" }}
+
+    func toDomainSlice(rows []gen.Permission) []*permission.Permission {{ "{" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomain(row))
     	{{ "}" }}
     	return out
     {{ "}" }}
 
-    func mapPermission(row gen.Permission) *permission.Permission {{ "{" }}
-    	return &permission.Permission{{ "{" }}
-    		ID:     row.ID,
-    		Code:   row.Code,
-    		Name:   row.Name,
-    		Kind:   row.Kind,
-    		Method: row.Method,
+    func derefInt32(v *int32) int32 {{ "{" }}
+    	if v != nil {{ "{" }}
+    		return *v
     	{{ "}" }}
+    	return 0
+    {{ "}" }}
+
+    func mapErr(err error, key any) error {{ "{" }}
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return permission.NotFoundError{{ "{" }}Key: fmt.Sprint(key){{ "}" }}
+    	{{ "}" }}
+    	return err
     {{ "}" }}

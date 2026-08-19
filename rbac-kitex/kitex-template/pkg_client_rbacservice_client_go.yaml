@@ -48,7 +48,7 @@ body: |
 
     func DefaultConfig() Config {{ "{" }}
     	return Config{{ "{" }}
-    		ServiceName:                "RBACService",
+    		ServiceName:                "rbacservice",
     		RPCTimeoutSeconds:          3,
     		ConnectTimeoutMilliseconds: 100,
     		EnableMetaInfo:             true,

@@ -1,8 +1,9 @@
-# ncgo exported template — internal/db/schema/000001_rbac.sql
-path: internal/db/schema/000001_rbac.sql
+# ncgo exported template — internal/db/migrations/000001_init.sql
+path: internal/db/migrations/000001_init.sql
 update_behavior:
     type: cover
 body: |-
+    -- +goose Up
     CREATE TABLE users (
         id BIGSERIAL PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
@@ -85,4 +86,13 @@ body: |-
     );
 
     CREATE INDEX idx_casbin_rule_policy ON casbin_rule(ptype, v0, v1, v2);
+
+    -- +goose Down
+    DROP TABLE IF EXISTS audit_log;
+    DROP TABLE IF EXISTS casbin_rule;
+    DROP TABLE IF EXISTS role_permissions;
+    DROP TABLE IF EXISTS user_roles;
+    DROP TABLE IF EXISTS permissions;
+    DROP TABLE IF EXISTS roles;
+    DROP TABLE IF EXISTS users;
 

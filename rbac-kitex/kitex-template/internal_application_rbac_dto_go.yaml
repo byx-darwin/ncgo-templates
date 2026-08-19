@@ -5,14 +5,14 @@ update_behavior:
 body: |
     package rbacsvc
 
-    // EnforceInput carries an authorization request.
+    // EnforceInput is the command to check a permission.
     type EnforceInput struct {{ "{" }}
-    	UID int64
+    	Uid int64
     	Obj string
     	Act string
     {{ "}" }}
 
-    // EnforceOutput carries the authorization result.
-    type EnforceOutput struct {{ "{" }}
+    // EnforceResult carries the authorization decision.
+    type EnforceResult struct {{ "{" }}
     	Allowed bool
     {{ "}" }}

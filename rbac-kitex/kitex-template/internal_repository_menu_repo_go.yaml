@@ -8,179 +8,59 @@ body: |
 
     import (
     	"context"
-    	"errors"
+    	"fmt"
 
-    	goerror "github.com/byx-darwin/go-tools/go-common/error"
-    	frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
-    	"github.com/jackc/pgx/v5"
     	"github.com/jackc/pgx/v5/pgxpool"
 
     	"{{.Module}}/internal/db/gen"
     	"{{.Module}}/internal/domain/menu"
     )
 
-    // Repo implements menu.Repository on top of sqlc-generated queries.
+    // Repo implements menu.Repository (read-only) using sqlc queries.
     type Repo struct {{ "{" }}
     	q    *gen.Queries
     	pool *pgxpool.Pool
     {{ "}" }}
 
-    // New creates a Repo backed by sqlc Queries and a pgx pool.
+    // New creates a menu repo backed by sqlc Queries and a pgx pool.
     func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
     	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
     {{ "}" }}
 
-    // GetByID returns a menu or menu.NotFoundError.
-    func (r *Repo) GetByID(ctx context.Context, id int64) (*menu.Menu, error) {{ "{" }}
-    	row, err := r.q.GetMenuByID(ctx, id)
-    	if err != nil {{ "{" }}
-    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
-    			return nil, menu.NotFoundError{{ "{" }}ID: id{{ "}" }}
-    		{{ "}" }}
-    		return nil, err
-    	{{ "}" }}
-    	return mapMenu(row), nil
-    {{ "}" }}
-
-    // List returns all menus ordered by sort_order, id.
-    func (r *Repo) List(ctx context.Context) ([]*menu.Menu, error) {{ "{" }}
-    	rows, err := r.q.ListMenus(ctx)
+    func (r *Repo) ListMenusAsTree(ctx context.Context) ([]*menu.Menu, error) {{ "{" }}
+    	rows, err := r.q.ListMenusAsTree(ctx)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
     	out := make([]*menu.Menu, 0, len(rows))
-    	for i := range rows {{ "{" }}
-    		out = append(out, mapMenu(rows[i]))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toMenuFromTreeRow(row))
     	{{ "}" }}
     	return out, nil
     {{ "}" }}
 
-    // ListByPermCodes returns menus whose perm_code is in the given codes.
-    func (r *Repo) ListByPermCodes(ctx context.Context, codes []string) ([]*menu.Menu, error) {{ "{" }}
-    	rows, err := r.q.ListMenusByPermCodes(ctx, codes)
+    func (r *Repo) ListMenusByParentID(ctx context.Context, parentID int64) ([]*menu.Menu, error) {{ "{" }}
+    	pid := parentID
+    	rows, err := r.q.ListMenusByParentID(ctx, &pid)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
     	out := make([]*menu.Menu, 0, len(rows))
-    	for i := range rows {{ "{" }}
-    		out = append(out, mapMenu(rows[i]))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toMenuFromParentRow(row))
     	{{ "}" }}
     	return out, nil
     {{ "}" }}
 
-    // Save creates or updates a menu. New menus are assigned an ID.
-    func (r *Repo) Save(ctx context.Context, m *menu.Menu) error {{ "{" }}
-    	args := menuArgs(m)
-    	if m.ID == 0 {{ "{" }}
-    		row, err := r.q.CreateMenu(ctx, gen.CreateMenuParams{{ "{" }}
-    			ParentID:  args.ParentID,
-    			Type:      args.Type,
-    			Name:      args.Name,
-    			Path:      args.Path,
-    			Component: args.Component,
-    			PermCode:  args.PermCode,
-    			SortOrder: args.SortOrder,
-    		{{ "}" }})
-    		if err != nil {{ "{" }}
-    			return err
-    		{{ "}" }}
-    		m.ID = row.ID
-    		return nil
-    	{{ "}" }}
-    	args.ID = m.ID
-    	_, err := r.q.UpdateMenu(ctx, args)
-    	return err
-    {{ "}" }}
-
-    // Delete removes a menu (children cascade via parent_id FK).
-    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
-    	return r.q.DeleteMenu(ctx, id)
-    {{ "}" }}
-
-    // WithTx runs fn inside a database transaction, rolling back on error/panic.
-    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
-    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
-    	if err != nil {{ "{" }}
-    		return goerror.
-    			In("menu.repository").
-    			Tags("database", "postgres", "transaction").
-    			Code(frameworkerror.CodeSystem).
-    			Public("database transaction failed").
-    			Wrapf(err, "begin transaction")
-    	{{ "}" }}
-    	committed := false
-    	defer func() {{ "{" }}
-    		if committed {{ "{" }}
-    			return
-    		{{ "}" }}
-    		if p := recover(); p != nil {{ "{" }}
-    			_ = tx.Rollback(ctx)
-    			panic(p)
-    		{{ "}" }}
-    		if err != nil {{ "{" }}
-    			_ = tx.Rollback(ctx)
-    		{{ "}" }}
-    	{{ "}" }}()
-    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
-    	if err := fn(txRepo); err != nil {{ "{" }}
-    		return goerror.
-    			In("menu.repository").
-    			Tags("database", "postgres", "transaction").
-    			Code(frameworkerror.CodeSystem).
-    			Public("database transaction failed").
-    			Wrapf(err, "transaction callback")
-    	{{ "}" }}
-    	if err := tx.Commit(ctx); err != nil {{ "{" }}
-    		return goerror.
-    			In("menu.repository").
-    			Tags("database", "postgres", "transaction").
-    			Code(frameworkerror.CodeSystem).
-    			Public("database transaction failed").
-    			Wrapf(err, "commit transaction")
-    	{{ "}" }}
-    	committed = true
-    	return nil
-    {{ "}" }}
-
-    var _ menu.Repository = (*Repo)(nil)
-
-    // menuArgs converts a domain menu into the shared sqlc params. Zero/empty
-    // values map to NULL for nullable columns (parent_id, path, component,
-    // perm_code).
-    func menuArgs(m *menu.Menu) gen.UpdateMenuParams {{ "{" }}
-    	var parentID *int64
-    	if m.ParentID != 0 {{ "{" }}
-    		parentID = &m.ParentID
-    	{{ "}" }}
-    	var path *string
-    	if m.Path != "" {{ "{" }}
-    		path = &m.Path
-    	{{ "}" }}
-    	var component *string
-    	if m.Component != "" {{ "{" }}
-    		component = &m.Component
-    	{{ "}" }}
-    	var permCode *string
-    	if m.PermCode != "" {{ "{" }}
-    		permCode = &m.PermCode
-    	{{ "}" }}
-    	return gen.UpdateMenuParams{{ "{" }}
-    		ParentID:  parentID,
-    		Type:      m.Type,
-    		Name:      m.Name,
-    		Path:      path,
-    		Component: component,
-    		PermCode:  permCode,
-    		SortOrder: m.SortOrder,
-    	{{ "}" }}
-    {{ "}" }}
-
-    func mapMenu(row gen.Menu) *menu.Menu {{ "{" }}
+    func toMenuFromTreeRow(row gen.ListMenusAsTreeRow) *menu.Menu {{ "{" }}
     	m := &menu.Menu{{ "{" }}
-    		ID:        row.ID,
-    		Type:      row.Type,
-    		Name:      row.Name,
-    		SortOrder: row.SortOrder,
+    		ID:         row.ID,
+    		Code:       row.Code,
+    		Name:       row.Name,
+    		Type:       row.Type,
+    		KeepAlive:  row.KeepAlive,
+    		HideInMenu: row.HideInMenu,
+    		IsExternal: row.IsExternal,
     	{{ "}" }}
     	if row.ParentID != nil {{ "{" }}
     		m.ParentID = *row.ParentID
@@ -188,11 +68,52 @@ body: |
     	if row.Path != nil {{ "{" }}
     		m.Path = *row.Path
     	{{ "}" }}
-    	if row.Component != nil {{ "{" }}
-    		m.Component = *row.Component
+    	if row.Icon != nil {{ "{" }}
+    		m.Icon = *row.Icon
     	{{ "}" }}
-    	if row.PermCode != nil {{ "{" }}
-    		m.PermCode = *row.PermCode
+    	if row.RouteName != nil {{ "{" }}
+    		m.RouteName = *row.RouteName
+    	{{ "}" }}
+    	if row.Redirect != nil {{ "{" }}
+    		m.Redirect = *row.Redirect
+    	{{ "}" }}
+    	if row.Sort != nil {{ "{" }}
+    		m.Sort = *row.Sort
     	{{ "}" }}
     	return m
+    {{ "}" }}
+
+    func toMenuFromParentRow(row gen.ListMenusByParentIDRow) *menu.Menu {{ "{" }}
+    	m := &menu.Menu{{ "{" }}
+    		ID:         row.ID,
+    		Code:       row.Code,
+    		Name:       row.Name,
+    		Type:       row.Type,
+    		KeepAlive:  row.KeepAlive,
+    		HideInMenu: row.HideInMenu,
+    		IsExternal: row.IsExternal,
+    	{{ "}" }}
+    	if row.ParentID != nil {{ "{" }}
+    		m.ParentID = *row.ParentID
+    	{{ "}" }}
+    	if row.Path != nil {{ "{" }}
+    		m.Path = *row.Path
+    	{{ "}" }}
+    	if row.Icon != nil {{ "{" }}
+    		m.Icon = *row.Icon
+    	{{ "}" }}
+    	if row.RouteName != nil {{ "{" }}
+    		m.RouteName = *row.RouteName
+    	{{ "}" }}
+    	if row.Redirect != nil {{ "{" }}
+    		m.Redirect = *row.Redirect
+    	{{ "}" }}
+    	if row.Sort != nil {{ "{" }}
+    		m.Sort = *row.Sort
+    	{{ "}" }}
+    	return m
+    {{ "}" }}
+
+    func mapErr(err error, key any) error {{ "{" }}
+    	return fmt.Errorf("menu repo: %v (key=%v)", err, key)
     {{ "}" }}

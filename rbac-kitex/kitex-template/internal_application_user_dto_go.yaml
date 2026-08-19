@@ -5,29 +5,31 @@ update_behavior:
 body: |
     package usersvc
 
-    // CreateUserInput carries a user creation request.
+    import "{{.Module}}/internal/domain/user"
+
+    // CreateUserInput is the command to create a user.
     type CreateUserInput struct {{ "{" }}
     	Username string
     	Password string
+    	Nickname string
+    	Avatar   string
+    	Email    string
+    	Phone    string
     {{ "}" }}
 
-    // UpdateUserInput carries a partial user update (password and/or status).
+    // UpdateUserInput is the command to update a user (all fields optional).
     type UpdateUserInput struct {{ "{" }}
     	ID       int64
     	Password *string
-    	Status   *string
+    	Status   *int
+    	Nickname *string
+    	Avatar   *string
+    	Email    *string
+    	Phone    *string
     {{ "}" }}
 
-    // ListUsersOutput carries a page of users plus the total count.
-    type ListUsersOutput struct {{ "{" }}
-    	Users []*UserRow
-    	Total int64
-    {{ "}" }}
-
-    // UserRow is a user plus its role codes.
-    type UserRow struct {{ "{" }}
-    	ID       int64
-    	Username string
-    	Status   string
-    	Roles    []string
+    // ListUsersResult is a page of users plus the total count.
+    type ListUsersResult struct {{ "{" }}
+    	Users []*user.User
+    	Total int32
     {{ "}" }}

@@ -5,25 +5,58 @@ update_behavior:
 body: |
     package permsvc
 
-    // CreatePermissionInput carries a permission creation request.
+    import "{{.Module}}/internal/domain/permission"
+
+    // CreatePermissionInput is the command to create a permission.
     type CreatePermissionInput struct {{ "{" }}
-    	Code   string
-    	Name   string
-    	Kind   string
-    	Method string
+    	Code        string
+    	Type        string
+    	Name        string
+    	ParentID    int64
+    	Path        string
+    	Icon        string
+    	RouteName   string
+    	Redirect    string
+    	KeepAlive   *bool
+    	HideInMenu  *bool
+    	IsExternal  *bool
+    	Method      string
+    	Sort        int32
+    	Status      int
+    	Description string
     {{ "}" }}
 
-    // ListPermissionsOutput carries a page of permissions plus the total count.
-    type ListPermissionsOutput struct {{ "{" }}
-    	Permissions []*PermissionRow
-    	Total       int64
+    // UpdatePermissionInput is the command to update a permission (all fields optional).
+    type UpdatePermissionInput struct {{ "{" }}
+    	ID          int64
+    	Code        *string
+    	Type        *string
+    	Name        *string
+    	ParentID    *int64
+    	Path        *string
+    	Icon        *string
+    	RouteName   *string
+    	Redirect    *string
+    	KeepAlive   *bool
+    	HideInMenu  *bool
+    	IsExternal  *bool
+    	Method      *string
+    	Sort        *int32
+    	Status      *int
+    	Description *string
     {{ "}" }}
 
-    // PermissionRow is a permission.
-    type PermissionRow struct {{ "{" }}
-    	ID     int64
-    	Code   string
-    	Name   string
-    	Kind   string
-    	Method string
+    // ListPermissionsFilter is the filter for listing permissions.
+    type ListPermissionsFilter struct {{ "{" }}
+    	Type     string
+    	ParentID int64
+    	Status   int
+    	Page     int32
+    	PageSize int32
+    {{ "}" }}
+
+    // ListPermissionsResult is a page of permissions plus the total count.
+    type ListPermissionsResult struct {{ "{" }}
+    	Permissions []*permission.Permission
+    	Total       int32
     {{ "}" }}

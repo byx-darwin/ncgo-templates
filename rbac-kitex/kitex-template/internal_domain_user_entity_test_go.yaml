@@ -5,58 +5,60 @@ update_behavior:
 body: |
     package user
 
-    import "testing"
+    import (
+    	"strings"
+    	"testing"
+    )
 
     func TestNewRejectsShortUsername(t *testing.T) {{ "{" }}
-    	for _, name := range []string{{ "{" }}"", "ab"{{ "}" }} {{ "{" }}
-    		if _, err := New(name, "hash"); err == nil {{ "{" }}
-    			t.Fatalf("New(%q) expected error", name)
+    	cases := []string{{ "{" }}"", "  ", "ab"{{ "}" }}
+    	for _, name := range cases {{ "{" }}
+    		u, err := New(name, "hash")
+    		if err == nil {{ "{" }}
+    			t.Fatalf("New(%q) = %+v, want error", name, u)
     		{{ "}" }}
+    		var ve ValidationError
+    		if !strings.Contains(err.Error(), "username") {{ "{" }}
+    			t.Fatalf("New(%q) error %v, want username validation error", name, err)
+    		{{ "}" }}
+    		_ = ve
     	{{ "}" }}
     {{ "}" }}
 
     func TestNewAcceptsValidUsername(t *testing.T) {{ "{" }}
     	u, err := New("alice", "hash")
     	if err != nil {{ "{" }}
-    		t.Fatalf("New() unexpected error: %v", err)
+    		t.Fatalf("New: %v", err)
     	{{ "}" }}
     	if u.Username != "alice" {{ "{" }}
     		t.Fatalf("Username = %q, want alice", u.Username)
     	{{ "}" }}
-    	if u.PasswordHash != "hash" {{ "{" }}
-    		t.Fatalf("PasswordHash = %q, want hash", u.PasswordHash)
-    	{{ "}" }}
-    	if u.Status != StatusActive {{ "{" }}
-    		t.Fatalf("Status = %q, want %q", u.Status, StatusActive)
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestNewRejectsEmptyPasswordHash(t *testing.T) {{ "{" }}
-    	if _, err := New("alice", ""); err == nil {{ "{" }}
-    		t.Fatal("New with empty password hash expected error")
+    	if u.Status != StatusEnabled {{ "{" }}
+    		t.Fatalf("Status = %d, want %d", u.Status, StatusEnabled)
     	{{ "}" }}
     {{ "}" }}
 
     func TestSetStatusValidatesEnum(t *testing.T) {{ "{" }}
     	u, err := New("alice", "hash")
     	if err != nil {{ "{" }}
-    		t.Fatalf("New() unexpected error: %v", err)
+    		t.Fatalf("New: %v", err)
     	{{ "}" }}
     	if err := u.SetStatus(StatusDisabled); err != nil {{ "{" }}
-    		t.Fatalf("SetStatus(disabled) unexpected error: %v", err)
+    		t.Fatalf("SetStatus(0): %v", err)
     	{{ "}" }}
-    	if err := u.SetStatus("bogus"); err == nil {{ "{" }}
-    		t.Fatal("SetStatus(bogus) expected error")
+    	if u.Status != StatusDisabled {{ "{" }}
+    		t.Fatalf("Status = %d, want %d", u.Status, StatusDisabled)
+    	{{ "}" }}
+    	if err := u.SetStatus(99); err == nil {{ "{" }}
+    		t.Fatal("SetStatus(99): want error")
     	{{ "}" }}
     {{ "}" }}
 
-    func TestSetPasswordHash(t *testing.T) {{ "{" }}
-    	u, err := New("alice", "old")
-    	if err != nil {{ "{" }}
-    		t.Fatalf("New() unexpected error: %v", err)
+    func TestStatusConstants(t *testing.T) {{ "{" }}
+    	if StatusEnabled != 1 {{ "{" }}
+    		t.Fatalf("StatusEnabled = %d, want 1", StatusEnabled)
     	{{ "}" }}
-    	u.SetPasswordHash("new")
-    	if u.PasswordHash != "new" {{ "{" }}
-    		t.Fatalf("PasswordHash = %q, want new", u.PasswordHash)
+    	if StatusDisabled != 0 {{ "{" }}
+    		t.Fatalf("StatusDisabled = %d, want 0", StatusDisabled)
     	{{ "}" }}
     {{ "}" }}

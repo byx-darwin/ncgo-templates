@@ -1,108 +1,165 @@
-# rbac-kitex template — internal/db/query/rbac.sql
+# ncgo exported template — internal/db/query/rbac.sql
 path: internal/db/query/rbac.sql
 update_behavior:
-  type: cover
+    type: cover
 body: |-
-  -- name: CreateUser :one
-  INSERT INTO users (username, password_hash, status) VALUES ($1, $2, $3) RETURNING *;
-  -- name: GetUserByID :one
-  SELECT * FROM users WHERE id = $1;
-  -- name: GetUserByUsername :one
-  SELECT * FROM users WHERE username = $1;
-  -- name: ListUsers :many
-  SELECT * FROM users ORDER BY id LIMIT $1 OFFSET $2;
-  -- name: CountUsers :one
-  SELECT count(*) FROM users;
-  -- name: UpdateUser :one
-  UPDATE users SET username = $1, status = $2, updated_at = now() WHERE id = $3 RETURNING *;
-  -- name: UpdateUserPassword :one
-  UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING *;
-  -- name: DeleteUser :exec
-  DELETE FROM users WHERE id = $1;
-  -- name: AddUserRole :exec
-  INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
-  -- name: RemoveUserRole :exec
-  DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2;
-  -- name: ClearUserRoles :exec
-  DELETE FROM user_roles WHERE user_id = $1;
-  -- name: ListRolesByUserID :many
-  SELECT r.* FROM roles r JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = $1 ORDER BY r.id;
-  -- name: ListRoleIDsByUserID :many
-  SELECT role_id FROM user_roles WHERE user_id = $1;
+    -- name: CreateUser :one
+    INSERT INTO users (username, password_hash, nickname, avatar, email, phone, status)
+    VALUES ($1, $2, $3, $4, $5, $6, 1) RETURNING *;
+    -- name: GetUserByID :one
+    SELECT * FROM users WHERE id = $1;
+    -- name: GetUserByUsername :one
+    SELECT * FROM users WHERE username = $1;
+    -- name: ListUsers :many
+    SELECT * FROM users ORDER BY id LIMIT $1 OFFSET $2;
+    -- name: CountUsers :one
+    SELECT count(*) FROM users;
+    -- name: UpdateUser :one
+    UPDATE users SET
+        username = COALESCE($2, username),
+        nickname = COALESCE($3, nickname),
+        avatar = COALESCE($4, avatar),
+        email = COALESCE($5, email),
+        phone = COALESCE($6, phone),
+        status = COALESCE($7, status),
+        updated_at = now()
+    WHERE id = $1 RETURNING *;
+    -- name: UpdateUserPassword :one
+    UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2 RETURNING *;
+    -- name: DeleteUser :exec
+    DELETE FROM users WHERE id = $1;
+    -- name: AddUserRole :exec
+    INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+    -- name: RemoveUserRole :exec
+    DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2;
+    -- name: ClearUserRoles :exec
+    DELETE FROM user_roles WHERE user_id = $1;
+    -- name: ListRolesByUserID :many
+    SELECT r.* FROM roles r JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = $1 ORDER BY r.id;
+    -- name: ListRoleIDsByUserID :many
+    SELECT role_id FROM user_roles WHERE user_id = $1;
 
-  -- name: CreateRole :one
-  INSERT INTO roles (code, name) VALUES ($1, $2) RETURNING *;
-  -- name: GetRoleByID :one
-  SELECT * FROM roles WHERE id = $1;
-  -- name: GetRoleByCode :one
-  SELECT * FROM roles WHERE code = $1;
-  -- name: ListRoles :many
-  SELECT * FROM roles ORDER BY id LIMIT $1 OFFSET $2;
-  -- name: CountRoles :one
-  SELECT count(*) FROM roles;
-  -- name: UpdateRole :one
-  UPDATE roles SET name = $1 WHERE id = $2 RETURNING *;
-  -- name: DeleteRole :exec
-  DELETE FROM roles WHERE id = $1;
-  -- name: AddRolePermission :exec
-  INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
-  -- name: RemoveRolePermission :exec
-  DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2;
-  -- name: ClearRolePermissions :exec
-  DELETE FROM role_permissions WHERE role_id = $1;
-  -- name: ListPermissionIDsByRoleID :many
-  SELECT permission_id FROM role_permissions WHERE role_id = $1;
-  -- name: ListPermissionsByRoleIDs :many
-  SELECT DISTINCT p.* FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ANY($1::bigint[]) ORDER BY p.id;
+    -- name: CreateRole :one
+    INSERT INTO roles (code, name, status, remark) VALUES ($1, $2, 1, $3) RETURNING *;
+    -- name: GetRoleByID :one
+    SELECT * FROM roles WHERE id = $1;
+    -- name: GetRoleByCode :one
+    SELECT * FROM roles WHERE code = $1;
+    -- name: ListRoles :many
+    SELECT * FROM roles ORDER BY id LIMIT $1 OFFSET $2;
+    -- name: CountRoles :one
+    SELECT count(*) FROM roles;
+    -- name: UpdateRole :one
+    UPDATE roles SET
+        name = COALESCE($2, name),
+        status = COALESCE($3, status),
+        remark = COALESCE($4, remark),
+        updated_at = now()
+    WHERE id = $1 RETURNING *;
+    -- name: DeleteRole :exec
+    DELETE FROM roles WHERE id = $1;
+    -- name: AddRolePermission :exec
+    INSERT INTO role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
+    -- name: RemoveRolePermission :exec
+    DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2;
+    -- name: ClearRolePermissions :exec
+    DELETE FROM role_permissions WHERE role_id = $1;
+    -- name: ListPermissionCodesByRoleID :many
+    SELECT p.code FROM permissions p
+    JOIN role_permissions rp ON rp.permission_id = p.id
+    WHERE rp.role_id = $1
+    ORDER BY p.code;
+    -- name: ListPermissionIDsByCodes :many
+    SELECT id, code FROM permissions WHERE code = ANY($1::text[]);
+    -- name: ListPermissionsByRoleIDs :many
+    SELECT DISTINCT p.* FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ANY($1::bigint[]) ORDER BY p.id;
 
-  -- name: CreatePermission :one
-  INSERT INTO permissions (code, name, kind, method) VALUES ($1, $2, $3, $4) RETURNING *;
-  -- name: GetPermissionByID :one
-  SELECT * FROM permissions WHERE id = $1;
-  -- name: GetPermissionByCode :one
-  SELECT * FROM permissions WHERE code = $1;
-  -- name: ListPermissions :many
-  SELECT * FROM permissions ORDER BY id LIMIT $1 OFFSET $2;
-  -- name: CountPermissions :one
-  SELECT count(*) FROM permissions;
-  -- name: ListPermissionsByCodes :many
-  SELECT * FROM permissions WHERE code = ANY($1::text[]) ORDER BY id;
-  -- name: ListPermissionsByIDs :many
-  SELECT * FROM permissions WHERE id = ANY($1::bigint[]) ORDER BY id;
-  -- name: DeletePermission :exec
-  DELETE FROM permissions WHERE id = $1;
+    -- Permission queries (revised for single tree)
 
-  -- name: CreateMenu :one
-  INSERT INTO menus (parent_id, type, name, path, component, perm_code, sort_order) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;
-  -- name: GetMenuByID :one
-  SELECT * FROM menus WHERE id = $1;
-  -- name: ListMenus :many
-  SELECT * FROM menus ORDER BY sort_order, id;
-  -- name: UpdateMenu :one
-  UPDATE menus SET parent_id = $1, type = $2, name = $3, path = $4, component = $5, perm_code = $6, sort_order = $7 WHERE id = $8 RETURNING *;
-  -- name: DeleteMenu :exec
-  DELETE FROM menus WHERE id = $1;
-  -- name: ListMenusByPermCodes :many
-  SELECT * FROM menus WHERE perm_code = ANY($1::text[]) ORDER BY sort_order, id;
+    -- name: CreatePermission :one
+    INSERT INTO permissions (code, type, name, parent_id, path, icon, route_name, redirect, keep_alive, hide_in_menu, is_external, method, sort, status, description)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING *;
 
-  -- name: ListCasbinRules :many
-  SELECT ptype, v0, v1, v2, v3, v4, v5 FROM casbin_rule ORDER BY id;
-  -- name: InsertCasbinRule :one
-  INSERT INTO casbin_rule (ptype, v0, v1, v2, v3, v4, v5) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (ptype, v0, v1, v2, v3, v4, v5) DO NOTHING RETURNING id;
-  -- name: DeleteCasbinRule :exec
-  DELETE FROM casbin_rule WHERE ptype = $1 AND v0 = $2 AND v1 = $3 AND v2 = $4 AND v3 = $5 AND v4 = $6 AND v5 = $7;
-  -- name: DeleteCasbinRuleFiltered :exec
-  DELETE FROM casbin_rule
-  WHERE (sqlc.arg(ptype)::text = '' OR ptype = sqlc.arg(ptype)::text)
-    AND v0 = COALESCE(NULLIF(sqlc.arg(v0)::text,''), v0)
-    AND v1 = COALESCE(NULLIF(sqlc.arg(v1)::text,''), v1)
-    AND v2 = COALESCE(NULLIF(sqlc.arg(v2)::text,''), v2)
-    AND v3 = COALESCE(NULLIF(sqlc.arg(v3)::text,''), v3)
-    AND v4 = COALESCE(NULLIF(sqlc.arg(v4)::text,''), v4)
-    AND v5 = COALESCE(NULLIF(sqlc.arg(v5)::text,''), v5);
-  -- name: CountCasbinRules :one
-  SELECT count(*) FROM casbin_rule;
+    -- name: GetPermissionByID :one
+    SELECT * FROM permissions WHERE id = $1;
 
-  -- name: InsertAuditLog :one
-  INSERT INTO audit_log (actor_uid, action, target, detail_json) VALUES ($1, $2, $3, $4) RETURNING id;
+    -- name: GetPermissionByCode :many
+    SELECT * FROM permissions WHERE code = $1 ORDER BY type;
+
+    -- name: GetPermissionByCodeAndType :one
+    SELECT * FROM permissions WHERE code = $1 AND type = $2;
+
+    -- name: ListPermissions :many
+    SELECT * FROM permissions ORDER BY sort NULLS LAST, id LIMIT $1 OFFSET $2;
+    -- name: CountPermissions :one
+    SELECT count(*) FROM permissions;
+
+    -- name: ListPermissionsFiltered :many
+    SELECT * FROM permissions
+    WHERE ($1 = '' OR type = $1)
+      AND ($2 < 0 OR parent_id = $2)
+      AND ($3 < 0 OR status = $3)
+    ORDER BY sort NULLS LAST, id
+    LIMIT $4 OFFSET $5;
+
+    -- name: ListPermissionsByCodes :many
+    SELECT * FROM permissions WHERE code = ANY($1::text[]) ORDER BY code, type;
+
+    -- name: UpdatePermission :one
+    UPDATE permissions SET
+        code = COALESCE($2, code),
+        type = COALESCE($3, type),
+        name = COALESCE($4, name),
+        parent_id = COALESCE($5, parent_id),
+        path = COALESCE($6, path),
+        icon = COALESCE($7, icon),
+        route_name = COALESCE($8, route_name),
+        redirect = COALESCE($9, redirect),
+        keep_alive = COALESCE($10, keep_alive),
+        hide_in_menu = COALESCE($11, hide_in_menu),
+        is_external = COALESCE($12, is_external),
+        method = COALESCE($13, method),
+        sort = COALESCE($14, sort),
+        status = COALESCE($15, status),
+        description = COALESCE($16, description),
+        updated_at = now()
+    WHERE id = $1 RETURNING *;
+
+    -- name: DeletePermission :exec
+    DELETE FROM permissions WHERE id = $1;
+
+    -- name: ListChildPermissionIDs :many
+    SELECT id FROM permissions WHERE parent_id = $1;
+
+    -- Menu read-only queries (view over permissions WHERE type IN ('catalog','menu'))
+
+    -- name: ListMenusAsTree :many
+    SELECT id, code, name, parent_id, type, path, icon, route_name, redirect, keep_alive, hide_in_menu, is_external, sort
+    FROM permissions
+    WHERE type IN ('catalog', 'menu') AND status = 1
+    ORDER BY sort NULLS LAST, id;
+
+    -- name: ListMenusByParentID :many
+    SELECT id, code, name, parent_id, type, path, icon, route_name, redirect, keep_alive, hide_in_menu, is_external, sort
+    FROM permissions
+    WHERE type IN ('catalog', 'menu') AND status = 1 AND parent_id = $1
+    ORDER BY sort NULLS LAST, id;
+
+    -- name: ListCasbinRules :many
+    SELECT ptype, v0, v1, v2, v3, v4, v5 FROM casbin_rule ORDER BY id;
+    -- name: InsertCasbinRule :one
+    INSERT INTO casbin_rule (ptype, v0, v1, v2, v3, v4, v5) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (ptype, v0, v1, v2, v3, v4, v5) DO NOTHING RETURNING id;
+    -- name: DeleteCasbinRule :exec
+    DELETE FROM casbin_rule WHERE ptype = $1 AND v0 = $2 AND v1 = $3 AND v2 = $4 AND v3 = $5 AND v4 = $6 AND v5 = $7;
+    -- name: ClearCasbinRules :exec
+    DELETE FROM casbin_rule;
+    -- name: DeleteCasbinRuleFiltered :exec
+    DELETE FROM casbin_rule WHERE ptype = $1
+      AND ($2 = '' OR v0 = $2) AND ($3 = '' OR v1 = $3) AND ($4 = '' OR v2 = $4)
+      AND ($5 = '' OR v3 = $5) AND ($6 = '' OR v4 = $6) AND ($7 = '' OR v5 = $7);
+    -- name: CountCasbinRules :one
+    SELECT count(*) FROM casbin_rule;
+
+    -- name: InsertAuditLog :one
+    INSERT INTO audit_log (actor_uid, action, target, detail_json) VALUES ($1, $2, $3, $4) RETURNING id;
 

@@ -70,6 +70,39 @@ done
 log "== hermetic 基线 =="
 BASE_DIR="$(gen rbace2e)"
 assert_no_residual "$BASE_DIR"
+
+# 结构性断言（s-web 对齐）
+log "== 结构性断言 =="
+PROTO="$BASE_DIR/idl/auth.proto"
+MIGRATION="$BASE_DIR/internal/db/migrations/000001_init.sql"
+QUERY="$BASE_DIR/internal/db/query/rbac.sql"
+
+# proto: has UpdatePermission + GetPermission
+if grep -q "rpc UpdatePermission" "$PROTO"; then log "proto has UpdatePermission"; else fail "proto missing UpdatePermission"; fi
+if grep -q "rpc GetPermission" "$PROTO"; then log "proto has GetPermission"; else fail "proto missing GetPermission"; fi
+
+# proto: NO CreateMenu/UpdateMenu/DeleteMenu
+if grep -q "rpc CreateMenu" "$PROTO"; then fail "proto still has CreateMenu"; else log "proto has no CreateMenu"; fi
+if grep -q "rpc UpdateMenu" "$PROTO"; then fail "proto still has UpdateMenu"; else log "proto has no UpdateMenu"; fi
+if grep -q "rpc DeleteMenu" "$PROTO"; then fail "proto still has DeleteMenu"; else log "proto has no DeleteMenu"; fi
+
+# proto: GrantPermissionsToRole uses permission_codes
+if grep -q "permission_codes" "$PROTO"; then log "proto uses permission_codes"; else fail "proto missing permission_codes"; fi
+if grep -q "permission_ids" "$PROTO"; then fail "proto still has permission_ids"; else log "proto has no permission_ids"; fi
+
+# SQL: no menus table
+if grep -q "CREATE TABLE menus" "$MIGRATION"; then fail "SQL still has menus table"; else log "SQL has no menus table"; fi
+
+# SQL: permissions has UNIQUE(code, type)
+if grep -q "UNIQUE (code, type)" "$MIGRATION"; then log "SQL has UNIQUE(code, type)"; else fail "SQL missing UNIQUE(code, type)"; fi
+
+# SQL: 7 tables total
+TABLE_COUNT=$(grep -c "CREATE TABLE" "$MIGRATION" || true)
+if [ "$TABLE_COUNT" -eq 7 ]; then log "SQL has 7 tables"; else fail "SQL has $TABLE_COUNT tables, want 7"; fi
+
+# SQL: has ListMenusAsTree query
+if grep -q "ListMenusAsTree" "$QUERY"; then log "SQL has ListMenusAsTree query"; else fail "SQL missing ListMenusAsTree query"; fi
+
 ( cd "$BASE_DIR" && make sqlc >/dev/null 2>&1 ) \
   && log "hermetic sqlc gen ok" || fail "hermetic make sqlc"
 go_build "$BASE_DIR" "hermetic"

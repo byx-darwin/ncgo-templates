@@ -9,53 +9,42 @@ body: |
     	"context"
     	"testing"
 
-    	casbin "github.com/casbin/casbin/v2"
-
-    	casbinstore "{{.Module}}/internal/infrastructure/casbin"
+    	"{{.Module}}/internal/infrastructure/casbin"
     )
 
-    func newTestEnforcer(t *testing.T) *casbin.Enforcer {{ "{" }}
+    func newEnforceService(t *testing.T) (*EnforceService, *casbin.Enforcer) {{ "{" }}
     	t.Helper()
-    	e, err := casbinstore.NewEnforcer(casbinstore.NewMemoryPolicyStore())
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	e.EnableLog(false)
-    	return e
+    	return New(e), e
     {{ "}" }}
 
-    func TestEnforceGranted(t *testing.T) {{ "{" }}
-    	e := newTestEnforcer(t)
-    	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
-    		t.Fatalf("AddPolicy: %v", err)
-    	{{ "}" }}
+    func TestEnforce(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, e := newEnforceService(t)
+
     	if _, err := e.AddRoleForUser("1", "admin"); err != nil {{ "{" }}
     		t.Fatalf("AddRoleForUser: %v", err)
     	{{ "}" }}
-    	svc := New(e)
-    	ok, err := svc.Enforce(context.Background(), 1, "user:create", "POST")
-    	if err != nil {{ "{" }}
-    		t.Fatalf("Enforce: %v", err)
-    	{{ "}" }}
-    	if !ok {{ "{" }}
-    		t.Fatal("expected allow")
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestEnforceDenied(t *testing.T) {{ "{" }}
-    	e := newTestEnforcer(t)
     	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
-    	if _, err := e.AddRoleForUser("1", "admin"); err != nil {{ "{" }}
-    		t.Fatalf("AddRoleForUser: %v", err)
-    	{{ "}" }}
-    	svc := New(e)
-    	ok, err := svc.Enforce(context.Background(), 1, "user:delete", "POST")
+
+    	allowed, err := svc.Enforce(ctx, 1, "user:create", "POST")
     	if err != nil {{ "{" }}
     		t.Fatalf("Enforce: %v", err)
     	{{ "}" }}
-    	if ok {{ "{" }}
-    		t.Fatal("expected deny")
+    	if !allowed {{ "{" }}
+    		t.Fatal("Enforce(1, user:create, POST) = false, want true")
+    	{{ "}" }}
+    	allowed, err = svc.Enforce(ctx, 1, "user:delete", "DELETE")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Enforce: %v", err)
+    	{{ "}" }}
+    	if allowed {{ "{" }}
+    		t.Fatal("Enforce(1, user:delete, DELETE) = true, want false")
     	{{ "}" }}
     {{ "}" }}

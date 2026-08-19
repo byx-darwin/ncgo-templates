@@ -7,13 +7,12 @@ body: |
 
     import (
     	"context"
+    	"fmt"
     	"testing"
-
-    	casbin "github.com/casbin/casbin/v2"
 
     	"{{.Module}}/internal/domain/permission"
     	"{{.Module}}/internal/infrastructure/audit"
-    	casbinstore "{{.Module}}/internal/infrastructure/casbin"
+    	"{{.Module}}/internal/infrastructure/casbin"
     )
 
     type fakePermRepo struct {{ "{" }}
@@ -21,39 +20,50 @@ body: |
     	next  int64
     {{ "}" }}
 
-    func newFakePermRepo() *fakePermRepo {{ "{" }}
-    	return &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}" }}, next: 100{{ "}" }}
-    {{ "}" }}
-
     func (f *fakePermRepo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
     	p, ok := f.perms[id]
     	if !ok {{ "{" }}
-    		return nil, permission.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    		return nil, permission.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
     	{{ "}" }}
     	return p, nil
     {{ "}" }}
 
     func (f *fakePermRepo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
-    	out := make([]*permission.Permission, 0, len(f.perms))
+    	var out []*permission.Permission
     	for _, p := range f.perms {{ "{" }}
     		out = append(out, p)
     	{{ "}" }}
     	return out, nil
     {{ "}" }}
 
-    func (f *fakePermRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.perms)), nil {{ "}" }}
-
-    func (f *fakePermRepo) ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error) {{ "{" }}
-    	return nil, nil
+    func (f *fakePermRepo) ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	return f.List(ctx, limit, offset)
     {{ "}" }}
 
-    func (f *fakePermRepo) Save(ctx context.Context, p *permission.Permission) error {{ "{" }}
+    func (f *fakePermRepo) ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error) {{ "{" }}
+    	var out []*permission.Permission
+    	for _, p := range f.perms {{ "{" }}
+    		if p.ParentID == parentID {{ "{" }}
+    			out = append(out, p)
+    		{{ "}" }}
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (f *fakePermRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.perms)), nil {{ "}" }}
+
+    func (f *fakePermRepo) Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
     	if p.ID == 0 {{ "{" }}
-    		p.ID = f.next
     		f.next++
+    		p.ID = f.next
     	{{ "}" }}
     	f.perms[p.ID] = p
-    	return nil
+    	return p, nil
+    {{ "}" }}
+
+    func (f *fakePermRepo) Update(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
+    	f.perms[p.ID] = p
+    	return p, nil
     {{ "}" }}
 
     func (f *fakePermRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
@@ -61,60 +71,107 @@ body: |
     	return nil
     {{ "}" }}
 
-    func newTestEnforcer(t *testing.T) *casbin.Enforcer {{ "{" }}
+    func newPermService(t *testing.T) (*Service, *casbin.Enforcer, *audit.MemoryWriter) {{ "{" }}
     	t.Helper()
-    	e, err := casbinstore.NewEnforcer(casbinstore.NewMemoryPolicyStore())
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	e.EnableLog(false)
-    	return e
+    	repo := &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}}" }}
+    	aud := audit.NewMemoryWriter()
+    	return New(repo, e, aud), e, aud
     {{ "}" }}
 
-    func TestCreateRejectsUnknownKind(t *testing.T) {{ "{" }}
-    	perms := newFakePermRepo()
-    	svc := New(perms, newTestEnforcer(t), audit.NewMemoryWriter())
-    	if _, err := svc.Create(context.Background(), CreatePermissionInput{{ "{" }}
-    		Code: "x", Name: "X", Kind: "bogus",
-    	{{ "}" }}); err == nil {{ "{" }}
-    		t.Fatal("Create with unknown kind expected error")
+    func TestCreateRejectsUnknownType(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+    	if _, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "x", Type: "bogus", Name: "X"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Create(bogus type) = nil, want error")
     	{{ "}" }}
     {{ "}" }}
 
-    func TestCreateNormalizesMethod(t *testing.T) {{ "{" }}
-    	perms := newFakePermRepo()
-    	svc := New(perms, newTestEnforcer(t), audit.NewMemoryWriter())
-    	p, err := svc.Create(context.Background(), CreatePermissionInput{{ "{" }}
-    		Code: "user:create", Name: "Create user", Kind: permission.KindButton, Method: "POST",
-    	{{ "}" }})
+    func TestCreateAPIRequiresMethod(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+    	if _, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "user:create", Type: permission.TypeAPI, Name: "Create User"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Create(api, no method) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestCreateAPINormalizesMethod(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+    	p, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "user:create", Type: permission.TypeAPI, Name: "Create User", Method: "post"{{ "}" }})
     	if err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
-    	if p.Method != "*" {{ "{" }}
-    		t.Fatalf("Method = %q, want *", p.Method)
+    	if p.Method != "POST" {{ "{" }}
+    		t.Fatalf("method = %q, want POST", p.Method)
     	{{ "}" }}
-    	if p.ID == 0 {{ "{" }}
-    		t.Fatal("Create did not assign an ID")
+    {{ "}" }}
+
+    func TestUpdateChangesFields(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+    	p, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "user:create", Type: permission.TypeAPI, Name: "Create User", Method: "POST"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	newName := "Updated Name"
+    	updated, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: p.ID, Name: &newName{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Update: %v", err)
+    	{{ "}" }}
+    	if updated.Name != "Updated Name" {{ "{" }}
+    		t.Fatalf("Name = %q, want Updated Name", updated.Name)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestDeleteCascadesChildren(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+
+    	parent, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system", Type: permission.TypeCatalog, Name: "System"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create parent: %v", err)
+    	{{ "}" }}
+    	child, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system:user", Type: permission.TypeMenu, Name: "Users", ParentID: parent.ID{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create child: %v", err)
+    	{{ "}" }}
+
+    	if err := svc.Delete(ctx, parent.ID); err != nil {{ "{" }}
+    		t.Fatalf("Delete: %v", err)
+    	{{ "}" }}
+    	// Both parent and child should be deleted.
+    	if _, err := svc.Get(ctx, parent.ID); err == nil {{ "{" }}
+    		t.Fatal("parent should be deleted")
+    	{{ "}" }}
+    	if _, err := svc.Get(ctx, child.ID); err == nil {{ "{" }}
+    		t.Fatal("child should be cascade-deleted")
     	{{ "}" }}
     {{ "}" }}
 
     func TestDeleteRemovesCasbinPolicy(t *testing.T) {{ "{" }}
-    	perms := newFakePermRepo()
-    	perms.perms[5] = &permission.Permission{{ "{" }}ID: 5, Code: "user:create", Name: "Create", Kind: permission.KindAPI, Method: "POST"{{ "}" }}
-    	enforcer := newTestEnforcer(t)
-    	if _, err := enforcer.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
+    	ctx := context.Background()
+    	svc, e, _ := newPermService(t)
+
+    	p, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "user:delete", Type: permission.TypeAPI, Name: "Delete User", Method: "DELETE"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if _, err := e.AddPolicy("admin", p.Code, "DELETE"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
-    	svc := New(perms, enforcer, audit.NewMemoryWriter())
+    	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); !allowed {{ "{" }}
+    		t.Fatal("Enforce before delete = false, want true")
+    	{{ "}" }}
 
-    	if err := svc.Delete(context.Background(), 5); err != nil {{ "{" }}
+    	if err := svc.Delete(ctx, p.ID); err != nil {{ "{" }}
     		t.Fatalf("Delete: %v", err)
     	{{ "}" }}
-    	ok, err := enforcer.Enforce("admin", "user:create", "POST")
-    	if err != nil {{ "{" }}
-    		t.Fatalf("Enforce: %v", err)
-    	{{ "}" }}
-    	if ok {{ "{" }}
-    		t.Fatal("policy should be removed after permission delete")
+    	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); allowed {{ "{" }}
+    		t.Fatal("Enforce after delete = true, want false")
     	{{ "}" }}
     {{ "}" }}

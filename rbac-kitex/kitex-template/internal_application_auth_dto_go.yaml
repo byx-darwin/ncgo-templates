@@ -5,44 +5,9 @@ update_behavior:
 body: |
     package authsvc
 
-    // Config carries token TTLs for the auth service.
-    type Config struct {{ "{" }}
-    	AccessTTLSeconds  int
-    	RefreshTTLSeconds int
-    {{ "}" }}
-
-    // LoginInput is a username/password login attempt.
-    type LoginInput struct {{ "{" }}
-    	Username string
-    	Password string
-    {{ "}" }}
-
-    // LoginOutput carries the issued token pair and the access token TTL.
-    type LoginOutput struct {{ "{" }}
+    // LoginResult is the issued token pair returned by Login/Refresh.
+    type LoginResult struct {{ "{" }}
     	AccessToken  string
     	RefreshToken string
     	ExpiresIn    int32
-    {{ "}" }}
-
-    // RefreshInput carries a refresh token to rotate.
-    type RefreshInput struct {{ "{" }}
-    	RefreshToken string
-    {{ "}" }}
-
-    // RefreshOutput carries a rotated token pair.
-    type RefreshOutput struct {{ "{" }}
-    	AccessToken  string
-    	RefreshToken string
-    {{ "}" }}
-
-    // LogoutInput carries an access token to revoke.
-    type LogoutInput struct {{ "{" }}
-    	AccessToken string
-    {{ "}" }}
-
-    // ValidateTokenOutput carries the claims embedded in a validated access token.
-    type ValidateTokenOutput struct {{ "{" }}
-    	UID   int64
-    	Roles []string
-    	Valid bool
     {{ "}" }}

@@ -1,0 +1,15 @@
+# ncgo exported template — internal/domain/menu/query_service.go
+path: internal/domain/menu/query_service.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    // Menu is now a read-only query aggregate. The write path for permission tree
+    // nodes (including catalog/menu types) lives in the permission aggregate.
+    //
+    // QueryService is the application-level entry point; it is defined here as a
+    // domain-level type alias for documentation. The concrete implementation lives
+    // in internal/application/menu/query_service.go.
+    //
+    // Domain-level pure functions (BuildTree) remain in entity.go.

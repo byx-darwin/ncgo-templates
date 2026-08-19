@@ -5,13 +5,11 @@ update_behavior:
 body: |
     package user
 
-    // service.go hosts pure domain rules that operate on the user aggregate but
-    // are not intrinsic to the entity itself.
-
-    // Credentials is a value object carrying a login attempt. Keeping it in the
-    // domain layer makes the login contract explicit and unit-testable without
-    // infrastructure.
-    type Credentials struct {{ "{" }}
-    	Username string
-    	Password string
+    // ValidatePassword applies the plaintext password policy. The returned error
+    // is a ValidationError when the policy is violated.
+    func ValidatePassword(plain string) error {{ "{" }}
+    	if len(plain) < 8 {{ "{" }}
+    		return ValidationError{{ "{" }}Field: "password", Msg: "must be at least 8 characters"{{ "}" }}
+    	{{ "}" }}
+    	return nil
     {{ "}" }}

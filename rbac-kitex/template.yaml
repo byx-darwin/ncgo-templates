@@ -7,6 +7,8 @@ skip_default_templates:
   - usecase.yaml
   - repository.yaml
   - server.yaml
+  - migration_init.yaml
+  - migration_keep.yaml
   # Embedded rule-center preset fragments would otherwise leak into any
   # non-rule-center template package (overlay retains all embedded yamls not
   # listed here), generating internal/handler/rulecenter + kitex_gen/api/ratelimit/v1

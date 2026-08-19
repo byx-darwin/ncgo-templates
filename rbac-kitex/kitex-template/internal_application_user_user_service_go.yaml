@@ -1,0 +1,185 @@
+# ncgo exported template — internal/application/user/user_service.go
+path: internal/application/user/user_service.go
+update_behavior:
+    type: skip
+body: |
+    package usersvc
+
+    import (
+    	"context"
+    	"fmt"
+
+    	rbacsvc "{{.Module}}/internal/application/rbac"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	authinfra "{{.Module}}/internal/infrastructure/auth"
+    )
+
+    // userRepo is the user service's data-access port.
+    type userRepo interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    	List(ctx context.Context, limit, offset int32) ([]*user.User, error)
+    	Count(ctx context.Context) (int64, error)
+    	Save(ctx context.Context, u *user.User) error
+    	Delete(ctx context.Context, id int64) error
+    	SetStatus(ctx context.Context, id int64, status string) error
+    	AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error
+    	ClearRoles(ctx context.Context, uid int64) error
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    {{ "}" }}
+
+    // roleRepo resolves role codes by id for enforcer sync.
+    type roleRepo interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*role.Role, error)
+    {{ "}" }}
+
+    // Service implements user management and role assignment.
+    type Service struct {{ "{" }}
+    	users    userRepo
+    	roles    roleRepo
+    	enforcer rbacsvc.Enforcer
+    	audit    audit.Writer
+    {{ "}" }}
+
+    // New wires the user service.
+    func New(users userRepo, roles roleRepo, enforcer rbacsvc.Enforcer, audit audit.Writer) *Service {{ "{" }}
+    	return &Service{{ "{" }}users: users, roles: roles, enforcer: enforcer, audit: audit{{ "}" }}
+    {{ "}" }}
+
+    // Create hashes the password, validates the username, and persists the user.
+    func (s *Service) Create(ctx context.Context, in CreateUserInput) (*user.User, error) {{ "{" }}
+    	hash, err := authinfra.HashPassword(in.Password)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	u, err := user.New(in.Username, hash)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if err := s.users.Save(ctx, u); err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "user.create", u.Username, `{{ "{" }}{{ "}" }}`)
+    	return u, nil
+    {{ "}" }}
+
+    // Update applies an optional password change and/or status change.
+    func (s *Service) Update(ctx context.Context, in UpdateUserInput) (*user.User, error) {{ "{" }}
+    	u, err := s.users.GetByID(ctx, in.ID)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if in.Password != nil {{ "{" }}
+    		hash, err := authinfra.HashPassword(*in.Password)
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		u.SetPasswordHash(hash)
+    	{{ "}" }}
+    	if in.Status != nil {{ "{" }}
+    		if err := u.SetStatus(*in.Status); err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    	{{ "}" }}
+    	if err := s.users.Save(ctx, u); err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, in.ID, "user.update", u.Username, `{{ "{" }}{{ "}" }}`)
+    	return u, nil
+    {{ "}" }}
+
+    // Delete removes a user and its Casbin role mappings.
+    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	u, err := s.users.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err := s.users.Delete(ctx, id); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	roles, err := s.users.ListRoles(ctx, id)
+    	if err == nil {{ "{" }}
+    		for _, r := range roles {{ "{" }}
+    			_, _ = s.enforcer.DeleteRoleForUser(fmt.Sprint(id), r.Code)
+    		{{ "}" }}
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, id, "user.delete", u.Username, `{{ "{" }}{{ "}" }}`)
+    	return nil
+    {{ "}" }}
+
+    // Get returns a user by id.
+    func (s *Service) Get(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    	return s.users.GetByID(ctx, id)
+    {{ "}" }}
+
+    // List returns a page of users plus the total count.
+    func (s *Service) List(ctx context.Context, page, pageSize int32) (*ListUsersOutput, error) {{ "{" }}
+    	page, pageSize = normalizePage(page, pageSize)
+    	users, err := s.users.List(ctx, pageSize, (page-1)*pageSize)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	total, err := s.users.Count(ctx)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	rows := make([]*UserRow, 0, len(users))
+    	for _, u := range users {{ "{" }}
+    		rows = append(rows, &UserRow{{ "{" }}
+    			ID:       u.ID,
+    			Username: u.Username,
+    			Status:   u.Status,
+    			Roles:    nil, // roles resolved per-row by the handler if needed
+    		{{ "}" }})
+    	{{ "}" }}
+    	return &ListUsersOutput{{ "{" }}Users: rows, Total: total{{ "}" }}, nil
+    {{ "}" }}
+
+    // AssignRoles rewrites a user's role set and syncs the Casbin g(uid, code)
+    // rules for the new roles.
+    func (s *Service) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    	current, err := s.users.ListRoles(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	newRoles := make([]*role.Role, 0, len(roleIDs))
+    	for _, rid := range roleIDs {{ "{" }}
+    		r, err := s.roles.GetByID(ctx, rid)
+    		if err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    		newRoles = append(newRoles, r)
+    	{{ "}" }}
+    	if err := s.users.ClearRoles(ctx, uid); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err := s.users.AssignRoles(ctx, uid, roleIDs); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	for _, r := range current {{ "{" }}
+    		if _, err := s.enforcer.DeleteRoleForUser(fmt.Sprint(uid), r.Code); err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    	{{ "}" }}
+    	for _, r := range newRoles {{ "{" }}
+    		if _, err := s.enforcer.AddRoleForUser(fmt.Sprint(uid), r.Code); err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, uid, "user.assign_roles", fmt.Sprint(uid), fmt.Sprintf(`{{ "{" }}"role_ids":%v{{ "}" }}`, roleIDs))
+    	return nil
+    {{ "}" }}
+
+    func normalizePage(page, pageSize int32) (int32, int32) {{ "{" }}
+    	if page < 1 {{ "{" }}
+    		page = 1
+    	{{ "}" }}
+    	if pageSize < 1 {{ "{" }}
+    		pageSize = 20
+    	{{ "}" }}
+    	if pageSize > 100 {{ "{" }}
+    		pageSize = 100
+    	{{ "}" }}
+    	return page, pageSize
+    {{ "}" }}

@@ -1,0 +1,118 @@
+syntax = "proto3";
+package rbac.v1;
+
+option go_package = "api/rbac/v1";
+
+service AuthService {
+  rpc Login(LoginReq) returns (LoginResp);
+  rpc Refresh(RefreshReq) returns (LoginResp);
+  rpc Logout(LogoutReq) returns (LogoutResp);
+  rpc ValidateToken(ValidateTokenReq) returns (ValidateTokenResp);
+}
+
+service RBACService {
+  rpc CreateUser(CreateUserReq) returns (UserResp);
+  rpc UpdateUser(UpdateUserReq) returns (UserResp);
+  rpc DeleteUser(DeleteUserReq) returns (EmptyResp);
+  rpc GetUser(GetUserReq) returns (UserResp);
+  rpc ListUsers(ListUsersReq) returns (ListUsersResp);
+
+  rpc CreateRole(CreateRoleReq) returns (RoleResp);
+  rpc UpdateRole(UpdateRoleReq) returns (RoleResp);
+  rpc DeleteRole(DeleteRoleReq) returns (EmptyResp);
+  rpc ListRoles(ListRolesReq) returns (ListRolesResp);
+
+  rpc CreatePermission(CreatePermissionReq) returns (PermissionResp);
+  rpc DeletePermission(DeletePermissionReq) returns (EmptyResp);
+  rpc ListPermissions(ListPermissionsReq) returns (ListPermissionsResp);
+
+  rpc CreateMenu(CreateMenuReq) returns (MenuResp);
+  rpc UpdateMenu(UpdateMenuReq) returns (MenuResp);
+  rpc DeleteMenu(DeleteMenuReq) returns (EmptyResp);
+  rpc ListMenus(ListMenusReq) returns (ListMenusResp);
+
+  rpc AssignRolesToUser(AssignRolesToUserReq) returns (EmptyResp);
+  rpc GrantPermissionsToRole(GrantPermissionsToRoleReq) returns (EmptyResp);
+  rpc Enforce(EnforceReq) returns (EnforceResp);
+  rpc GetUserMenuTree(GetUserMenuTreeReq) returns (GetUserMenuTreeResp);
+  rpc GetUserPermCodes(GetUserPermCodesReq) returns (GetUserPermCodesResp);
+}
+
+message LoginReq { string username = 1; string password = 2; }
+message LoginResp {
+  string access_token = 1;
+  string refresh_token = 2;
+  int32 expires_in = 3;           // access token TTL seconds
+}
+message RefreshReq { string refresh_token = 1; }
+message LogoutReq { string access_token = 1; }
+message LogoutResp {}
+message ValidateTokenReq { string access_token = 1; }
+message ValidateTokenResp {
+  int64 uid = 1;
+  repeated string roles = 2;
+  bool valid = 3;
+}
+
+message User {
+  int64 id = 1;
+  string username = 2;
+  string status = 3;
+  repeated string roles = 4;
+}
+message CreateUserReq { string username = 1; string password = 2; }
+message UpdateUserReq { int64 id = 1; optional string password = 2; optional string status = 3; }
+message DeleteUserReq { int64 id = 1; }
+message GetUserReq { int64 id = 1; }
+message ListUsersReq { int32 page = 1; int32 page_size = 2; }
+message UserResp { User user = 1; }
+message ListUsersResp { repeated User users = 1; int32 total = 2; }
+
+message Role { int64 id = 1; string code = 2; string name = 3; }
+message CreateRoleReq { string code = 1; string name = 2; }
+message UpdateRoleReq { int64 id = 1; string name = 2; }
+message DeleteRoleReq { int64 id = 1; }
+message ListRolesReq { int32 page = 1; int32 page_size = 2; }
+message RoleResp { Role role = 1; }
+message ListRolesResp { repeated Role roles = 1; int32 total = 2; }
+
+message Permission {
+  int64 id = 1;
+  string code = 2;
+  string name = 3;
+  string kind = 4;   // menu | button | api
+  string method = 5; // HTTP method for kind=api; "*" for menu/button
+}
+message CreatePermissionReq { string code = 1; string name = 2; string kind = 3; string method = 4; }
+message DeletePermissionReq { int64 id = 1; }
+message ListPermissionsReq { int32 page = 1; int32 page_size = 2; }
+message PermissionResp { Permission permission = 1; }
+message ListPermissionsResp { repeated Permission permissions = 1; int32 total = 2; }
+
+message Menu {
+  int64 id = 1;
+  int64 parent_id = 2;
+  string type = 3;      // dir | menu | button
+  string name = 4;
+  string path = 5;
+  string component = 6;
+  string perm_code = 7;
+  int32 sort_order = 8;
+}
+message CreateMenuReq { int64 parent_id = 1; string type = 2; string name = 3; string path = 4; string component = 5; string perm_code = 6; int32 sort_order = 7; }
+message UpdateMenuReq { int64 id = 1; optional int64 parent_id = 2; optional string type = 3; optional string name = 4; optional string path = 5; optional string component = 6; optional string perm_code = 7; optional int32 sort_order = 8; }
+message DeleteMenuReq { int64 id = 1; }
+message ListMenusReq {}
+message MenuResp { Menu menu = 1; }
+message ListMenusResp { repeated Menu menus = 1; }
+
+message AssignRolesToUserReq { int64 user_id = 1; repeated int64 role_ids = 2; }
+message GrantPermissionsToRoleReq { int64 role_id = 1; repeated int64 permission_ids = 2; }
+message EnforceReq { int64 uid = 1; string obj = 2; string act = 3; }
+message EnforceResp { bool allowed = 1; }
+message GetUserMenuTreeReq { int64 uid = 1; }
+message MenuNode { Menu menu = 1; repeated MenuNode children = 2; }
+message GetUserMenuTreeResp { repeated MenuNode roots = 1; }
+message GetUserPermCodesReq { int64 uid = 1; }
+message GetUserPermCodesResp { repeated string codes = 1; }
+message EmptyResp {}

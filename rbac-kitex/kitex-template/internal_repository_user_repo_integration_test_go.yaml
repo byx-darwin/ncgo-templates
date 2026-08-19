@@ -1,0 +1,86 @@
+# ncgo exported template — internal/repository/user/repo_integration_test.go
+path: internal/repository/user/repo_integration_test.go
+update_behavior:
+    type: skip
+
+body: |
+    package userrepo_test
+
+    import (
+    	"context"
+    	"errors"
+    	"os"
+    	"os/exec"
+    	"testing"
+
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/user"
+    	userrepo "{{.Module}}/internal/repository/user"
+    )
+
+    // TestUserRepoRoundTrip exercises the sqlc-backed user repo against a real
+    // postgres. It is gated on pg_isready + POSTGRES_DSN and skips explicitly
+    // when either is absent (hermetic CI has no database).
+    func TestUserRepoRoundTrip(t *testing.T) {{ "{" }}
+    	if _, err := exec.LookPath("pg_isready"); err != nil {{ "{" }}
+    		t.Skipf("skipped: pg_isready not found: %v", err)
+    	{{ "}" }}
+    	dsn := os.Getenv("POSTGRES_DSN")
+    	if dsn == "" {{ "{" }}
+    		t.Skip("skipped: POSTGRES_DSN not set")
+    	{{ "}" }}
+    	if err := exec.Command("pg_isready").Run(); err != nil {{ "{" }}
+    		t.Skipf("skipped: postgres not reachable: %v", err)
+    	{{ "}" }}
+
+    	ctx := context.Background()
+    	pool, err := pgxpool.New(ctx, dsn)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("connect postgres: %v", err)
+    	{{ "}" }}
+    	defer pool.Close()
+
+    	repo := userrepo.New(gen.New(pool), pool)
+
+    	u, err := user.New("e2e_testuser", "hash")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("user.New: %v", err)
+    	{{ "}" }}
+    	if err := repo.Save(ctx, u); err != nil {{ "{" }}
+    		t.Fatalf("Save(create): %v", err)
+    	{{ "}" }}
+    	t.Cleanup(func() {{ "{" }} _ = repo.Delete(ctx, u.ID) {{ "}" }})
+
+    	got, err := repo.GetByUsername(ctx, u.Username)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByUsername: %v", err)
+    	{{ "}" }}
+    	if got.ID != u.ID || got.Username != u.Username {{ "{" }}
+    		t.Fatalf("GetByUsername = %+v, want id=%d username=%s", got, u.ID, u.Username)
+    	{{ "}" }}
+
+    	if err := repo.SetStatus(ctx, u.ID, user.StatusDisabled); err != nil {{ "{" }}
+    		t.Fatalf("SetStatus: %v", err)
+    	{{ "}" }}
+    	got2, err := repo.GetByID(ctx, u.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID: %v", err)
+    	{{ "}" }}
+    	if got2.Status != user.StatusDisabled {{ "{" }}
+    		t.Fatalf("Status = %q, want %q", got2.Status, user.StatusDisabled)
+    	{{ "}" }}
+
+    	if err := repo.Delete(ctx, u.ID); err != nil {{ "{" }}
+    		t.Fatalf("Delete: %v", err)
+    	{{ "}" }}
+    	if _, err := repo.GetByID(ctx, u.ID); err == nil {{ "{" }}
+    		t.Fatal("GetByID after delete expected NotFoundError")
+    	{{ "}" }} else {{ "{" }}
+    		var nf user.NotFoundError
+    		if !errors.As(err, &nf) {{ "{" }}
+    			t.Fatalf("error = %v, want user.NotFoundError", err)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}

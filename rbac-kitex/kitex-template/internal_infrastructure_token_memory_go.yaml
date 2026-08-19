@@ -1,0 +1,95 @@
+# rbac-kitex template — internal/infrastructure/token/memory.go
+path: internal/infrastructure/token/memory.go
+update_behavior:
+  type: cover
+body: |-
+  package token
+
+  import (
+  	"context"
+  	"sync"
+  	"time"
+  )
+
+  // MemoryStore is the hermetic default token store. It is safe for concurrent
+  // use and expires entries lazily on read. Suitable for development and tests;
+  // production deployments should swap in RedisStore.
+  type MemoryStore struct {
+  	mu        sync.Mutex
+  	refresh   map[string]refreshEntry
+  	blacklist map[string]time.Time
+  }
+
+  type refreshEntry struct {
+  	uid     int64
+  	expires time.Time
+  }
+
+  // NewMemoryStore creates an empty in-memory token store.
+  func NewMemoryStore() *MemoryStore {
+  	return &MemoryStore{
+  		refresh:   make(map[string]refreshEntry),
+  		blacklist: make(map[string]time.Time),
+  	}
+  }
+
+  // SetRefresh stores a refresh token bound to a uid until ttl elapses.
+  func (s *MemoryStore) SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	s.refresh[refreshToken] = refreshEntry{uid: uid, expires: time.Now().Add(ttl)}
+  	return nil
+  }
+
+  // GetRefresh resolves a refresh token to its uid, purging expired entries.
+  func (s *MemoryStore) GetRefresh(ctx context.Context, refreshToken string) (int64, error) {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	s.purgeLocked()
+  	e, ok := s.refresh[refreshToken]
+  	if !ok {
+  		return 0, ErrNotFound
+  	}
+  	return e.uid, nil
+  }
+
+  // DeleteRefresh invalidates a refresh token.
+  func (s *MemoryStore) DeleteRefresh(ctx context.Context, refreshToken string) error {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	delete(s.refresh, refreshToken)
+  	return nil
+  }
+
+  // Blacklist marks an access token as revoked until ttl elapses.
+  func (s *MemoryStore) Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	s.blacklist[accessToken] = time.Now().Add(ttl)
+  	return nil
+  }
+
+  // IsBlacklisted reports whether an access token was revoked (and not expired).
+  func (s *MemoryStore) IsBlacklisted(ctx context.Context, accessToken string) (bool, error) {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	exp, ok := s.blacklist[accessToken]
+  	if !ok {
+  		return false, nil
+  	}
+  	if time.Now().After(exp) {
+  		delete(s.blacklist, accessToken)
+  		return false, nil
+  	}
+  	return true, nil
+  }
+
+  func (s *MemoryStore) purgeLocked() {
+  	now := time.Now()
+  	for k, e := range s.refresh {
+  		if now.After(e.expires) {
+  			delete(s.refresh, k)
+  		}
+  	}
+  }
+

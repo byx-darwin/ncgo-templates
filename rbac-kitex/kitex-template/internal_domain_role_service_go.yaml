@@ -1,0 +1,11 @@
+# ncgo exported template — internal/domain/role/service.go
+path: internal/domain/role/service.go
+update_behavior:
+    type: skip
+body: |
+    package role
+
+    // service.go hosts pure role domain rules. Role-permission assignment is an
+    // application-layer concern (cross-aggregate consistency with Casbin lives in
+    // internal/application/role), so the domain stays free of persistence or
+    // enforcer dependencies.

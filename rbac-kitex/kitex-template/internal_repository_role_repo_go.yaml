@@ -1,0 +1,182 @@
+# ncgo exported template — internal/repository/role/repo.go
+path: internal/repository/role/repo.go
+update_behavior:
+    type: skip
+
+body: |
+    package rolerepo
+
+    import (
+    	"context"
+    	"errors"
+
+    	goerror "github.com/byx-darwin/go-tools/go-common/error"
+    	frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    )
+
+    // Repo implements role.Repository and the role-side permission helpers.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a Repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    // GetByID returns a role or role.NotFoundError.
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*role.Role, error) {{ "{" }}
+    	row, err := r.q.GetRoleByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    			return nil, role.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    		{{ "}" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapRole(row), nil
+    {{ "}" }}
+
+    // GetByCode returns a role or role.NotFoundError.
+    func (r *Repo) GetByCode(ctx context.Context, code string) (*role.Role, error) {{ "{" }}
+    	row, err := r.q.GetRoleByCode(ctx, code)
+    	if err != nil {{ "{" }}
+    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    			return nil, role.NotFoundError{{ "{" }}Code: code{{ "}" }}
+    		{{ "}" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapRole(row), nil
+    {{ "}" }}
+
+    // List returns roles with offset pagination.
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*role.Role, error) {{ "{" }}
+    	rows, err := r.q.ListRoles(ctx, gen.ListRolesParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*role.Role, 0, len(rows))
+    	for i := range rows {{ "{" }}
+    		out = append(out, mapRole(rows[i]))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    // Count returns the total number of roles.
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountRoles(ctx)
+    {{ "}" }}
+
+    // Save creates or updates a role. New roles are assigned an ID on the entity.
+    func (r *Repo) Save(ctx context.Context, rl *role.Role) error {{ "{" }}
+    	if rl.ID == 0 {{ "{" }}
+    		row, err := r.q.CreateRole(ctx, gen.CreateRoleParams{{ "{" }}Code: rl.Code, Name: rl.Name{{ "}" }})
+    		if err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    		rl.ID = row.ID
+    		return nil
+    	{{ "}" }}
+    	_, err := r.q.UpdateRole(ctx, gen.UpdateRoleParams{{ "{" }}Name: rl.Name, ID: rl.ID{{ "}" }})
+    	return err
+    {{ "}" }}
+
+    // Delete removes a role (links cascade).
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeleteRole(ctx, id)
+    {{ "}" }}
+
+    // AssignPermissions links a role to the given permission ids.
+    func (r *Repo) AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    	for _, pid := range permissionIDs {{ "{" }}
+    		if err := r.q.AddRolePermission(ctx, gen.AddRolePermissionParams{{ "{" }}RoleID: roleID, PermissionID: pid{{ "}" }}); err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    // ClearPermissions removes every permission link for a role.
+    func (r *Repo) ClearPermissions(ctx context.Context, roleID int64) error {{ "{" }}
+    	return r.q.ClearRolePermissions(ctx, roleID)
+    {{ "}" }}
+
+    // ListPermissions returns the permissions granted to the given role ids.
+    func (r *Repo) ListPermissions(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByRoleIDs(ctx, roleIDs)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for i := range rows {{ "{" }}
+    		out = append(out, mapPermission(rows[i]))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    // WithTx runs fn inside a database transaction, rolling back on error/panic.
+    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
+    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return goerror.
+    			In("role.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "begin transaction")
+    	{{ "}" }}
+    	committed := false
+    	defer func() {{ "{" }}
+    		if committed {{ "{" }}
+    			return
+    		{{ "}" }}
+    		if p := recover(); p != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    			panic(p)
+    		{{ "}" }}
+    		if err != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    		{{ "}" }}
+    	{{ "}" }}()
+    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
+    	if err := fn(txRepo); err != nil {{ "{" }}
+    		return goerror.
+    			In("role.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "transaction callback")
+    	{{ "}" }}
+    	if err := tx.Commit(ctx); err != nil {{ "{" }}
+    		return goerror.
+    			In("role.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "commit transaction")
+    	{{ "}" }}
+    	committed = true
+    	return nil
+    {{ "}" }}
+
+    var _ role.Repository = (*Repo)(nil)
+
+    func mapRole(row gen.Role) *role.Role {{ "{" }}
+    	return &role.Role{{ "{" }}ID: row.ID, Code: row.Code, Name: row.Name{{ "}" }}
+    {{ "}" }}
+
+    func mapPermission(row gen.Permission) *permission.Permission {{ "{" }}
+    	return &permission.Permission{{ "{" }}
+    		ID:     row.ID,
+    		Code:   row.Code,
+    		Name:   row.Name,
+    		Kind:   row.Kind,
+    		Method: row.Method,
+    	{{ "}" }}
+    {{ "}" }}

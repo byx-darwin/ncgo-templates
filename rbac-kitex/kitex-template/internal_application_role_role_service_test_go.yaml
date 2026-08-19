@@ -1,0 +1,134 @@
+# ncgo exported template — internal/application/role/role_service_test.go
+path: internal/application/role/role_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package rolesvc
+
+    import (
+    	"context"
+    	"testing"
+
+    	casbin "github.com/casbin/casbin/v2"
+
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	casbinstore "{{.Module}}/internal/infrastructure/casbin"
+    )
+
+    type fakeRoleRepo struct {{ "{" }}
+    	roles map[int64]*role.Role
+    	perms map[int64][]int64
+    	next  int64
+    {{ "}" }}
+
+    func newFakeRoleRepo() *fakeRoleRepo {{ "{" }}
+    	return &fakeRoleRepo{{ "{" }}roles: map[int64]*role.Role{{ "{" }}{{ "}" }}, perms: map[int64][]int64{{ "{" }}{{ "}" }}, next: 1{{ "}" }}
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) GetByID(ctx context.Context, id int64) (*role.Role, error) {{ "{" }}
+    	r, ok := f.roles[id]
+    	if !ok {{ "{" }}
+    		return nil, role.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    	{{ "}" }}
+    	return r, nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) List(ctx context.Context, limit, offset int32) ([]*role.Role, error) {{ "{" }}
+    	out := make([]*role.Role, 0, len(f.roles))
+    	for _, r := range f.roles {{ "{" }}
+    		out = append(out, r)
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.roles)), nil {{ "}" }}
+
+    func (f *fakeRoleRepo) Save(ctx context.Context, r *role.Role) error {{ "{" }}
+    	if r.ID == 0 {{ "{" }}
+    		r.ID = f.next
+    		f.next++
+    	{{ "}" }}
+    	f.roles[r.ID] = r
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	delete(f.roles, id)
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    	f.perms[roleID] = permissionIDs
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) ClearPermissions(ctx context.Context, roleID int64) error {{ "{" }}
+    	f.perms[roleID] = nil
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) ListPermissions(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    	return nil, nil
+    {{ "}" }}
+
+    type fakePermRepo struct {{ "{" }}
+    	perms map[int64]*permission.Permission
+    {{ "}" }}
+
+    func (f *fakePermRepo) ListByIDs(ctx context.Context, ids []int64) ([]*permission.Permission, error) {{ "{" }}
+    	out := make([]*permission.Permission, 0, len(ids))
+    	for _, id := range ids {{ "{" }}
+    		if p, ok := f.perms[id]; ok {{ "{" }}
+    			out = append(out, p)
+    		{{ "}" }}
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func newTestEnforcer(t *testing.T) *casbin.Enforcer {{ "{" }}
+    	t.Helper()
+    	e, err := casbinstore.NewEnforcer(casbinstore.NewMemoryPolicyStore())
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	e.EnableLog(false)
+    	return e
+    {{ "}" }}
+
+    func TestGrantPermissionsSyncsPolicies(t *testing.T) {{ "{" }}
+    	roles := &fakeRoleRepo{{ "{" }}
+    		roles: map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }},
+    		perms: map[int64][]int64{{ "{" }}{{ "}" }},
+    	{{ "}" }}
+    	perms := &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}
+    		10: {{ "{" }}ID: 10, Code: "user:create", Name: "Create user", Kind: permission.KindAPI, Method: "POST"{{ "}" }},
+    	{{ "}}" }}
+    	enforcer := newTestEnforcer(t)
+    	memAudit := audit.NewMemoryWriter()
+    	svc := New(roles, perms, enforcer, memAudit)
+
+    	if err := svc.GrantPermissions(context.Background(), 1, []int64{{ "{" }}10{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("GrantPermissions: %v", err)
+    	{{ "}" }}
+    	ok, err := enforcer.Enforce("admin", "user:create", "POST")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Enforce: %v", err)
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		t.Fatal("enforcer should allow the granted permission for the role")
+    	{{ "}" }}
+    	entries := memAudit.Entries()
+    	if len(entries) != 1 || entries[0].Action != "role.grant_permissions" {{ "{" }}
+    		t.Fatalf("audit entries = %+v, want role.grant_permissions", entries)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestCreateRejectsEmptyCode(t *testing.T) {{ "{" }}
+    	roles := newFakeRoleRepo()
+    	svc := New(roles, &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}}" }}, newTestEnforcer(t), audit.NewMemoryWriter())
+    	if _, err := svc.Create(context.Background(), CreateRoleInput{{ "{" }}Code: "", Name: "X"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Create with empty code expected error")
+    	{{ "}" }}
+    {{ "}" }}

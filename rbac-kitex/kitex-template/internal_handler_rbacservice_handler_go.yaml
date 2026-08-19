@@ -1,0 +1,304 @@
+# ncgo exported template — internal/handler/rbacservice/handler.go
+path: internal/handler/rbacservice/handler.go
+update_behavior:
+    type: skip
+
+body: |
+    package rbacservicehandler
+
+    import (
+    	"context"
+
+    	menusvc "{{.Module}}/internal/application/menu"
+    	permsvc "{{.Module}}/internal/application/permission"
+    	rbacsvc "{{.Module}}/internal/application/rbac"
+    	rolesvc "{{.Module}}/internal/application/role"
+    	usersvc "{{.Module}}/internal/application/user"
+    	"{{.Module}}/internal/domain/menu"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/pkg/rpcerror"
+    	v1 "{{.Module}}/kitex_gen/api/rbac/v1"
+    )
+
+    // RBACServiceImpl implements the Kitex-generated RBACService interface by
+    // delegating to the user/role/permission/menu application services and the
+    // Casbin enforce service.
+    type RBACServiceImpl struct {{ "{" }}
+    	user       *usersvc.Service
+    	role       *rolesvc.Service
+    	permission *permsvc.Service
+    	menu       *menusvc.Service
+    	rbac       *rbacsvc.EnforceService
+    {{ "}" }}
+
+    // NewRBACServiceImpl creates an RBACServiceImpl.
+    func NewRBACServiceImpl(
+    	user *usersvc.Service,
+    	role *rolesvc.Service,
+    	permission *permsvc.Service,
+    	menu *menusvc.Service,
+    	rbac *rbacsvc.EnforceService,
+    ) *RBACServiceImpl {{ "{" }}
+    	return &RBACServiceImpl{{ "{" }}user: user, role: role, permission: permission, menu: menu, rbac: rbac{{ "}" }}
+    {{ "}" }}
+
+    // CreateUser creates a user with a hashed password.
+    func (s *RBACServiceImpl) CreateUser(ctx context.Context, req *v1.CreateUserReq) (resp *v1.UserResp, err error) {{ "{" }}
+    	u, err := s.user.Create(ctx, usersvc.CreateUserInput{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.UserResp{{ "{" }}User: userToProto(u, nil){{ "}" }}, nil
+    {{ "}" }}
+
+    // UpdateUser applies an optional password and/or status change.
+    func (s *RBACServiceImpl) UpdateUser(ctx context.Context, req *v1.UpdateUserReq) (resp *v1.UserResp, err error) {{ "{" }}
+    	u, err := s.user.Update(ctx, usersvc.UpdateUserInput{{ "{" }}
+    		ID:       req.Id,
+    		Password: req.Password,
+    		Status:   req.Status,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.UserResp{{ "{" }}User: userToProto(u, nil){{ "}" }}, nil
+    {{ "}" }}
+
+    // DeleteUser removes a user.
+    func (s *RBACServiceImpl) DeleteUser(ctx context.Context, req *v1.DeleteUserReq) (resp *v1.EmptyResp, err error) {{ "{" }}
+    	if err := s.user.Delete(ctx, req.Id); err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    // GetUser returns a user by id.
+    func (s *RBACServiceImpl) GetUser(ctx context.Context, req *v1.GetUserReq) (resp *v1.UserResp, err error) {{ "{" }}
+    	u, err := s.user.Get(ctx, req.Id)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.UserResp{{ "{" }}User: userToProto(u, nil){{ "}" }}, nil
+    {{ "}" }}
+
+    // ListUsers returns a page of users.
+    func (s *RBACServiceImpl) ListUsers(ctx context.Context, req *v1.ListUsersReq) (resp *v1.ListUsersResp, err error) {{ "{" }}
+    	out, err := s.user.List(ctx, req.Page, req.PageSize)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	users := make([]*v1.User, 0, len(out.Users))
+    	for _, row := range out.Users {{ "{" }}
+    		users = append(users, &v1.User{{ "{" }}Id: row.ID, Username: row.Username, Status: row.Status, Roles: row.Roles{{ "}" }})
+    	{{ "}" }}
+    	return &v1.ListUsersResp{{ "{" }}Users: users, Total: int32(out.Total){{ "}" }}, nil
+    {{ "}" }}
+
+    // CreateRole creates a role.
+    func (s *RBACServiceImpl) CreateRole(ctx context.Context, req *v1.CreateRoleReq) (resp *v1.RoleResp, err error) {{ "{" }}
+    	r, err := s.role.Create(ctx, rolesvc.CreateRoleInput{{ "{" }}Code: req.Code, Name: req.Name{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.RoleResp{{ "{" }}Role: roleToProto(r){{ "}" }}, nil
+    {{ "}" }}
+
+    // UpdateRole renames a role.
+    func (s *RBACServiceImpl) UpdateRole(ctx context.Context, req *v1.UpdateRoleReq) (resp *v1.RoleResp, err error) {{ "{" }}
+    	r, err := s.role.Update(ctx, rolesvc.UpdateRoleInput{{ "{" }}ID: req.Id, Name: req.Name{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.RoleResp{{ "{" }}Role: roleToProto(r){{ "}" }}, nil
+    {{ "}" }}
+
+    // DeleteRole removes a role and its Casbin policies.
+    func (s *RBACServiceImpl) DeleteRole(ctx context.Context, req *v1.DeleteRoleReq) (resp *v1.EmptyResp, err error) {{ "{" }}
+    	if err := s.role.Delete(ctx, req.Id); err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    // ListRoles returns a page of roles.
+    func (s *RBACServiceImpl) ListRoles(ctx context.Context, req *v1.ListRolesReq) (resp *v1.ListRolesResp, err error) {{ "{" }}
+    	out, err := s.role.List(ctx, req.Page, req.PageSize)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	roles := make([]*v1.Role, 0, len(out.Roles))
+    	for _, row := range out.Roles {{ "{" }}
+    		roles = append(roles, &v1.Role{{ "{" }}Id: row.ID, Code: row.Code, Name: row.Name{{ "}" }})
+    	{{ "}" }}
+    	return &v1.ListRolesResp{{ "{" }}Roles: roles, Total: int32(out.Total){{ "}" }}, nil
+    {{ "}" }}
+
+    // CreatePermission creates a permission with a validated kind.
+    func (s *RBACServiceImpl) CreatePermission(ctx context.Context, req *v1.CreatePermissionReq) (resp *v1.PermissionResp, err error) {{ "{" }}
+    	p, err := s.permission.Create(ctx, permsvc.CreatePermissionInput{{ "{" }}
+    		Code: req.Code, Name: req.Name, Kind: req.Kind, Method: req.Method,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.PermissionResp{{ "{" }}Permission: permissionToProto(p){{ "}" }}, nil
+    {{ "}" }}
+
+    // DeletePermission removes a permission and its Casbin policies.
+    func (s *RBACServiceImpl) DeletePermission(ctx context.Context, req *v1.DeletePermissionReq) (resp *v1.EmptyResp, err error) {{ "{" }}
+    	if err := s.permission.Delete(ctx, req.Id); err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    // ListPermissions returns a page of permissions.
+    func (s *RBACServiceImpl) ListPermissions(ctx context.Context, req *v1.ListPermissionsReq) (resp *v1.ListPermissionsResp, err error) {{ "{" }}
+    	out, err := s.permission.List(ctx, req.Page, req.PageSize)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	perms := make([]*v1.Permission, 0, len(out.Permissions))
+    	for _, row := range out.Permissions {{ "{" }}
+    		perms = append(perms, &v1.Permission{{ "{" }}
+    			Id: row.ID, Code: row.Code, Name: row.Name, Kind: row.Kind, Method: row.Method,
+    		{{ "}" }})
+    	{{ "}" }}
+    	return &v1.ListPermissionsResp{{ "{" }}Permissions: perms, Total: int32(out.Total){{ "}" }}, nil
+    {{ "}" }}
+
+    // CreateMenu creates a menu node.
+    func (s *RBACServiceImpl) CreateMenu(ctx context.Context, req *v1.CreateMenuReq) (resp *v1.MenuResp, err error) {{ "{" }}
+    	m, err := s.menu.Create(ctx, menusvc.CreateMenuInput{{ "{" }}
+    		ParentID: req.ParentId, Type: req.Type, Name: req.Name,
+    		Path: req.Path, Component: req.Component, PermCode: req.PermCode, SortOrder: req.SortOrder,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.MenuResp{{ "{" }}Menu: menuToProto(m){{ "}" }}, nil
+    {{ "}" }}
+
+    // UpdateMenu applies partial changes to a menu.
+    func (s *RBACServiceImpl) UpdateMenu(ctx context.Context, req *v1.UpdateMenuReq) (resp *v1.MenuResp, err error) {{ "{" }}
+    	m, err := s.menu.Update(ctx, menusvc.UpdateMenuInput{{ "{" }}
+    		ID: req.Id, ParentID: req.ParentId, Type: req.Type, Name: req.Name,
+    		Path: req.Path, Component: req.Component, PermCode: req.PermCode, SortOrder: req.SortOrder,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.MenuResp{{ "{" }}Menu: menuToProto(m){{ "}" }}, nil
+    {{ "}" }}
+
+    // DeleteMenu removes a menu node.
+    func (s *RBACServiceImpl) DeleteMenu(ctx context.Context, req *v1.DeleteMenuReq) (resp *v1.EmptyResp, err error) {{ "{" }}
+    	if err := s.menu.Delete(ctx, req.Id); err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    // ListMenus returns every menu.
+    func (s *RBACServiceImpl) ListMenus(ctx context.Context, req *v1.ListMenusReq) (resp *v1.ListMenusResp, err error) {{ "{" }}
+    	menus, err := s.menu.List(ctx)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	out := make([]*v1.Menu, 0, len(menus))
+    	for _, m := range menus {{ "{" }}
+    		out = append(out, menuToProto(m))
+    	{{ "}" }}
+    	return &v1.ListMenusResp{{ "{" }}Menus: out{{ "}" }}, nil
+    {{ "}" }}
+
+    // AssignRolesToUser rewrites a user's role set and syncs Casbin.
+    func (s *RBACServiceImpl) AssignRolesToUser(ctx context.Context, req *v1.AssignRolesToUserReq) (resp *v1.EmptyResp, err error) {{ "{" }}
+    	if err := s.user.AssignRoles(ctx, req.UserId, req.RoleIds); err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    // GrantPermissionsToRole rewrites a role's permission set and syncs Casbin.
+    func (s *RBACServiceImpl) GrantPermissionsToRole(ctx context.Context, req *v1.GrantPermissionsToRoleReq) (resp *v1.EmptyResp, err error) {{ "{" }}
+    	if err := s.role.GrantPermissions(ctx, req.RoleId, req.PermissionIds); err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    // Enforce answers whether uid may perform act on obj.
+    func (s *RBACServiceImpl) Enforce(ctx context.Context, req *v1.EnforceReq) (resp *v1.EnforceResp, err error) {{ "{" }}
+    	allowed, err := s.rbac.Enforce(ctx, req.Uid, req.Obj, req.Act)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.EnforceResp{{ "{" }}Allowed: allowed{{ "}" }}, nil
+    {{ "}" }}
+
+    // GetUserMenuTree returns the menu tree visible to a user.
+    func (s *RBACServiceImpl) GetUserMenuTree(ctx context.Context, req *v1.GetUserMenuTreeReq) (resp *v1.GetUserMenuTreeResp, err error) {{ "{" }}
+    	nodes, err := s.menu.UserMenuTree(ctx, req.Uid)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	roots := make([]*v1.MenuNode, 0, len(nodes))
+    	for _, n := range nodes {{ "{" }}
+    		roots = append(roots, menuNodeToProto(n))
+    	{{ "}" }}
+    	return &v1.GetUserMenuTreeResp{{ "{" }}Roots: roots{{ "}" }}, nil
+    {{ "}" }}
+
+    // GetUserPermCodes returns the unified permission codes granted to a user.
+    func (s *RBACServiceImpl) GetUserPermCodes(ctx context.Context, req *v1.GetUserPermCodesReq) (resp *v1.GetUserPermCodesResp, err error) {{ "{" }}
+    	codes, err := s.menu.UserPermCodes(ctx, req.Uid)
+    	if err != nil {{ "{" }}
+    		return nil, rpcerror.ToBizError(err)
+    	{{ "}" }}
+    	return &v1.GetUserPermCodesResp{{ "{" }}Codes: codes{{ "}" }}, nil
+    {{ "}" }}
+
+    func userToProto(u *user.User, roles []string) *v1.User {{ "{" }}
+    	if u == nil {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &v1.User{{ "{" }}Id: u.ID, Username: u.Username, Status: u.Status, Roles: roles{{ "}" }}
+    {{ "}" }}
+
+    func roleToProto(r *role.Role) *v1.Role {{ "{" }}
+    	if r == nil {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &v1.Role{{ "{" }}Id: r.ID, Code: r.Code, Name: r.Name{{ "}" }}
+    {{ "}" }}
+
+    func permissionToProto(p *permission.Permission) *v1.Permission {{ "{" }}
+    	if p == nil {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &v1.Permission{{ "{" }}Id: p.ID, Code: p.Code, Name: p.Name, Kind: p.Kind, Method: p.Method{{ "}" }}
+    {{ "}" }}
+
+    func menuToProto(m *menu.Menu) *v1.Menu {{ "{" }}
+    	if m == nil {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &v1.Menu{{ "{" }}
+    		Id: m.ID, ParentId: m.ParentID, Type: m.Type, Name: m.Name,
+    		Path: m.Path, Component: m.Component, PermCode: m.PermCode, SortOrder: m.SortOrder,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func menuNodeToProto(n *menu.Node) *v1.MenuNode {{ "{" }}
+    	if n == nil {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	node := &v1.MenuNode{{ "{" }}Menu: menuToProto(n.Menu){{ "}" }}
+    	for _, c := range n.Children {{ "{" }}
+    		node.Children = append(node.Children, menuNodeToProto(c))
+    	{{ "}" }}
+    	return node
+    {{ "}" }}

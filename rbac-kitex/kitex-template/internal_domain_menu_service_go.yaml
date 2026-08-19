@@ -1,0 +1,47 @@
+# ncgo exported template — internal/domain/menu/service.go
+path: internal/domain/menu/service.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import "sort"
+
+    // BuildTree assembles a flat menu list into a nested tree. Nodes with
+    // ParentID pointing at a missing parent are treated as roots ("orphans hang
+    // as roots"). Sibling order is stable: SortOrder ascending, then ID ascending.
+    func BuildTree(items []*Menu) []*Node {{ "{" }}
+    	if len(items) == 0 {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	byID := make(map[int64]*Node, len(items))
+    	for _, m := range items {{ "{" }}
+    		byID[m.ID] = &Node{{ "{" }}Menu: m{{ "}" }}
+    	{{ "}" }}
+    	var roots []*Node
+    	for _, m := range items {{ "{" }}
+    		n := byID[m.ID]
+    		if m.ParentID != 0 {{ "{" }}
+    			if parent, ok := byID[m.ParentID]; ok {{ "{" }}
+    				parent.Children = append(parent.Children, n)
+    				continue
+    			{{ "}" }}
+    		{{ "}" }}
+    		roots = append(roots, n)
+    	{{ "}" }}
+    	sortNodes(roots)
+    	return roots
+    {{ "}" }}
+
+    func sortNodes(nodes []*Node) {{ "{" }}
+    	sort.SliceStable(nodes, func(i, j int) bool {{ "{" }}
+    		a, b := nodes[i].Menu, nodes[j].Menu
+    		if a.SortOrder != b.SortOrder {{ "{" }}
+    			return a.SortOrder < b.SortOrder
+    		{{ "}" }}
+    		return a.ID < b.ID
+    	{{ "}" }})
+    	for _, n := range nodes {{ "{" }}
+    		sortNodes(n.Children)
+    	{{ "}" }}
+    {{ "}" }}

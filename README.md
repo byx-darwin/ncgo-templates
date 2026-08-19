@@ -18,6 +18,7 @@ The registry URL defaults to this repository; override with `--registry <url>` o
 |---|---|---|---|
 | `base-kitex` | kitex | Standard Kitex RPC service (layered layout + health check) | ✅ `ncgo new --kind kitex --template base-kitex` |
 | `base-hertz` | hertz | Standard Hertz HTTP service (layered layout + health check) | ✅ `ncgo new --kind hertz --template base-hertz` |
+| `rbac-kitex` | kitex | RBAC + auth authority service (DDD, Casbin sqlc adapter, JWT login, audit) | ✅ `ncgo new --kind kitex --template rbac-kitex` |
 | `rule-center` | kitex | Rate-limit rule-center service (Kitex gRPC + rate-limit store/resolver/middleware) | ⚠️ asset-ready; full preset consumption lands with ncgo rule-center template support |
 | `micro` | micro | Micro workspace reference (multi-service layout + shared compose/pre-commit) | ⚠️ reference; workspace template consumption lands with ncgo add rpc/bff template support |
 

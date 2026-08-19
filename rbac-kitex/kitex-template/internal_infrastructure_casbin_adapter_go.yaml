@@ -1,0 +1,258 @@
+# rbac-kitex template — internal/infrastructure/casbin/adapter.go
+path: internal/infrastructure/casbin/adapter.go
+update_behavior:
+  type: cover
+body: |-
+  package casbin
+
+  import (
+  	"context"
+  	"fmt"
+  	"sync"
+
+  	"github.com/casbin/casbin/v2/model"
+  	"github.com/casbin/casbin/v2/persist"
+
+  	"{{.Module}}/internal/db/gen"
+  )
+
+  // Policy is a single casbin_rule line: a ptype ("p" or "g") plus up to six
+  // variable columns. Unused trailing columns are empty strings.
+  type Policy struct {
+  	Ptype string
+  	V     [6]string
+  }
+
+  // PolicyStore is the persistence port the casbin adapter reads and writes.
+  type PolicyStore interface {
+  	List(ctx context.Context) ([]Policy, error)
+  	Insert(ctx context.Context, p Policy) error
+  	Delete(ctx context.Context, p Policy) error
+  	DeleteFiltered(ctx context.Context, ptype string, filter []string) error
+  }
+
+  // SQLPolicyStore implements PolicyStore over sqlc-generated queries
+  // (internal/db/gen). casbin_rule is the enforcement single-source of truth.
+  type SQLPolicyStore struct {
+  	q *gen.Queries
+  }
+
+  // NewSQLPolicyStore creates a sqlc-backed policy store.
+  func NewSQLPolicyStore(q *gen.Queries) *SQLPolicyStore {
+  	return &SQLPolicyStore{q: q}
+  }
+
+  // List returns every policy row ordered by insertion id.
+  func (s *SQLPolicyStore) List(ctx context.Context) ([]Policy, error) {
+  	rows, err := s.q.ListCasbinRules(ctx)
+  	if err != nil {
+  		return nil, err
+  	}
+  	out := make([]Policy, 0, len(rows))
+  	for _, r := range rows {
+  		out = append(out, Policy{
+  			Ptype: r.Ptype,
+  			V:     [6]string{r.V0, r.V1, r.V2, r.V3, r.V4, r.V5},
+  		})
+  	}
+  	return out, nil
+  }
+
+  // Insert adds a policy row, ignoring conflicts (ON CONFLICT DO NOTHING).
+  func (s *SQLPolicyStore) Insert(ctx context.Context, p Policy) error {
+  	_, err := s.q.InsertCasbinRule(ctx, gen.InsertCasbinRuleParams{
+  		Ptype: p.Ptype,
+  		V0:    p.V[0], V1: p.V[1], V2: p.V[2],
+  		V3: p.V[3], V4: p.V[4], V5: p.V[5],
+  	})
+  	return err
+  }
+
+  // Delete removes an exact policy row.
+  func (s *SQLPolicyStore) Delete(ctx context.Context, p Policy) error {
+  	return s.q.DeleteCasbinRule(ctx, gen.DeleteCasbinRuleParams{
+  		Ptype: p.Ptype,
+  		V0:    p.V[0], V1: p.V[1], V2: p.V[2],
+  		V3: p.V[3], V4: p.V[4], V5: p.V[5],
+  	})
+  }
+
+  // DeleteFiltered removes rows matching ptype plus any non-empty filter fields.
+  // filter is a 6-element slice aligned with V positions; "" means "any".
+  func (s *SQLPolicyStore) DeleteFiltered(ctx context.Context, ptype string, filter []string) error {
+  	f := normalizeFilter(filter)
+  	return s.q.DeleteCasbinRuleFiltered(ctx, gen.DeleteCasbinRuleFilteredParams{
+  		Ptype:   ptype,
+  		Column2: f[0], Column3: f[1], Column4: f[2],
+  		Column5: f[3], Column6: f[4], Column7: f[5],
+  	})
+  }
+
+  // MemoryPolicyStore is an in-memory PolicyStore used by tests and as the
+  // default store when no database is configured.
+  type MemoryPolicyStore struct {
+  	mu   sync.Mutex
+  	rows []Policy
+  }
+
+  // NewMemoryPolicyStore creates an empty in-memory policy store.
+  func NewMemoryPolicyStore() *MemoryPolicyStore {
+  	return &MemoryPolicyStore{}
+  }
+
+  // List returns a copy of all policy rows.
+  func (s *MemoryPolicyStore) List(ctx context.Context) ([]Policy, error) {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	out := make([]Policy, len(s.rows))
+  	copy(out, s.rows)
+  	return out, nil
+  }
+
+  // Insert appends a policy row, skipping exact duplicates.
+  func (s *MemoryPolicyStore) Insert(ctx context.Context, p Policy) error {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	for _, r := range s.rows {
+  		if r.Ptype == p.Ptype && r.V == p.V {
+  			return nil
+  		}
+  	}
+  	s.rows = append(s.rows, p)
+  	return nil
+  }
+
+  // Delete removes an exact policy row.
+  func (s *MemoryPolicyStore) Delete(ctx context.Context, p Policy) error {
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	for i, r := range s.rows {
+  		if r.Ptype == p.Ptype && r.V == p.V {
+  			s.rows = append(s.rows[:i], s.rows[i+1:]...)
+  			return nil
+  		}
+  	}
+  	return nil
+  }
+
+  // DeleteFiltered removes rows matching ptype plus non-empty filter fields.
+  func (s *MemoryPolicyStore) DeleteFiltered(ctx context.Context, ptype string, filter []string) error {
+  	f := normalizeFilter(filter)
+  	s.mu.Lock()
+  	defer s.mu.Unlock()
+  	kept := s.rows[:0]
+  	for _, r := range s.rows {
+  		if r.Ptype == ptype && matchesFilter(r.V, f) {
+  			continue
+  		}
+  		kept = append(kept, r)
+  	}
+  	s.rows = kept
+  	return nil
+  }
+
+  func matchesFilter(v [6]string, f []string) bool {
+  	for i := 0; i < 6; i++ {
+  		if i < len(f) && f[i] != "" && v[i] != f[i] {
+  			return false
+  		}
+  	}
+  	return true
+  }
+
+  func normalizeFilter(filter []string) []string {
+  	f := make([]string, 6)
+  	copy(f, filter)
+  	return f
+  }
+
+  // Adapter implements casbin persist.Adapter over a PolicyStore.
+  type Adapter struct {
+  	store PolicyStore
+  }
+
+  // NewAdapter creates a persist.Adapter backed by the given store.
+  func NewAdapter(store PolicyStore) *Adapter {
+  	return &Adapter{store: store}
+  }
+
+  // LoadPolicy loads every stored policy into the casbin model.
+  func (a *Adapter) LoadPolicy(m model.Model) error {
+  	policies, err := a.store.List(context.Background())
+  	if err != nil {
+  		return fmt.Errorf("casbin adapter: list policies: %w", err)
+  	}
+  	for _, p := range policies {
+  		rule := policyRule(p)
+  		if len(rule) == 0 {
+  			continue
+  		}
+  		if err := m.AddPolicy(p.Ptype, p.Ptype, rule); err != nil {
+  			return fmt.Errorf("casbin adapter: add policy %s %v: %w", p.Ptype, rule, err)
+  		}
+  	}
+  	return nil
+  }
+
+  // SavePolicy truncates the store and re-inserts every policy from the model.
+  func (a *Adapter) SavePolicy(m model.Model) error {
+  	ctx := context.Background()
+  	if err := a.store.DeleteFiltered(ctx, "", nil); err != nil {
+  		return fmt.Errorf("casbin adapter: clear policies: %w", err)
+  	}
+  	for _, sec := range []string{"p", "g"} {
+  		assertions, ok := m[sec]
+  		if !ok {
+  			continue
+  		}
+  		for _, ast := range assertions {
+  			for _, rule := range ast.Policy {
+  				p := Policy{Ptype: sec}
+  				copy(p.V[:], rule)
+  				if err := a.store.Insert(ctx, p); err != nil {
+  					return fmt.Errorf("casbin adapter: save policy %v: %w", rule, err)
+  				}
+  			}
+  		}
+  	}
+  	return nil
+  }
+
+  // AddPolicy inserts a policy line.
+  func (a *Adapter) AddPolicy(sec, ptype string, rule []string) error {
+  	p := Policy{Ptype: ptype}
+  	copy(p.V[:], rule)
+  	return a.store.Insert(context.Background(), p)
+  }
+
+  // RemovePolicy deletes an exact policy line.
+  func (a *Adapter) RemovePolicy(sec, ptype string, rule []string) error {
+  	p := Policy{Ptype: ptype}
+  	copy(p.V[:], rule)
+  	return a.store.Delete(context.Background(), p)
+  }
+
+  // RemoveFilteredPolicy deletes policy lines matching the given field index.
+  func (a *Adapter) RemoveFilteredPolicy(sec, ptype string, fieldIndex int, fieldValues ...string) error {
+  	filter := make([]string, 6)
+  	for i, v := range fieldValues {
+  		if fieldIndex+i < 6 {
+  			filter[fieldIndex+i] = v
+  		}
+  	}
+  	return a.store.DeleteFiltered(context.Background(), ptype, filter)
+  }
+
+  func policyRule(p Policy) []string {
+  	var rule []string
+  	for _, v := range p.V {
+  		if v == "" {
+  			break
+  		}
+  		rule = append(rule, v)
+  	}
+  	return rule
+  }
+
+  var _ persist.Adapter = (*Adapter)(nil)
+

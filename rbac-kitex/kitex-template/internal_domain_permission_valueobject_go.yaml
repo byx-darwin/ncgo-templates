@@ -1,0 +1,14 @@
+# ncgo exported template — internal/domain/permission/valueobject.go
+path: internal/domain/permission/valueobject.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    // PermissionCode is a value object wrapping the unified permission code. The
+    // code is the single identifier shared by permissions.code, the Casbin obj,
+    // and menu/button perm_code.
+    type PermissionCode string
+
+    // Value returns the raw code string.
+    func (c PermissionCode) Value() string {{ "{" }} return string(c) {{ "}" }}

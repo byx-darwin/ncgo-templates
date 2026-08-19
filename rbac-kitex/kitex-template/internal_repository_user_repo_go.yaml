@@ -1,0 +1,206 @@
+# ncgo exported template — internal/repository/user/repo.go
+path: internal/repository/user/repo.go
+update_behavior:
+    type: skip
+
+body: |
+    package userrepo
+
+    import (
+    	"context"
+    	"errors"
+
+    	goerror "github.com/byx-darwin/go-tools/go-common/error"
+    	frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    // Repo implements user.Repository and the user-side role assignment helpers
+    // on top of sqlc-generated queries.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a Repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    // GetByID returns a user or user.NotFoundError.
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    			return nil, user.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    		{{ "}" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapUser(row), nil
+    {{ "}" }}
+
+    // GetByUsername returns a user or user.NotFoundError.
+    func (r *Repo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByUsername(ctx, username)
+    	if err != nil {{ "{" }}
+    		if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    			return nil, user.NotFoundError{{ "{" }}Username: username{{ "}" }}
+    		{{ "}" }}
+    		return nil, err
+    	{{ "}" }}
+    	return mapUser(row), nil
+    {{ "}" }}
+
+    // List returns users with offset pagination.
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}
+    	rows, err := r.q.ListUsers(ctx, gen.ListUsersParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*user.User, 0, len(rows))
+    	for i := range rows {{ "{" }}
+    		out = append(out, mapUser(rows[i]))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    // Count returns the total number of users.
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountUsers(ctx)
+    {{ "}" }}
+
+    // Save creates or updates a user. New users are assigned an ID on the entity.
+    func (r *Repo) Save(ctx context.Context, u *user.User) error {{ "{" }}
+    	if u.ID == 0 {{ "{" }}
+    		row, err := r.q.CreateUser(ctx, gen.CreateUserParams{{ "{" }}
+    			Username:     u.Username,
+    			PasswordHash: u.PasswordHash,
+    			Status:       u.Status,
+    		{{ "}" }})
+    		if err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    		u.ID = row.ID
+    		return nil
+    	{{ "}" }}
+    	if _, err := r.q.UpdateUser(ctx, gen.UpdateUserParams{{ "{" }}
+    		Username: u.Username,
+    		Status:   u.Status,
+    		ID:       u.ID,
+    	{{ "}" }}); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_, err := r.q.UpdateUserPassword(ctx, gen.UpdateUserPasswordParams{{ "{" }}
+    		PasswordHash: u.PasswordHash,
+    		ID:           u.ID,
+    	{{ "}" }})
+    	return err
+    {{ "}" }}
+
+    // Delete removes a user (role links cascade).
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeleteUser(ctx, id)
+    {{ "}" }}
+
+    // SetStatus updates a user's status after validating the new value.
+    func (r *Repo) SetStatus(ctx context.Context, id int64, status string) error {{ "{" }}
+    	u, err := r.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_, err = r.q.UpdateUser(ctx, gen.UpdateUserParams{{ "{" }}Username: u.Username, Status: status, ID: id{{ "}" }})
+    	return err
+    {{ "}" }}
+
+    // AssignRoles links a user to the given role ids (ON CONFLICT DO NOTHING).
+    func (r *Repo) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    	for _, rid := range roleIDs {{ "{" }}
+    		if err := r.q.AddUserRole(ctx, gen.AddUserRoleParams{{ "{" }}UserID: uid, RoleID: rid{{ "}" }}); err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    // ClearRoles removes every role link for a user.
+    func (r *Repo) ClearRoles(ctx context.Context, uid int64) error {{ "{" }}
+    	return r.q.ClearUserRoles(ctx, uid)
+    {{ "}" }}
+
+    // ListRoles returns the roles assigned to a user.
+    func (r *Repo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	rows, err := r.q.ListRolesByUserID(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*role.Role, 0, len(rows))
+    	for i := range rows {{ "{" }}
+    		out = append(out, mapRole(rows[i]))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    // WithTx runs fn inside a database transaction, rolling back on error/panic.
+    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
+    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return goerror.
+    			In("user.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "begin transaction")
+    	{{ "}" }}
+    	committed := false
+    	defer func() {{ "{" }}
+    		if committed {{ "{" }}
+    			return
+    		{{ "}" }}
+    		if p := recover(); p != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    			panic(p)
+    		{{ "}" }}
+    		if err != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    		{{ "}" }}
+    	{{ "}" }}()
+    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
+    	if err := fn(txRepo); err != nil {{ "{" }}
+    		return goerror.
+    			In("user.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "transaction callback")
+    	{{ "}" }}
+    	if err := tx.Commit(ctx); err != nil {{ "{" }}
+    		return goerror.
+    			In("user.repository").
+    			Tags("database", "postgres", "transaction").
+    			Code(frameworkerror.CodeSystem).
+    			Public("database transaction failed").
+    			Wrapf(err, "commit transaction")
+    	{{ "}" }}
+    	committed = true
+    	return nil
+    {{ "}" }}
+
+    var _ user.Repository = (*Repo)(nil)
+
+    func mapUser(row gen.User) *user.User {{ "{" }}
+    	return &user.User{{ "{" }}
+    		ID:           row.ID,
+    		Username:     row.Username,
+    		PasswordHash: row.PasswordHash,
+    		Status:       row.Status,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func mapRole(row gen.Role) *role.Role {{ "{" }}
+    	return &role.Role{{ "{" }}ID: row.ID, Code: row.Code, Name: row.Name{{ "}" }}
+    {{ "}" }}

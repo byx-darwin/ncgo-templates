@@ -1,0 +1,33 @@
+# ncgo exported template — internal/application/user/dto.go
+path: internal/application/user/dto.go
+update_behavior:
+    type: skip
+body: |
+    package usersvc
+
+    // CreateUserInput carries a user creation request.
+    type CreateUserInput struct {{ "{" }}
+    	Username string
+    	Password string
+    {{ "}" }}
+
+    // UpdateUserInput carries a partial user update (password and/or status).
+    type UpdateUserInput struct {{ "{" }}
+    	ID       int64
+    	Password *string
+    	Status   *string
+    {{ "}" }}
+
+    // ListUsersOutput carries a page of users plus the total count.
+    type ListUsersOutput struct {{ "{" }}
+    	Users []*UserRow
+    	Total int64
+    {{ "}" }}
+
+    // UserRow is a user plus its role codes.
+    type UserRow struct {{ "{" }}
+    	ID       int64
+    	Username string
+    	Status   string
+    	Roles    []string
+    {{ "}" }}

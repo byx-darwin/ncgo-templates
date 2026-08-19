@@ -1,0 +1,100 @@
+# ncgo exported template — internal/application/permission/permission_service.go
+path: internal/application/permission/permission_service.go
+update_behavior:
+    type: skip
+body: |
+    package permsvc
+
+    import (
+    	"context"
+
+    	rbacsvc "{{.Module}}/internal/application/rbac"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/infrastructure/audit"
+    )
+
+    // permRepo is the permission service's data-access port.
+    type permRepo interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*permission.Permission, error)
+    	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
+    	Count(ctx context.Context) (int64, error)
+    	ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error)
+    	Save(ctx context.Context, p *permission.Permission) error
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}
+
+    // Service implements permission management. Deleting a permission cascades
+    // role_permissions via the FK and strips its Casbin policies.
+    type Service struct {{ "{" }}
+    	perms    permRepo
+    	enforcer rbacsvc.Enforcer
+    	audit    audit.Writer
+    {{ "}" }}
+
+    // New wires the permission service.
+    func New(perms permRepo, enforcer rbacsvc.Enforcer, audit audit.Writer) *Service {{ "{" }}
+    	return &Service{{ "{" }}perms: perms, enforcer: enforcer, audit: audit{{ "}" }}
+    {{ "}" }}
+
+    // Create validates kind and normalizes method via the domain, then persists.
+    func (s *Service) Create(ctx context.Context, in CreatePermissionInput) (*permission.Permission, error) {{ "{" }}
+    	p, err := permission.New(in.Code, in.Name, in.Kind, in.Method)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if err := s.perms.Save(ctx, p); err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "permission.create", p.Code, `{{ "{" }}{{ "}" }}`)
+    	return p, nil
+    {{ "}" }}
+
+    // Delete removes a permission and every Casbin p(role, code, method) rule
+    // referencing its unified code. role_permissions rows cascade via the FK.
+    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	p, err := s.perms.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err := s.perms.Delete(ctx, id); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if _, err := s.enforcer.RemoveFilteredPolicy(1, p.Code); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, id, "permission.delete", p.Code, `{{ "{" }}{{ "}" }}`)
+    	return nil
+    {{ "}" }}
+
+    // List returns a page of permissions plus the total count.
+    func (s *Service) List(ctx context.Context, page, pageSize int32) (*ListPermissionsOutput, error) {{ "{" }}
+    	page, pageSize = normalizePage(page, pageSize)
+    	perms, err := s.perms.List(ctx, pageSize, (page-1)*pageSize)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	total, err := s.perms.Count(ctx)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	rows := make([]*PermissionRow, 0, len(perms))
+    	for _, p := range perms {{ "{" }}
+    		rows = append(rows, &PermissionRow{{ "{" }}
+    			ID: p.ID, Code: p.Code, Name: p.Name, Kind: p.Kind, Method: p.Method,
+    		{{ "}" }})
+    	{{ "}" }}
+    	return &ListPermissionsOutput{{ "{" }}Permissions: rows, Total: total{{ "}" }}, nil
+    {{ "}" }}
+
+    func normalizePage(page, pageSize int32) (int32, int32) {{ "{" }}
+    	if page < 1 {{ "{" }}
+    		page = 1
+    	{{ "}" }}
+    	if pageSize < 1 {{ "{" }}
+    		pageSize = 20
+    	{{ "}" }}
+    	if pageSize > 100 {{ "{" }}
+    		pageSize = 100
+    	{{ "}" }}
+    	return page, pageSize
+    {{ "}" }}

@@ -1,0 +1,245 @@
+syntax = "proto3";
+
+package api.rbac.v1;
+
+option go_package = "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/kitex_gen/api/rbac/v1;rbacv1";
+
+import "api.proto";
+
+// RBACService handles role-based access control operations
+service RBACService {
+  rpc Enforce(EnforceRequest) returns (EnforceResponse);
+
+  // User management
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+  // Role management
+  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
+  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
+  rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse);
+  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
+
+  // Permission management
+  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
+  rpc GetPermission(GetPermissionRequest) returns (GetPermissionResponse);
+  rpc CreatePermission(CreatePermissionRequest) returns (CreatePermissionResponse);
+  rpc UpdatePermission(UpdatePermissionRequest) returns (UpdatePermissionResponse);
+  rpc DeletePermission(DeletePermissionRequest) returns (DeletePermissionResponse);
+
+  // Menu management
+  rpc ListMenus(ListMenusRequest) returns (ListMenusResponse);
+
+  // Current user operations
+  rpc GetUserMenuTree(GetUserMenuTreeRequest) returns (GetUserMenuTreeResponse);
+  rpc GetUserPermCodes(GetUserPermCodesRequest) returns (GetUserPermCodesResponse);
+}
+
+message EnforceRequest {
+  string sub = 1;
+  string obj = 2;
+  string act = 3;
+}
+
+message EnforceResponse {
+  bool allowed = 1;
+}
+
+// User messages
+message User {
+  int64 id = 1;
+  string username = 2;
+  string email = 3;
+  bool active = 4;
+  repeated string roles = 5;
+}
+
+message ListUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  int32 total = 2;
+}
+
+message GetUserRequest {
+  int64 id = 1;
+}
+
+message GetUserResponse {
+  User user = 1;
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string email = 3;
+  repeated string roles = 4;
+}
+
+message CreateUserResponse {
+  User user = 1;
+}
+
+message UpdateUserRequest {
+  int64 id = 1;
+  string username = 2;
+  string email = 3;
+  bool active = 4;
+  repeated string roles = 5;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+}
+
+message DeleteUserRequest {
+  int64 id = 1;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+}
+
+// Role messages
+message Role {
+  int64 id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string permissions = 4;
+}
+
+message ListRolesRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListRolesResponse {
+  repeated Role roles = 1;
+  int32 total = 2;
+}
+
+message CreateRoleRequest {
+  string name = 1;
+  string description = 2;
+  repeated string permissions = 3;
+}
+
+message CreateRoleResponse {
+  Role role = 1;
+}
+
+message UpdateRoleRequest {
+  int64 id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string permissions = 4;
+}
+
+message UpdateRoleResponse {
+  Role role = 1;
+}
+
+message DeleteRoleRequest {
+  int64 id = 1;
+}
+
+message DeleteRoleResponse {
+  bool success = 1;
+}
+
+// Permission messages
+message Permission {
+  int64 id = 1;
+  string code = 2;
+  string name = 3;
+  string description = 4;
+}
+
+message ListPermissionsRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListPermissionsResponse {
+  repeated Permission permissions = 1;
+  int32 total = 2;
+}
+
+message GetPermissionRequest {
+  int64 id = 1;
+}
+
+message GetPermissionResponse {
+  Permission permission = 1;
+}
+
+message CreatePermissionRequest {
+  string code = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message CreatePermissionResponse {
+  Permission permission = 1;
+}
+
+message UpdatePermissionRequest {
+  int64 id = 1;
+  string code = 2;
+  string name = 3;
+  string description = 4;
+}
+
+message UpdatePermissionResponse {
+  Permission permission = 1;
+}
+
+message DeletePermissionRequest {
+  int64 id = 1;
+}
+
+message DeletePermissionResponse {
+  bool success = 1;
+}
+
+// Menu messages
+message Menu {
+  int64 id = 1;
+  string name = 2;
+  string path = 3;
+  string icon = 4;
+  int64 parent_id = 5;
+  int32 order = 6;
+}
+
+message ListMenusRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListMenusResponse {
+  repeated Menu menus = 1;
+  int32 total = 2;
+}
+
+message GetUserMenuTreeRequest {
+  string user_id = 1;
+}
+
+message GetUserMenuTreeResponse {
+  repeated Menu menus = 1;
+}
+
+message GetUserPermCodesRequest {
+  string user_id = 1;
+}
+
+message GetUserPermCodesResponse {
+  repeated string perm_codes = 1;
+}

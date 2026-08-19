@@ -1,0 +1,15 @@
+# ncgo exported template — internal/pkg/middleware/memory_cache.go
+path: internal/pkg/middleware/memory_cache.go
+update_behavior:
+    type: cover
+body: |
+    package middleware
+
+    const defaultMemoryCacheMaxEntries = 100000
+
+    func memoryCacheMaxEntries(configured int) int {{ "{" }}
+    	if configured <= 0 {{ "{" }}
+    		return defaultMemoryCacheMaxEntries
+    	{{ "}" }}
+    	return configured
+    {{ "}" }}

@@ -1,0 +1,4 @@
+name: admin-bff-hertz
+kind: hertz
+description: "Official admin BFF Hertz HTTP template (JWT auth + RBAC authz via rbac-kitex + rate-limit rule management via rule-center)"
+version: "1"

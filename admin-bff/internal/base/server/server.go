@@ -20,6 +20,9 @@ import (
 
     "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pkg/middleware"
     "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pkg/response"
+    "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/router"
+    rbacclient "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/pkg/client/rbac"
+    rulecenterclient "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/pkg/client/rulecenter"
 )
 
 func Run() {
@@ -102,9 +105,22 @@ func Run() {
         dbData = do.MustInvoke[*data.Data](injector)
         repository.NewRateLimitRuleRepository(dbData)
     }
-    
+
+
+    // Initialize RPC clients for admin BFF
+    rbacCli, err := rbacclient.New(ctx, cfg.GRPC.RBAC)
+    if err != nil {
+        log.Fatalf("init rbac client: %v", err)
+    }
+
+    rulecenterCli, err := rulecenterclient.New(ctx, cfg.GRPC.RuleCenter)
+    if err != nil {
+        log.Fatalf("init rulecenter client: %v", err)
+    }
 
     // Register routes
+    router.GeneratedRegister(h)
+    router.RegisterAdminRoutes(h, rbacCli, rulecenterCli)
 
     // Start server
     h.Spin()

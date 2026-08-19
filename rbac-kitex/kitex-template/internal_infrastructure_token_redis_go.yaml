@@ -23,7 +23,7 @@ body: |-
   }
 
   // NewRedisStore creates a RedisStore seam. keyPrefix scopes all keys, e.g.
-  // "rbac-rpc".
+  // "{{.ServiceName}}".
   func NewRedisStore(redisAddr, keyPrefix string) *RedisStore {
   	return &RedisStore{addr: redisAddr, keyPrefix: keyPrefix}
   }

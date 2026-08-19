@@ -20,7 +20,7 @@ body: |-
       # 服务注册信息
       registry:
         # 服务名：用于服务注册、日志、指标等
-        name: rbacservice
+        name: {{.ServiceName}}
       # 超时配置（使用 Go time.Duration 字符串格式，如 "30s"/"1m"）
       timeout:
         # 连接读写超时

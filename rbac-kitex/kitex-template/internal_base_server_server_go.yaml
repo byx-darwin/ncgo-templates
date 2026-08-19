@@ -157,7 +157,7 @@ body: |
     // default; redis is a documented production seam (type present, client unwired).
     func newTokenStore(cfg conf.AuthConfig) tokeninfra.Store {{ "{" }}
     	if cfg.TokenStore == "redis" {{ "{" }}
-    		return tokeninfra.NewRedisStore(cfg.RedisAddr, "rbac-rpc")
+    		return tokeninfra.NewRedisStore(cfg.RedisAddr, "{{.ServiceName}}")
     	{{ "}" }}
     	return tokeninfra.NewMemoryStore()
     {{ "}" }}

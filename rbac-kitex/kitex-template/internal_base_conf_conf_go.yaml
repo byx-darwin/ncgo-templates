@@ -241,7 +241,7 @@ body: |
     				Network: "tcp",
     			{{ "}" }},
     			Registry: &config.RegistryOption{{ "{" }}
-    				Name: "rbacservice",
+    				Name: "{{.ServiceName}}",
     			{{ "}" }},
     			Timeout: &kitexconfig.ServerTimeout{{ "{" }}
     				ReadWriteTimeout: 30 * time.Second,
@@ -267,10 +267,10 @@ body: |
     		RateLimit: RateLimitConfig{{ "{" }}
     			Enabled:      false,
     			Source:       RateLimitSourceConfig{{ "{" }}Type: "database", CacheTTLSeconds: config.Duration{{ "{" }}Duration: 60 * time.Second{{ "}" }}, FallbackOnError: true{{ "}" }},
-    			GRPC:         RateLimitGRPCConfig{{ "{" }}TimeoutMilliseconds: config.Duration{{ "{" }}Duration: 200 * time.Millisecond{{ "}" }}, ServiceName: "rbacservice", AuthHeader: "Authorization"{{ "}" }},
+    			GRPC:         RateLimitGRPCConfig{{ "{" }}TimeoutMilliseconds: config.Duration{{ "{" }}Duration: 200 * time.Millisecond{{ "}" }}, ServiceName: "{{.ServiceName}}", AuthHeader: "Authorization"{{ "}" }},
     			Database:     RateLimitDatabaseConfig{{ "{" }}QueryTimeoutMilliseconds: config.Duration{{ "{" }}Duration: 200 * time.Millisecond{{ "}}" }},
     			Backend:      "memory",
-    			KeyPrefix:    "rbacservice:rate_limit",
+    			KeyPrefix:    "{{.ServiceName}}:rate_limit",
     			AppKeyHeader: "x-app-key",
     			SkipPaths:    []string{{ "{" }}{{ "}" }},
     			PreAuth: RateLimitPhaseConfig{{ "{" }}

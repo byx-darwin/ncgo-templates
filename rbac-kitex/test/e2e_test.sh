@@ -58,10 +58,11 @@ go_test() { # $1=dir  $2=label  $3..=env assignments
   ( cd "$dir" && env "$@" go test ./... ) && log "$label test ok" || fail "$label go test"
 }
 
-# 工具门槛
+# 工具门槛：缺少任一工具时显式跳过并 exit 0（plan Task 9 Step 1 — 禁止 "skipped" 后继续硬失败）
 for tool in kitex protoc sqlc; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     skip "$tool 未安装（rbac-kitex e2e 需要 $tool）"
+    exit 0
   fi
 done
 

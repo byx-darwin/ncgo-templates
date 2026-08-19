@@ -92,9 +92,14 @@ body: |-
   -- name: DeleteCasbinRule :exec
   DELETE FROM casbin_rule WHERE ptype = $1 AND v0 = $2 AND v1 = $3 AND v2 = $4 AND v3 = $5 AND v4 = $6 AND v5 = $7;
   -- name: DeleteCasbinRuleFiltered :exec
-  DELETE FROM casbin_rule WHERE ptype = $1
-    AND ($2 = '' OR v0 = $2) AND ($3 = '' OR v1 = $3) AND ($4 = '' OR v2 = $4)
-    AND ($5 = '' OR v3 = $5) AND ($6 = '' OR v4 = $6) AND ($7 = '' OR v5 = $7);
+  DELETE FROM casbin_rule
+  WHERE (sqlc.arg(ptype)::text = '' OR ptype = sqlc.arg(ptype)::text)
+    AND v0 = COALESCE(NULLIF(sqlc.arg(v0)::text,''), v0)
+    AND v1 = COALESCE(NULLIF(sqlc.arg(v1)::text,''), v1)
+    AND v2 = COALESCE(NULLIF(sqlc.arg(v2)::text,''), v2)
+    AND v3 = COALESCE(NULLIF(sqlc.arg(v3)::text,''), v3)
+    AND v4 = COALESCE(NULLIF(sqlc.arg(v4)::text,''), v4)
+    AND v5 = COALESCE(NULLIF(sqlc.arg(v5)::text,''), v5);
   -- name: CountCasbinRules :one
   SELECT count(*) FROM casbin_rule;
 

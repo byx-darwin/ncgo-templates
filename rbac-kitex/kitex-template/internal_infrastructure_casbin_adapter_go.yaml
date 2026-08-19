@@ -78,13 +78,14 @@ body: |-
   }
 
   // DeleteFiltered removes rows matching ptype plus any non-empty filter fields.
-  // filter is a 6-element slice aligned with V positions; "" means "any".
+  // An empty ptype is a wildcard (matches every row); SavePolicy relies on it to
+  // truncate. filter is a 6-element slice aligned with V positions; "" means "any".
   func (s *SQLPolicyStore) DeleteFiltered(ctx context.Context, ptype string, filter []string) error {
   	f := normalizeFilter(filter)
   	return s.q.DeleteCasbinRuleFiltered(ctx, gen.DeleteCasbinRuleFilteredParams{
-  		Ptype:   ptype,
-  		Column2: f[0], Column3: f[1], Column4: f[2],
-  		Column5: f[3], Column6: f[4], Column7: f[5],
+  		Ptype: ptype,
+  		V0:    f[0], V1: f[1], V2: f[2],
+  		V3: f[3], V4: f[4], V5: f[5],
   	})
   }
 
@@ -136,13 +137,15 @@ body: |-
   }
 
   // DeleteFiltered removes rows matching ptype plus non-empty filter fields.
+  // An empty ptype is a wildcard (matches every row); SavePolicy relies on it to
+  // truncate the whole store.
   func (s *MemoryPolicyStore) DeleteFiltered(ctx context.Context, ptype string, filter []string) error {
   	f := normalizeFilter(filter)
   	s.mu.Lock()
   	defer s.mu.Unlock()
   	kept := s.rows[:0]
   	for _, r := range s.rows {
-  		if r.Ptype == ptype && matchesFilter(r.V, f) {
+  		if (ptype == "" || r.Ptype == ptype) && matchesFilter(r.V, f) {
   			continue
   		}
   		kept = append(kept, r)
@@ -195,10 +198,15 @@ body: |-
   }
 
   // SavePolicy truncates the store and re-inserts every policy from the model.
+  // Every row is ptype "p" or "g", so two scoped deletes clear the table; the
+  // stores also treat an empty ptype as a wildcard (defense in depth).
   func (a *Adapter) SavePolicy(m model.Model) error {
   	ctx := context.Background()
-  	if err := a.store.DeleteFiltered(ctx, "", nil); err != nil {
-  		return fmt.Errorf("casbin adapter: clear policies: %w", err)
+  	if err := a.store.DeleteFiltered(ctx, "p", nil); err != nil {
+  		return fmt.Errorf("casbin adapter: clear p policies: %w", err)
+  	}
+  	if err := a.store.DeleteFiltered(ctx, "g", nil); err != nil {
+  		return fmt.Errorf("casbin adapter: clear g policies: %w", err)
   	}
   	for _, sec := range []string{"p", "g"} {
   		assertions, ok := m[sec]

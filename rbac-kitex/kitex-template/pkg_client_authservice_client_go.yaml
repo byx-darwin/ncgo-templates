@@ -48,7 +48,7 @@ body: |
 
     func DefaultConfig() Config {{ "{" }}
     	return Config{{ "{" }}
-    		ServiceName:                "authservice",
+    		ServiceName:                "AuthService",
     		RPCTimeoutSeconds:          3,
     		ConnectTimeoutMilliseconds: 100,
     		EnableMetaInfo:             true,

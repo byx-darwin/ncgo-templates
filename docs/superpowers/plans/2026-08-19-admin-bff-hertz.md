@@ -1,12 +1,12 @@
-# admin-bff-hertz Implementation Plan
+# admin-bff-hertz Implementation Plan (Revised)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Create a Hertz HTTP BFF template that provides admin API gateway functionality with JWT auth, RBAC authorization via rpc call to rbac-kitex, and rate-limit rule management via rpc call to rule-center.
+**Goal:** Create a Hertz HTTP BFF template that provides admin API gateway functionality with JWT auth, RBAC authorization via RPC call to rbac-kitex, and rate-limit rule management via RPC call to rule-center.
 
-**Architecture:** Thin BFF layer using Hertz framework with JWT middleware for authentication, Authz middleware calling rbac-kitex Enforce RPC for authorization, handlers that proxy to backend RPC services (rbac-kitex for auth/RBAC, rule-center for rate-limit rules). pkg/client encapsulates RPC client initialization.
+**Architecture:** Thin BFF layer using Hertz framework with JWT middleware for authentication, Authz middleware calling rbac-kitex Enforce RPC for authorization, handlers that proxy to backend RPC services. Build via ncgo workflow: write Go project → `ncgo export templates` → assemble template package.
 
-**Tech Stack:** Go 1.24+, Hertz (HTTP), Kitex (gRPC client), PostgreSQL (for generated project), JWT (HS256)
+**Tech Stack:** Go 1.24+, Hertz (HTTP), Kitex (gRPC client), ncgo CLI, PostgreSQL (for generated project), JWT (HS256)
 
 **Spec:** docs/superpowers/specs/2026-08-19-admin-bff-hertz-design.md
 
@@ -14,6 +14,7 @@
 
 - Template kind: `hertz`
 - Template name: `admin-bff-hertz`
+- Build method: `ncgo new` → hand-write Go code → `ncgo export templates` → assemble package
 - Variables: `{{.Module}}`, `{{.ServiceName}}`, `{{ToLower .ServiceName}}`
 - JWT algorithm: HS256 (RS256/JWKS as documented TODO seam)
 - Authz pattern: Handler declares `RequirePermission("code")`, middleware calls rbac-kitex Enforce RPC
@@ -23,189 +24,159 @@
 - Rate-limit: BFF manages rules (CRUD), does NOT enforce rate-limit on itself
 - All tests hermetic (mock RPC clients, skip postgres/redis if unavailable)
 
+## Build Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Phase A: Create Go Project (in worktree or temp directory)    │
+├─────────────────────────────────────────────────────────────────┤
+│  1. ncgo new admin-bff --kind hertz --db postgres              │
+│  2. Hand-write Go code:                                        │
+│     - internal/pkg/middleware/jwt.go + authz.go                │
+│     - internal/handler/auth.go, user.go, role.go, ...          │
+│     - pkg/client/rbac/client.go + rulecenter/client.go         │
+│     - internal/base/conf/conf.go (extend with JWT/gRPC config) │
+│     - internal/router/register.go                              │
+│     - internal/base/server/server.go (wire clients)            │
+│  3. go build ./... && go test ./... (hermetic, mock clients)   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  Phase B: Export to Template                                   │
+├─────────────────────────────────────────────────────────────────┤
+│  4. ncgo export templates --kind hertz                         │
+│     → Generates hertz-template/*.yaml from Go source           │
+│  5. Assemble admin-bff-hertz/ package:                         │
+│     - template.yaml                                            │
+│     - hertz-template/*.yaml (from export)                      │
+│     - idl/auth.proto + rule_center.proto                       │
+│     - README.md                                                │
+│     - test/e2e_test.sh                                         │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  Phase C: Verification                                         │
+├─────────────────────────────────────────────────────────────────┤
+│  6. ncgo new test-bff --template admin-bff-hertz               │
+│  7. go build ./... && go test ./...                            │
+│  8. Verify generated project structure matches spec            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
-## Task 1: Template Scaffolding
+## Task 1: Create Worktree + Generate Base Project
 
 **Files:**
-- Create: `admin-bff-hertz/template.yaml`
-- Create: `admin-bff-hertz/README.md`
+- Create: `.worktree/feat-12-admin-bff-hertz/` (worktree directory)
+- Generate: Base Hertz project via `ncgo new`
 
 **Interfaces:**
-- Consumes: Nothing
-- Produces: Template package structure recognized by ncgo
+- Consumes: ncgo CLI, base-hertz template
+- Produces: Working Hertz project directory
 
-- [ ] **Step 1: Create template.yaml**
-
-```yaml
-# admin-bff-hertz/template.yaml
-name: admin-bff-hertz
-kind: hertz
-description: "Official admin BFF Hertz HTTP template (JWT auth + RBAC authz via rbac-kitex + rate-limit rule management via rule-center)"
-version: "1"
-skip_default_templates:
-  - handler.yaml
-  - usecase.yaml
-  - repository.yaml
-  - server.yaml
-  - migration_init.yaml
-  - migration_keep.yaml
-  - ratelimit_handler.yaml
-  - ratelimit_middleware_test.yaml
-  - ratelimit_middleware.yaml
-  - ratelimit_proto.yaml
-  - ratelimit_repository.yaml
-  - ratelimit_schema.yaml
-  - ratelimit_server.yaml
-  - ratelimit_sqlc_queries.yaml
-  - ratelimit_usecase.yaml
-```
-
-- [ ] **Step 2: Create placeholder README.md**
-
-```markdown
-# admin-bff-hertz
-
-Official **admin BFF** Hertz HTTP template — thin API gateway for micro-admin with JWT auth, RBAC authorization (via rbac-kitex RPC), and rate-limit rule management (via rule-center RPC).
-
-## Use
-
-\`\`\`bash
-ncgo template pull admin-bff-hertz
-ncgo new admin-bff --module github.com/acme/admin-bff --kind hertz --template admin-bff-hertz
-\`\`\`
-
-## Contents
-
-- JWT middleware (HS256)
-- Authz middleware (RequirePermission → rbac-kitex Enforce RPC)
-- Auth handlers: /api/v1/auth/login|refresh|logout
-- RBAC handlers: /api/v1/users|roles|permissions|menus
-- Current user: /api/v1/me/menus|perms
-- Rate-limit rule management: /api/v1/rate-limit-rules
-- pkg/client: rbac/ + rulecenter/
-
-## Seams (TODO)
-
-- RS256/JWKS (v1 uses HS256)
-- Local Casbin enforcer + watcher (v1 uses Enforce RPC)
-- OTel observability (base wiring)
-```
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 1: Create worktree**
 
 ```bash
-git add admin-bff-hertz/template.yaml admin-bff-hertz/README.md
-git commit -m "feat(admin-bff-hertz): add template scaffolding"
+git worktree add .worktree/feat-12-admin-bff-hertz -b feat/12-admin-bff-hertz
 ```
 
----
-
-## Task 2: IDL Files
-
-**Files:**
-- Create: `admin-bff-hertz/idl/auth.proto`
-- Create: `admin-bff-hertz/idl/rule_center.proto`
-
-**Interfaces:**
-- Consumes: rbac-kitex IDL definitions
-- Produces: IDL files for ncgo to generate kitex_gen code
-
-- [ ] **Step 1: Copy auth.proto from rbac-kitex**
-
-Copy from `rbac-kitex/idl/auth.proto` to `admin-bff-hertz/idl/auth.proto`. This defines:
-- `AuthService`: Login, Refresh, Logout, ValidateToken
-- `RBACService`: User/Role/Permission/Menu CRUD, Enforce, GetUserMenuTree, GetUserPermCodes
-
-- [ ] **Step 2: Copy rule_center.proto from rule-center**
-
-Copy from `rule-center/idl/rule-center.proto` to `admin-bff-hertz/idl/rule_center.proto`. This defines:
-- `RuleService`: GetRule, CreateRule, UpdateRule, DeleteRule, ListRules
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Generate base Hertz project**
 
 ```bash
-git add admin-bff-hertz/idl/
-git commit -m "feat(admin-bff-hertz): add IDL files"
+cd .worktree/feat-12-admin-bff-hertz
+ncgo new admin-bff --module github.com/byx-darwin/ncgo-templates/admin-bff-hertz --kind hertz --db postgres
+```
+
+- [ ] **Step 3: Verify base project builds**
+
+```bash
+cd admin-bff
+go build ./...
+go test ./...
+```
+
+Expected: Build succeeds, tests pass (base template is hermetic).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add .
+git commit -m "chore: scaffold base hertz project for admin-bff"
 ```
 
 ---
 
-## Task 3: Configuration Template
+## Task 2: Extend Configuration
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/conf_dev_yaml.yaml`
+- Modify: `internal/base/conf/conf.go`
+- Modify: `conf/dev/conf.yaml`
 
 **Interfaces:**
-- Consumes: Nothing
-- Produces: Config struct with jwt, grpc.rbc, grpc.rule_center sections
+- Consumes: Base conf structure
+- Produces: Extended Config with JWTConfig + GRPCConfig sections
 
-- [ ] **Step 1: Create conf_dev_yaml.yaml**
-
-```yaml
-# admin-bff-hertz/hertz-template/conf_dev_yaml.yaml
-path: conf/dev/conf.yaml
-update_behavior:
-  type: cover
-body: |-
-  server:
-    addr: ":8888"
-    registry:
-      name: "{{.ServiceName}}"
-      address: ""
-    jaeger:
-      enable: false
-      endpoint: ""
-
-  jwt:
-    secret: "your-256-bit-secret-change-in-production"
-    access_token_ttl_seconds: 7200
-    refresh_token_ttl_seconds: 604800
-
-  grpc:
-    rbac:
-      service_name: "rbacservice"
-      host_ports: ["localhost:8889"]
-      rpc_timeout_seconds: 3
-      connect_timeout_milliseconds: 100
-      enable_metainfo: true
-      retry:
-        enabled: false
-    rule_center:
-      service_name: "rulecenterservice"
-      host_ports: ["localhost:8890"]
-      rpc_timeout_seconds: 3
-      connect_timeout_milliseconds: 100
-      enable_metainfo: true
-      retry:
-        enabled: false
-```
-
-- [ ] **Step 2: Update conf.go to include JWT and gRPC config structs**
-
-Create `admin-bff-hertz/hertz-template/conf_go.yaml`:
+- [ ] **Step 1: Write failing test**
 
 ```go
-// Path: internal/base/conf/conf.go
+// internal/base/conf/conf_test.go
+package conf_test
+
+import (
+    "testing"
+    
+    "{{.Module}}/internal/base/conf"
+)
+
+func TestConfig_HasJWTSection(t *testing.T) {
+    cfg := conf.Get()
+    if cfg.JWT.Secret == "" {
+        t.Error("expected JWT.Secret to be configured")
+    }
+    if cfg.JWT.AccessTokenTTLSeconds <= 0 {
+        t.Error("expected JWT.AccessTokenTTLSeconds > 0")
+    }
+}
+
+func TestConfig_HasGRPCSection(t *testing.T) {
+    cfg := conf.Get()
+    if cfg.GRPC.RBAC.ServiceName == "" {
+        t.Error("expected GRPC.RBAC.ServiceName to be configured")
+    }
+    if cfg.GRPC.RuleCenter.ServiceName == "" {
+        t.Error("expected GRPC.RuleCenter.ServiceName to be configured")
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/base/conf/... -v`
+Expected: FAIL with "cfg.JWT undefined" or similar
+
+- [ ] **Step 3: Extend conf.go**
+
+```go
+// internal/base/conf/conf.go
 package conf
 
 import (
     "sync"
     
     gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
-    "gopkg.in/yaml.v3"
 )
 
 type Config struct {
-    Server     gfconfig.ServerConfig     `yaml:"server"`
-    JWT        JWTConfig                 `yaml:"jwt"`
-    GRPC       GRPCConfig                `yaml:"grpc"`
+    Server gfconfig.ServerConfig `yaml:"server"`
+    JWT    JWTConfig             `yaml:"jwt"`
+    GRPC   GRPCConfig            `yaml:"grpc"`
 }
 
 type JWTConfig struct {
-    Secret                  string `yaml:"secret"`
-    AccessTokenTTLSeconds   int    `yaml:"access_token_ttl_seconds"`
-    RefreshTokenTTLSeconds  int    `yaml:"refresh_token_ttl_seconds"`
+    Secret                 string `yaml:"secret"`
+    AccessTokenTTLSeconds  int    `yaml:"access_token_ttl_seconds"`
+    RefreshTokenTTLSeconds int    `yaml:"refresh_token_ttl_seconds"`
 }
 
 type GRPCConfig struct {
@@ -243,24 +214,63 @@ func Get() Config {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Update conf/dev/conf.yaml**
+
+```yaml
+# conf/dev/conf.yaml
+server:
+  addr: ":8888"
+  registry:
+    name: "admin-bff"
+    address: ""
+
+jwt:
+  secret: "your-256-bit-secret-change-in-production"
+  access_token_ttl_seconds: 7200
+  refresh_token_ttl_seconds: 604800
+
+grpc:
+  rbac:
+    service_name: "rbacservice"
+    host_ports: ["localhost:8889"]
+    rpc_timeout_seconds: 3
+    connect_timeout_milliseconds: 100
+    enable_metainfo: true
+    retry:
+      enabled: false
+  rule_center:
+    service_name: "rulecenterservice"
+    host_ports: ["localhost:8890"]
+    rpc_timeout_seconds: 3
+    connect_timeout_milliseconds: 100
+    enable_metainfo: true
+    retry:
+      enabled: false
+```
+
+- [ ] **Step 5: Run test to verify it passes**
+
+Run: `go test ./internal/base/conf/... -v`
+Expected: PASS
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/conf_*.yaml
-git commit -m "feat(admin-bff-hertz): add configuration templates"
+git add internal/base/conf/ conf/dev/conf.yaml
+git commit -m "feat(conf): extend config with JWT and gRPC sections"
 ```
 
 ---
 
-## Task 4: pkg/client — RBAC Client
+## Task 3: pkg/client — RBAC Client
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/pkg_client_rbac_go.yaml`
-- Test: `admin-bff-hertz/hertz-template/pkg_client_rbac_test_go.yaml`
+- Create: `pkg/client/rbac/client.go`
+- Create: `pkg/client/rbac/client_test.go`
 
 **Interfaces:**
-- Consumes: Config from conf.go
-- Produces: `pkg/client/rbac.Client` with AuthService() and RBACService() methods
+- Consumes: conf.ClientConfig, authservice client, rbacservice client
+- Produces: `rbac.Client` with AuthService() and RBACService() methods
 
 - [ ] **Step 1: Write failing test**
 
@@ -305,6 +315,15 @@ Expected: FAIL with "package not found"
 
 - [ ] **Step 3: Implement pkg/client/rbac/client.go**
 
+First, generate the kitex client code:
+
+```bash
+ncgo add rpc authservice --proto idl/auth.proto
+ncgo add rpc rbacservice --proto idl/auth.proto
+```
+
+Then implement the wrapper:
+
 ```go
 // pkg/client/rbac/client.go
 package rbac
@@ -323,13 +342,25 @@ type Client struct {
 }
 
 func New(ctx context.Context, cfg conf.ClientConfig) (*Client, error) {
-    authCfg := convertToServiceConfig(cfg, "authservice")
+    authCfg := authserviceclient.Config{
+        ServiceName:                "authservice",
+        HostPorts:                  cfg.HostPorts,
+        RPCTimeoutSeconds:          cfg.RPCTimeoutSeconds,
+        ConnectTimeoutMilliseconds: cfg.ConnectTimeoutMilliseconds,
+        EnableMetaInfo:             cfg.EnableMetaInfo,
+    }
     authCli, err := authserviceclient.New(ctx, authCfg)
     if err != nil {
         return nil, err
     }
     
-    rbacCfg := convertToServiceConfig(cfg, "rbacservice")
+    rbacCfg := rbacserviceclient.Config{
+        ServiceName:                "rbacservice",
+        HostPorts:                  cfg.HostPorts,
+        RPCTimeoutSeconds:          cfg.RPCTimeoutSeconds,
+        ConnectTimeoutMilliseconds: cfg.ConnectTimeoutMilliseconds,
+        EnableMetaInfo:             cfg.EnableMetaInfo,
+    }
     rbacCli, err := rbacserviceclient.New(ctx, rbacCfg)
     if err != nil {
         return nil, err
@@ -348,41 +379,31 @@ func (c *Client) AuthService() authserviceclient.Client {
 func (c *Client) RBACService() rbacserviceclient.Client {
     return c.rbac
 }
-
-func convertToServiceConfig(cfg conf.ClientConfig, serviceName string) authserviceclient.Config {
-    return authserviceclient.Config{
-        ServiceName:                serviceName,
-        HostPorts:                  cfg.HostPorts,
-        RPCTimeoutSeconds:          cfg.RPCTimeoutSeconds,
-        ConnectTimeoutMilliseconds: cfg.ConnectTimeoutMilliseconds,
-        EnableMetaInfo:             cfg.EnableMetaInfo,
-    }
-}
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `go test ./pkg/client/rbac/... -v`
-Expected: PASS
+Expected: PASS (if kitex clients generated successfully)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/pkg_client_rbac*.yaml
-git commit -m "feat(admin-bff-hertz): add pkg/client/rbac"
+git add pkg/client/rbac/ idl/
+git commit -m "feat(pkg/client): add rbac client wrapper"
 ```
 
 ---
 
-## Task 5: pkg/client — RuleCenter Client
+## Task 4: pkg/client — RuleCenter Client
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/pkg_client_rulecenter_go.yaml`
-- Test: `admin-bff-hertz/hertz-template/pkg_client_rulecenter_test_go.yaml`
+- Create: `pkg/client/rulecenter/client.go`
+- Create: `pkg/client/rulecenter/client_test.go`
 
 **Interfaces:**
-- Consumes: Config from conf.go
-- Produces: `pkg/client/rulecenter.Client` with RuleService() method
+- Consumes: conf.ClientConfig, rulecenterservice client
+- Produces: `rulecenter.Client` with RuleService() method
 
 - [ ] **Step 1: Write failing test**
 
@@ -420,7 +441,7 @@ func TestNew_ReturnsClient(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./pkg/client/rulecenter/... -v`
-Expected: FAIL with "package not found"
+Expected: FAIL
 
 - [ ] **Step 3: Implement pkg/client/rulecenter/client.go**
 
@@ -471,20 +492,20 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/pkg_client_rulecenter*.yaml
-git commit -m "feat(admin-bff-hertz): add pkg/client/rulecenter"
+git add pkg/client/rulecenter/
+git commit -m "feat(pkg/client): add rulecenter client wrapper"
 ```
 
 ---
 
-## Task 6: JWT Middleware
+## Task 5: JWT Middleware
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_pkg_middleware_jwt_go.yaml`
-- Test: `admin-bff-hertz/hertz-template/internal_pkg_middleware_jwt_test_go.yaml`
+- Create: `internal/pkg/middleware/jwt.go`
+- Create: `internal/pkg/middleware/jwt_test.go`
 
 **Interfaces:**
-- Consumes: JWTConfig from conf.go
+- Consumes: JWT secret from config
 - Produces: `middleware.JWT(secret string, publicPaths ...string) app.HandlerFunc`
 - Side effects: Sets claims in context via `SetClaims(ctx, claims)`
 
@@ -496,7 +517,6 @@ package middleware_test
 
 import (
     "context"
-    "net/http/httptest"
     "testing"
     "time"
     
@@ -509,34 +529,35 @@ import (
 func TestJWT_ValidToken_SetsClaims(t *testing.T) {
     secret := "test-secret"
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-        "uuid": "user-123",
-        "roles": []string{"admin"},
-        "exp": time.Now().Add(time.Hour).Unix(),
+        "uuid":  "user-123",
+        "roles": []interface{}{"admin"},
+        "exp":   time.Now().Add(time.Hour).Unix(),
     })
     tokenStr, _ := token.SignedString([]byte(secret))
     
-    req := httptest.NewRequest("GET", "/api/v1/users", nil)
-    req.Header.Set("Authorization", "Bearer "+tokenStr)
-    
-    var capturedClaims middleware.Claims
-    handler := func(ctx context.Context, c *app.RequestContext) {
-        claims, ok := middleware.GetClaims(c)
-        if !ok {
-            t.Fatal("expected claims in context")
-        }
-        capturedClaims = claims
-        c.Next(ctx)
-    }
-    
     mw := middleware.JWT(secret)
+    
     ctx := context.Background()
     c := &app.RequestContext{}
     c.Request.Header.Set("Authorization", "Bearer "+tokenStr)
     
+    called := false
+    handler := func(ctx context.Context, c *app.RequestContext) {
+        called = true
+        claims, ok := middleware.GetClaims(c)
+        if !ok {
+            t.Fatal("expected claims in context")
+        }
+        if claims.UUID != "user-123" {
+            t.Errorf("expected UUID user-123, got %s", claims.UUID)
+        }
+        c.Next(ctx)
+    }
+    
     mw(handler)(ctx, c)
     
-    if capturedClaims.UUID != "user-123" {
-        t.Errorf("expected UUID user-123, got %s", capturedClaims.UUID)
+    if !called {
+        t.Error("expected handler to be called")
     }
 }
 
@@ -544,11 +565,12 @@ func TestJWT_ExpiredToken_Aborts(t *testing.T) {
     secret := "test-secret"
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
         "uuid": "user-123",
-        "exp": time.Now().Add(-time.Hour).Unix(),
+        "exp":  time.Now().Add(-time.Hour).Unix(),
     })
     tokenStr, _ := token.SignedString([]byte(secret))
     
     mw := middleware.JWT(secret)
+    
     ctx := context.Background()
     c := &app.RequestContext{}
     c.Request.Header.Set("Authorization", "Bearer "+tokenStr)
@@ -591,7 +613,7 @@ func TestJWT_PublicPath_SkipsValidation(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/pkg/middleware/... -v -run TestJWT`
-Expected: FAIL with "package not found"
+Expected: FAIL
 
 - [ ] **Step 3: Implement JWT middleware**
 
@@ -618,12 +640,15 @@ type Claims struct {
 type claimsKey struct{}
 
 func SetClaims(c *app.RequestContext, claims Claims) {
-    ctx := context.WithValue(c, claimsKey{}, claims)
-    c.SetContext(ctx)
+    c.Set("claims", claims)
 }
 
 func GetClaims(c *app.RequestContext) (Claims, bool) {
-    claims, ok := c.Value(claimsKey{}).(Claims)
+    val, exists := c.Get("claims")
+    if !exists {
+        return Claims{}, false
+    }
+    claims, ok := val.(Claims)
     return claims, ok
 }
 
@@ -709,17 +734,17 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_pkg_middleware_jwt*.yaml
-git commit -m "feat(admin-bff-hertz): add JWT middleware"
+git add internal/pkg/middleware/jwt.go internal/pkg/middleware/jwt_test.go
+git commit -m "feat(middleware): add JWT middleware"
 ```
 
 ---
 
-## Task 7: Authz Middleware with RequirePermission
+## Task 6: Authz Middleware with RequirePermission
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_pkg_middleware_authz_go.yaml`
-- Test: `admin-bff-hertz/hertz-template/internal_pkg_middleware_authz_test_go.yaml`
+- Create: `internal/pkg/middleware/authz.go`
+- Create: `internal/pkg/middleware/authz_test.go`
 
 **Interfaces:**
 - Consumes: rbac.Client, Claims from JWT middleware
@@ -739,8 +764,8 @@ import (
     "go.uber.org/mock/gomock"
     
     "{{.Module}}/internal/pkg/middleware"
-    "{{.Module}}/pkg/client/rbac"
     mock_rbac "{{.Module}}/pkg/client/rbac/mock"
+    api "{{.Module}}/kitex_gen/api/rbac/v1"
 )
 
 func TestAuthz_WithPermission_Allowed(t *testing.T) {
@@ -748,9 +773,13 @@ func TestAuthz_WithPermission_Allowed(t *testing.T) {
     defer ctrl.Finish()
     
     mockRBAC := mock_rbac.NewMockClient(ctrl)
-    mockEnforcer := mock_rbac.NewMockEnforcer(ctrl)
-    mockRBAC.EXPECT().RBACService().Return(mockEnforcer).AnyTimes()
-    mockEnforcer.EXPECT().Enforce(gomock.Any(), gomock.Any()).Return(&EnforceResponse{Allowed: true}, nil)
+    mockRBACService := mock_rbac.NewMockRBACService(ctrl)
+    mockRBAC.EXPECT().RBACService().Return(mockRBACService).AnyTimes()
+    mockRBACService.EXPECT().Enforce(gomock.Any(), &api.EnforceRequest{
+        Sub: "user-123",
+        Obj: "user:create",
+        Act: "execute",
+    }).Return(&api.EnforceResponse{Allowed: true}, nil)
     
     mw := middleware.Authz(mockRBAC)
     
@@ -777,9 +806,9 @@ func TestAuthz_WithPermission_Denied(t *testing.T) {
     defer ctrl.Finish()
     
     mockRBAC := mock_rbac.NewMockClient(ctrl)
-    mockEnforcer := mock_rbac.NewMockEnforcer(ctrl)
-    mockRBAC.EXPECT().RBACService().Return(mockEnforcer).AnyTimes()
-    mockEnforcer.EXPECT().Enforce(gomock.Any(), gomock.Any()).Return(&EnforceResponse{Allowed: false}, nil)
+    mockRBACService := mock_rbac.NewMockRBACService(ctrl)
+    mockRBAC.EXPECT().RBACService().Return(mockRBACService).AnyTimes()
+    mockRBACService.EXPECT().Enforce(gomock.Any(), gomock.Any()).Return(&api.EnforceResponse{Allowed: false}, nil)
     
     mw := middleware.Authz(mockRBAC)
     
@@ -829,7 +858,7 @@ func TestAuthz_NoPermission_SkipsEnforce(t *testing.T) {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/pkg/middleware/... -v -run TestAuthz`
-Expected: FAIL with "package not found"
+Expected: FAIL
 
 - [ ] **Step 3: Implement Authz middleware**
 
@@ -850,12 +879,15 @@ import (
 type permissionKey struct{}
 
 func SetPermission(c *app.RequestContext, code string) {
-    ctx := context.WithValue(c, permissionKey{}, code)
-    c.SetContext(ctx)
+    c.Set("permission", code)
 }
 
 func GetPermission(c *app.RequestContext) string {
-    code, _ := c.Value(permissionKey{}).(string)
+    val, exists := c.Get("permission")
+    if !exists {
+        return ""
+    }
+    code, _ := val.(string)
     return code
 }
 
@@ -866,7 +898,7 @@ func RequirePermission(code string) app.HandlerFunc {
     }
 }
 
-func Authz(rbacCli *rbac.Client) app.HandlerFunc {
+func Authz(rbacCli rbac.Client) app.HandlerFunc {
     return func(ctx context.Context, c *app.RequestContext) {
         perm := GetPermission(c)
         if perm == "" {
@@ -911,17 +943,17 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_pkg_middleware_authz*.yaml
-git commit -m "feat(admin-bff-hertz): add Authz middleware with RequirePermission"
+git add internal/pkg/middleware/authz.go internal/pkg/middleware/authz_test.go
+git commit -m "feat(middleware): add Authz middleware with RequirePermission"
 ```
 
 ---
 
-## Task 8: Auth Handlers
+## Task 7: Auth Handlers
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_handler_auth_go.yaml`
-- Test: `admin-bff-hertz/hertz-template/internal_handler_auth_test_go.yaml`
+- Create: `internal/handler/auth.go`
+- Create: `internal/handler/auth_test.go`
 
 **Interfaces:**
 - Consumes: rbac.Client
@@ -935,13 +967,13 @@ package handler_test
 
 import (
     "context"
+    "encoding/json"
     "testing"
     
     "github.com/cloudwego/hertz/pkg/app"
     "go.uber.org/mock/gomock"
     
     "{{.Module}}/internal/handler"
-    "{{.Module}}/pkg/client/rbac"
     mock_rbac "{{.Module}}/pkg/client/rbac/mock"
     api "{{.Module}}/kitex_gen/api/rbac/v1"
 )
@@ -951,10 +983,13 @@ func TestAuthHandler_Login_Success(t *testing.T) {
     defer ctrl.Finish()
     
     mockRBAC := mock_rbac.NewMockClient(ctrl)
-    mockAuth := mock_rbac.NewMockAuthService(ctrl)
-    mockRBAC.EXPECT().AuthService().Return(mockAuth).AnyTimes()
+    mockAuthService := mock_rbac.NewMockAuthService(ctrl)
+    mockRBAC.EXPECT().AuthService().Return(mockAuthService).AnyTimes()
     
-    mockAuth.EXPECT().Login(gomock.Any(), gomock.Any()).Return(&api.LoginResponse{
+    mockAuthService.EXPECT().Login(gomock.Any(), &api.LoginRequest{
+        Username: "admin",
+        Password: "secret",
+    }).Return(&api.LoginResponse{
         AccessToken:  "access-token",
         RefreshToken: "refresh-token",
         ExpiresIn:    7200,
@@ -964,18 +999,22 @@ func TestAuthHandler_Login_Success(t *testing.T) {
     
     ctx := context.Background()
     c := &app.RequestContext{}
-    c.Request.SetBody([]byte(`{"username":"admin","password":"secret"}`))
+    body, _ := json.Marshal(map[string]string{
+        "username": "admin",
+        "password": "secret",
+    })
+    c.Request.SetBody(body)
     
     h.Login(ctx, c)
     
-    // Verify response contains tokens
+    // Verify response (simplified - in real test would parse response)
 }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test ./internal/handler/... -v -run TestAuthHandler`
-Expected: FAIL with "package not found"
+Expected: FAIL
 
 - [ ] **Step 3: Implement AuthHandler**
 
@@ -989,16 +1028,17 @@ import (
     
     "github.com/cloudwego/hertz/pkg/app"
     
+    "{{.Module}}/internal/pkg/middleware"
     "{{.Module}}/internal/pkg/response"
     "{{.Module}}/pkg/client/rbac"
     api "{{.Module}}/kitex_gen/api/rbac/v1"
 )
 
 type AuthHandler struct {
-    rbacCli *rbac.Client
+    rbacCli rbac.Client
 }
 
-func NewAuthHandler(rbacCli *rbac.Client) *AuthHandler {
+func NewAuthHandler(rbacCli rbac.Client) *AuthHandler {
     return &AuthHandler{rbacCli: rbacCli}
 }
 
@@ -1081,19 +1121,19 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_handler_auth*.yaml
-git commit -m "feat(admin-bff-hertz): add auth handlers"
+git add internal/handler/auth.go internal/handler/auth_test.go
+git commit -m "feat(handler): add auth handlers"
 ```
 
 ---
 
-## Task 9: RBAC Handlers
+## Task 8: RBAC Handlers
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_handler_user_go.yaml`
-- Create: `admin-bff-hertz/hertz-template/internal_handler_role_go.yaml`
-- Create: `admin-bff-hertz/hertz-template/internal_handler_permission_go.yaml`
-- Create: `admin-bff-hertz/hertz-template/internal_handler_menu_go.yaml`
+- Create: `internal/handler/user.go`
+- Create: `internal/handler/role.go`
+- Create: `internal/handler/permission.go`
+- Create: `internal/handler/menu.go`
 
 **Interfaces:**
 - Consumes: rbac.Client
@@ -1101,33 +1141,115 @@ git commit -m "feat(admin-bff-hertz): add auth handlers"
 
 - [ ] **Step 1: Implement UserHandler (CRUD for /api/v1/users)**
 
-Similar pattern to AuthHandler but for User CRUD operations proxying to rbacCli.RBACService().CreateUser/UpdateUser/DeleteUser/GetUser/ListUsers.
+```go
+// internal/handler/user.go
+package handler
 
-- [ ] **Step 2: Implement RoleHandler (CRUD for /api/v1/roles)**
+import (
+    "context"
+    "encoding/json"
+    "strconv"
+    
+    "github.com/cloudwego/hertz/pkg/app"
+    
+    "{{.Module}}/internal/pkg/response"
+    "{{.Module}}/pkg/client/rbac"
+    api "{{.Module}}/kitex_gen/api/rbac/v1"
+)
 
-Proxy to rbacCli.RBACService().CreateRole/UpdateRole/DeleteRole/ListRoles.
+type UserHandler struct {
+    rbacCli rbac.Client
+}
 
-- [ ] **Step 3: Implement PermissionHandler (CRUD for /api/v1/permissions)**
+func NewUserHandler(rbacCli rbac.Client) *UserHandler {
+    return &UserHandler{rbacCli: rbacCli}
+}
 
-Proxy to rbacCli.RBACService().CreatePermission/UpdatePermission/DeletePermission/GetPermission/ListPermissions.
+func (h *UserHandler) List(ctx context.Context, c *app.RequestContext) {
+    resp, err := h.rbacCli.RBACService().ListUsers(ctx, &api.ListUsersRequest{})
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, resp.Users)
+}
 
-- [ ] **Step 4: Implement MenuHandler (read for /api/v1/menus)**
+func (h *UserHandler) Get(ctx context.Context, c *app.RequestContext) {
+    idStr := c.Param("id")
+    id, _ := strconv.ParseInt(idStr, 10, 64)
+    
+    resp, err := h.rbacCli.RBACService().GetUser(ctx, &api.GetUserRequest{Id: id})
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, resp.User)
+}
 
-Proxy to rbacCli.RBACService().ListMenus.
+func (h *UserHandler) Create(ctx context.Context, c *app.RequestContext) {
+    var req api.CreateUserRequest
+    if err := json.Unmarshal(c.Request.Body(), &req); err != nil {
+        response.ErrorCode(c, response.CodeInvalidParam)
+        return
+    }
+    
+    resp, err := h.rbacCli.RBACService().CreateUser(ctx, &req)
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, resp.User)
+}
 
-- [ ] **Step 5: Commit**
+func (h *UserHandler) Update(ctx context.Context, c *app.RequestContext) {
+    idStr := c.Param("id")
+    id, _ := strconv.ParseInt(idStr, 10, 64)
+    
+    var req api.UpdateUserRequest
+    if err := json.Unmarshal(c.Request.Body(), &req); err != nil {
+        response.ErrorCode(c, response.CodeInvalidParam)
+        return
+    }
+    req.Id = id
+    
+    resp, err := h.rbacCli.RBACService().UpdateUser(ctx, &req)
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, resp.User)
+}
+
+func (h *UserHandler) Delete(ctx context.Context, c *app.RequestContext) {
+    idStr := c.Param("id")
+    id, _ := strconv.ParseInt(idStr, 10, 64)
+    
+    _, err := h.rbacCli.RBACService().DeleteUser(ctx, &api.DeleteUserRequest{Id: id})
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, map[string]string{"status": "deleted"})
+}
+```
+
+- [ ] **Step 2: Implement RoleHandler, PermissionHandler, MenuHandler similarly**
+
+(Follow same pattern for Role, Permission, Menu CRUD operations)
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_handler_*_go.yaml
-git commit -m "feat(admin-bff-hertz): add RBAC handlers"
+git add internal/handler/user.go internal/handler/role.go internal/handler/permission.go internal/handler/menu.go
+git commit -m "feat(handler): add RBAC handlers"
 ```
 
 ---
 
-## Task 10: Current User Handlers
+## Task 9: Current User Handlers
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_handler_current_user_go.yaml`
+- Create: `internal/handler/current_user.go`
 
 **Interfaces:**
 - Consumes: rbac.Client, Claims from JWT middleware
@@ -1151,10 +1273,10 @@ import (
 )
 
 type CurrentUserHandler struct {
-    rbacCli *rbac.Client
+    rbacCli rbac.Client
 }
 
-func NewCurrentUserHandler(rbacCli *rbac.Client) *CurrentUserHandler {
+func NewCurrentUserHandler(rbacCli rbac.Client) *CurrentUserHandler {
     return &CurrentUserHandler{rbacCli: rbacCli}
 }
 
@@ -1198,20 +1320,20 @@ func (h *CurrentUserHandler) GetPerms(ctx context.Context, c *app.RequestContext
 - [ ] **Step 2: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_handler_current_user_go.yaml
-git commit -m "feat(admin-bff-hertz): add current user handlers"
+git add internal/handler/current_user.go
+git commit -m "feat(handler): add current user handlers"
 ```
 
 ---
 
-## Task 11: Rate Limit Rule Handlers
+## Task 10: Rate Limit Rule Handlers
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_handler_rate_limit_go.yaml`
+- Create: `internal/handler/rate_limit.go`
 
 **Interfaces:**
 - Consumes: rulecenter.Client
-- Produces: RateLimitHandler with CRUD methods for /api/v1/rate-limit-rules
+- Produces: RateLimitHandler with CRUD methods
 
 - [ ] **Step 1: Implement RateLimitHandler**
 
@@ -1222,6 +1344,7 @@ package handler
 import (
     "context"
     "encoding/json"
+    "strconv"
     
     "github.com/cloudwego/hertz/pkg/app"
     
@@ -1231,10 +1354,10 @@ import (
 )
 
 type RateLimitHandler struct {
-    rulecenterCli *rulecenter.Client
+    rulecenterCli rulecenter.Client
 }
 
-func NewRateLimitHandler(rulecenterCli *rulecenter.Client) *RateLimitHandler {
+func NewRateLimitHandler(rulecenterCli rulecenter.Client) *RateLimitHandler {
     return &RateLimitHandler{rulecenterCli: rulecenterCli}
 }
 
@@ -1244,7 +1367,6 @@ func (h *RateLimitHandler) List(ctx context.Context, c *app.RequestContext) {
         response.ErrorCode(c, response.CodeInternalError)
         return
     }
-    
     response.JSON(c, resp.Rules)
 }
 
@@ -1260,26 +1382,54 @@ func (h *RateLimitHandler) Create(ctx context.Context, c *app.RequestContext) {
         response.ErrorCode(c, response.CodeInternalError)
         return
     }
-    
     response.JSON(c, resp.Rule)
 }
 
-// Update, Delete, Get similar...
+func (h *RateLimitHandler) Update(ctx context.Context, c *app.RequestContext) {
+    idStr := c.Param("id")
+    id, _ := strconv.ParseInt(idStr, 10, 64)
+    
+    var req api.UpdateRuleRequest
+    if err := json.Unmarshal(c.Request.Body(), &req); err != nil {
+        response.ErrorCode(c, response.CodeInvalidParam)
+        return
+    }
+    req.Id = id
+    
+    resp, err := h.rulecenterCli.RuleService().UpdateRule(ctx, &req)
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, resp.Rule)
+}
+
+func (h *RateLimitHandler) Delete(ctx context.Context, c *app.RequestContext) {
+    idStr := c.Param("id")
+    id, _ := strconv.ParseInt(idStr, 10, 64)
+    
+    _, err := h.rulecenterCli.RuleService().DeleteRule(ctx, &api.DeleteRuleRequest{Id: id})
+    if err != nil {
+        response.ErrorCode(c, response.CodeInternalError)
+        return
+    }
+    response.JSON(c, map[string]string{"status": "deleted"})
+}
 ```
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_handler_rate_limit_go.yaml
-git commit -m "feat(admin-bff-hertz): add rate limit rule handlers"
+git add internal/handler/rate_limit.go
+git commit -m "feat(handler): add rate limit rule handlers"
 ```
 
 ---
 
-## Task 12: Router Registration
+## Task 11: Router Registration
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/internal_router_register_go.yaml`
+- Create: `internal/router/register.go`
 
 **Interfaces:**
 - Consumes: All handlers, middleware
@@ -1301,7 +1451,7 @@ import (
     "{{.Module}}/pkg/client/rulecenter"
 )
 
-func Register(h *server.Hertz, rbacCli *rbac.Client, rulecenterCli *rulecenter.Client) {
+func Register(h *server.Hertz, rbacCli rbac.Client, rulecenterCli rulecenter.Client) {
     cfg := conf.Get()
     
     authHandler := handler.NewAuthHandler(rbacCli)
@@ -1320,7 +1470,8 @@ func Register(h *server.Hertz, rbacCli *rbac.Client, rulecenterCli *rulecenter.C
     auth.POST("/refresh", authHandler.Refresh)
     
     // Protected routes (JWT required)
-    protected := api.Group("", middleware.JWT(cfg.JWT.Secret, "/api/v1/auth/login", "/api/v1/auth/refresh"))
+    protected := api.Group("")
+    protected.Use(middleware.JWT(cfg.JWT.Secret))
     
     // Authz middleware
     protected.Use(middleware.Authz(rbacCli))
@@ -1369,22 +1520,22 @@ func Register(h *server.Hertz, rbacCli *rbac.Client, rulecenterCli *rulecenter.C
 - [ ] **Step 2: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/internal_router_register_go.yaml
-git commit -m "feat(admin-bff-hertz): add router registration"
+git add internal/router/register.go
+git commit -m "feat(router): add route registration"
 ```
 
 ---
 
-## Task 13: Server Entry Point
+## Task 12: Server Entry Point
 
 **Files:**
-- Create: `admin-bff-hertz/hertz-template/server_go.yaml`
+- Modify: `internal/base/server/server.go`
 
 **Interfaces:**
 - Consumes: Config, clients, router
 - Produces: Server startup with middleware chain
 
-- [ ] **Step 1: Implement server.go**
+- [ ] **Step 1: Update server.go to initialize clients and register routes**
 
 ```go
 // internal/base/server/server.go
@@ -1398,7 +1549,6 @@ import (
     
     "{{.Module}}/internal/base/conf"
     "{{.Module}}/internal/handler/health"
-    "{{.Module}}/internal/pkg/middleware"
     "{{.Module}}/internal/router"
     "{{.Module}}/pkg/client/rbac"
     "{{.Module}}/pkg/client/rulecenter"
@@ -1438,130 +1588,122 @@ func Run() {
 - [ ] **Step 2: Commit**
 
 ```bash
-git add admin-bff-hertz/hertz-template/server_go.yaml
-git commit -m "feat(admin-bff-hertz): add server entry point"
+git add internal/base/server/server.go
+git commit -m "feat(server): wire clients and router"
 ```
 
 ---
 
-## Task 14: Update README with Full Documentation
+## Task 13: Export to Template + Assemble Package
 
 **Files:**
-- Modify: `admin-bff-hertz/README.md`
+- Create: `admin-bff-hertz/` directory (in repo root)
+- Export: hertz-template/*.yaml via `ncgo export`
 
-- [ ] **Step 1: Update README with complete documentation**
-
-Expand README to include:
-- Full usage instructions
-- Middleware documentation (JWT, Authz)
-- API endpoint list
-- pkg/client documentation
-- Seams (TODO) documentation
-- Configuration reference
-
-- [ ] **Step 2: Commit**
+- [ ] **Step 1: Export templates**
 
 ```bash
-git add admin-bff-hertz/README.md
-git commit -m "docs(admin-bff-hertz): complete README documentation"
+cd .worktree/feat-12-admin-bff-hertz/admin-bff
+ncgo export templates --kind hertz --output ../../../admin-bff-hertz/hertz-template/
+```
+
+- [ ] **Step 2: Assemble template package**
+
+Copy IDL files:
+
+```bash
+mkdir -p ../../../admin-bff-hertz/idl
+cp idl/*.proto ../../../admin-bff-hertz/idl/
+```
+
+Create template.yaml:
+
+```yaml
+# admin-bff-hertz/template.yaml
+name: admin-bff-hertz
+kind: hertz
+description: "Official admin BFF Hertz HTTP template (JWT auth + RBAC authz via rbac-kitex + rate-limit rule management via rule-center)"
+version: "1"
+```
+
+- [ ] **Step 3: Commit template package**
+
+```bash
+cd ../../..
+git add admin-bff-hertz/
+git commit -m "feat(admin-bff-hertz): export template package"
 ```
 
 ---
 
-## Task 15: E2E Verification
+## Task 14: Verification
 
 **Files:**
 - Create: `admin-bff-hertz/test/e2e_test.sh`
-
-**Interfaces:**
-- Consumes: Complete template
-- Produces: Verification that `ncgo new --template admin-bff-hertz` builds
 
 - [ ] **Step 1: Create e2e test script**
 
 ```bash
 #!/bin/bash
-# admin-bff-hertz/test/e2e_test.sh
-
 set -e
 
 echo "=== E2E Test: admin-bff-hertz ==="
 
-# Create temp directory
 TMPDIR=$(mktemp -d)
 cd "$TMPDIR"
 
-# Generate project
-echo "Generating project..."
-ncgo new admin-bff-test --module github.com/test/admin-bff --kind hertz --template admin-bff-hertz
+echo "Generating project from template..."
+ncgo new test-bff --module github.com/test/bff --kind hertz --template admin-bff-hertz
 
-cd admin-bff-test
+cd test-bff
 
-# Build
 echo "Building..."
 go build ./...
 
-# Test
 echo "Running tests..."
 go test ./...
 
-# Cleanup
 cd /
 rm -rf "$TMPDIR"
 
 echo "=== E2E Test PASSED ==="
 ```
 
-- [ ] **Step 2: Make executable and commit**
+- [ ] **Step 2: Run e2e test**
 
 ```bash
 chmod +x admin-bff-hertz/test/e2e_test.sh
-git add admin-bff-hertz/test/e2e_test.sh
-git commit -m "test(admin-bff-hertz): add e2e verification script"
+./admin-bff-hertz/test/e2e_test.sh
 ```
 
----
+Expected: Project generates, builds, and tests pass.
 
-## Task 16: Update Registry README
-
-**Files:**
-- Modify: `README.md` (root)
-
-- [ ] **Step 1: Add admin-bff-hertz to template registry**
-
-Add row to the Templates table:
-
-```markdown
-| `admin-bff-hertz` | hertz | Admin BFF Hertz HTTP template (JWT auth + RBAC authz + rate-limit rule management) | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
-```
-
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add README.md
-git commit -m "docs: add admin-bff-hertz to registry"
+git add admin-bff-hertz/test/
+git commit -m "test(admin-bff-hertz): add e2e verification"
 ```
 
 ---
 
 ## Summary
 
-This plan creates the `admin-bff-hertz` template with:
+This revised plan follows the ncgo workflow:
 
-1. ✅ Template scaffolding (template.yaml, README)
-2. ✅ IDL files (auth.proto, rule_center.proto)
-3. ✅ Configuration (conf.yaml with jwt, grpc sections)
-4. ✅ pkg/client (rbac + rulecenter)
-5. ✅ JWT middleware (HS256, public paths skip)
-6. ✅ Authz middleware (RequirePermission → Enforce RPC)
-7. ✅ Auth handlers (login, refresh, logout)
-8. ✅ RBAC handlers (user, role, permission, menu)
-9. ✅ Current user handlers (menus, perms)
-10. ✅ Rate limit handlers (CRUD)
-11. ✅ Router registration (with permission decorators)
-12. ✅ Server entry point
-13. ✅ Complete README documentation
-14. ✅ E2E verification script
-15. ✅ Registry README update
+1. ✅ Create worktree + generate base Hertz project
+2. ✅ Extend configuration (JWT, gRPC sections)
+3. ✅ pkg/client (rbac + rulecenter wrappers)
+4. ✅ JWT middleware (HS256, public paths skip)
+5. ✅ Authz middleware (RequirePermission → Enforce RPC)
+6. ✅ Auth handlers (login, refresh, logout)
+7. ✅ RBAC handlers (user, role, permission, menu)
+8. ✅ Current user handlers (menus, perms)
+9. ✅ Rate limit handlers (rule CRUD)
+10. ✅ Router registration (with permission decorators)
+11. ✅ Server entry point (wire clients)
+12. ✅ Export to template via `ncgo export`
+13. ✅ Assemble admin-bff-hertz/ package
+14. ✅ E2E verification
 
-Total: 16 tasks, all TDD-style with tests before implementation.
+Total: 14 tasks, TDD-style for Go code, then export to YAML templates.

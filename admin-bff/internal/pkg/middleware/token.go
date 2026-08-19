@@ -16,9 +16,10 @@ import (
 const ContextKeyTokenClaims = "tokenClaims"
 
 type Claims struct {
-	UserID string `json:"user_id"`
-	UUID   string `json:"uuid"`
-	AK     string `json:"ak"`
+	UserID string   `json:"user_id"`
+	UUID   string   `json:"uuid"`
+	AK     string   `json:"ak"`
+	Roles  []string `json:"roles"`
 	jwt.RegisteredClaims
 }
 

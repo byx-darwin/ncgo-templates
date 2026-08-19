@@ -1,0 +1,87 @@
+package middleware
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pkg/response"
+)
+
+// JWT returns a JWT middleware handler
+func JWT(secret string, publicPaths ...string) app.HandlerFunc {
+	publicPathSet := make(map[string]bool)
+	for _, p := range publicPaths {
+		publicPathSet[p] = true
+	}
+
+	return func(ctx context.Context, c *app.RequestContext) {
+		path := string(c.Request.URI().Path())
+		if publicPathSet[path] {
+			c.Next(ctx)
+			return
+		}
+
+		authHeader := string(c.Request.Header.Peek("Authorization"))
+		if authHeader == "" {
+			response.ErrorCode(c, response.CodeUnauthorized)
+			c.Abort()
+			return
+		}
+
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			response.ErrorCode(c, response.CodeUnauthorized)
+			c.Abort()
+			return
+		}
+
+		tokenStr := parts[1]
+		token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(secret), nil
+		})
+
+		if err != nil || !token.Valid {
+			response.ErrorCode(c, response.CodeUnauthorized)
+			c.Abort()
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			response.ErrorCode(c, response.CodeUnauthorized)
+			c.Abort()
+			return
+		}
+
+		exp, err := claims.GetExpirationTime()
+		if err != nil || exp.Before(time.Now()) {
+			response.ErrorCode(c, response.CodeUnauthorized)
+			c.Abort()
+			return
+		}
+
+		uuid, _ := claims["uuid"].(string)
+		rolesRaw, _ := claims["roles"].([]interface{})
+		roles := make([]string, 0, len(rolesRaw))
+		for _, r := range rolesRaw {
+			if rs, ok := r.(string); ok {
+				roles = append(roles, rs)
+			}
+		}
+
+		// Store claims in context using the existing Claims type
+		c.Set(ContextKeyTokenClaims, &Claims{
+			UUID:  uuid,
+			Roles: roles,
+		})
+
+		c.Next(ctx)
+	}
+}

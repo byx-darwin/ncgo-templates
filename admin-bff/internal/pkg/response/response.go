@@ -43,6 +43,7 @@ const (
     CodeCacheUnavailable      = 10304
     CodeDatabaseUnavailable   = 10303
     CodePermissionDenied      = 10108
+    CodeForbidden             = 10108
     CodeRateLimited           = 10200
     CodeDuplicateRequest      = 10201
     CodeReplayRequest         = 10202

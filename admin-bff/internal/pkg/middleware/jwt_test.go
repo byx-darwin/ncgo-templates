@@ -1,0 +1,79 @@
+package middleware_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pkg/middleware"
+)
+
+func TestJWT_ValidToken_SetsClaims(t *testing.T) {
+	secret := "test-secret"
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"uuid":  "user-123",
+		"roles": []interface{}{"admin"},
+		"exp":   time.Now().Add(time.Hour).Unix(),
+	})
+	tokenStr, _ := token.SignedString([]byte(secret))
+
+	mw := middleware.JWT(secret)
+
+	ctx := context.Background()
+	c := &app.RequestContext{}
+	c.Request.Header.Set("Authorization", "Bearer "+tokenStr)
+
+	// Call the middleware directly
+	mw(ctx, c)
+
+	// Check if claims were set
+	claims, ok := middleware.GetClaims(c)
+	if !ok {
+		t.Fatal("expected claims in context")
+	}
+	if claims.UUID != "user-123" {
+		t.Errorf("expected UUID user-123, got %s", claims.UUID)
+	}
+}
+
+func TestJWT_ExpiredToken_Aborts(t *testing.T) {
+	secret := "test-secret"
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"uuid": "user-123",
+		"exp":  time.Now().Add(-time.Hour).Unix(),
+	})
+	tokenStr, _ := token.SignedString([]byte(secret))
+
+	mw := middleware.JWT(secret)
+
+	ctx := context.Background()
+	c := &app.RequestContext{}
+	c.Request.Header.Set("Authorization", "Bearer "+tokenStr)
+
+	// Call the middleware
+	mw(ctx, c)
+
+	// Check that claims were not set (aborted)
+	_, ok := middleware.GetClaims(c)
+	if ok {
+		t.Error("expected no claims for expired token")
+	}
+}
+
+func TestJWT_PublicPath_SkipsValidation(t *testing.T) {
+	secret := "test-secret"
+	mw := middleware.JWT(secret, "/api/v1/auth/login")
+
+	ctx := context.Background()
+	c := &app.RequestContext{}
+	c.Request.SetRequestURI("/api/v1/auth/login")
+
+	// Call the middleware
+	mw(ctx, c)
+
+	// For public paths, we don't set claims but also don't abort
+	// The middleware just calls c.Next(ctx)
+}

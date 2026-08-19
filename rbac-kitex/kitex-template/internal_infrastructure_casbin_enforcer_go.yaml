@@ -1,32 +1,38 @@
-# rbac-kitex template — internal/infrastructure/casbin/enforcer.go
+# ncgo exported template — internal/infrastructure/casbin/enforcer.go
 path: internal/infrastructure/casbin/enforcer.go
 update_behavior:
-  type: cover
+    type: cover
 body: |-
-  package casbin
+    package casbin
 
-  import (
-  	_ "embed"
+    import (
+    	_ "embed"
 
-  	"github.com/casbin/casbin/v2"
-  	"github.com/casbin/casbin/v2/model"
-  )
+    	casbinlib "github.com/casbin/casbin/v2"
+    	"github.com/casbin/casbin/v2/model"
+    )
 
-  //go:embed model.conf
-  var modelConf string
+    //go:embed model.conf
+    var modelConf string
 
-  // NewEnforcer builds a Casbin enforcer over the given PolicyStore using the
-  // embedded RBAC model (sub, obj, act). Policies are loaded from the store on
-  // startup; management mutations route through the same adapter.
-  func NewEnforcer(store PolicyStore) (*casbin.Enforcer, error) {
-  	m, err := model.NewModelFromString(modelConf)
-  	if err != nil {
-  		return nil, err
-  	}
-  	e, err := casbin.NewEnforcer(m, NewAdapter(store))
-  	if err != nil {
-  		return nil, err
-  	}
-  	return e, nil
-  }
+    // Enforcer is the Casbin enforcer type used by the RBAC services.
+    type Enforcer = casbinlib.Enforcer
+
+    // NewEnforcer builds a Casbin enforcer over the given policy store, loading
+    // the embedded basic model (sub, obj, act) and all persisted rules.
+    func NewEnforcer(store PolicyStore) (*Enforcer, error) {
+    	m, err := model.NewModelFromString(modelConf)
+    	if err != nil {
+    		return nil, err
+    	}
+    	e, err := casbinlib.NewEnforcer(m, NewAdapter(store))
+    	if err != nil {
+    		return nil, err
+    	}
+    	e.EnableAutoSave(true)
+    	if err := e.LoadPolicy(); err != nil {
+    		return nil, err
+    	}
+    	return e, nil
+    }
 

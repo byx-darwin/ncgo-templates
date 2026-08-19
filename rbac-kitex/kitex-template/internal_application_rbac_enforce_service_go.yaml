@@ -10,31 +10,22 @@ body: |
     	"fmt"
     )
 
-    // Enforcer is the Casbin surface used by application services. The concrete
-    // *casbin.Enforcer satisfies it; tests may substitute a memory-backed enforcer.
+    // Enforcer evaluates authorization requests.
     type Enforcer interface {{ "{" }}
-    	AddPolicy(params ...any) (bool, error)
-    	RemovePolicy(params ...any) (bool, error)
-    	RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error)
-    	RemoveFilteredGroupingPolicy(fieldIndex int, fieldValues ...string) (bool, error)
-    	AddRoleForUser(user string, role string, domain ...string) (bool, error)
-    	DeleteRoleForUser(user string, role string, domain ...string) (bool, error)
     	Enforce(rvals ...any) (bool, error)
     {{ "}" }}
 
-    // EnforceService answers authorization questions against the Casbin enforcer.
+    // EnforceService answers permission checks against the Casbin model.
     type EnforceService struct {{ "{" }}
     	enforcer Enforcer
     {{ "}" }}
 
-    // New creates an EnforceService.
+    // New creates the enforce application service.
     func New(enforcer Enforcer) *EnforceService {{ "{" }}
     	return &EnforceService{{ "{" }}enforcer: enforcer{{ "}" }}
     {{ "}" }}
 
-    // Enforce reports whether uid may perform act on obj. The subject is the
-    // string form of the uid; role membership is resolved by the enforcer's
-    // g(user_id, role_code) rules.
+    // Enforce reports whether uid is allowed to perform act on obj.
     func (s *EnforceService) Enforce(ctx context.Context, uid int64, obj, act string) (bool, error) {{ "{" }}
     	return s.enforcer.Enforce(fmt.Sprint(uid), obj, act)
     {{ "}" }}

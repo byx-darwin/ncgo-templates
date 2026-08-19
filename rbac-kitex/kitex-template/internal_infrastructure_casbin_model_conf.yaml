@@ -1,20 +1,20 @@
-# rbac-kitex template — internal/infrastructure/casbin/model.conf
+# ncgo exported template — internal/infrastructure/casbin/model.conf
 path: internal/infrastructure/casbin/model.conf
 update_behavior:
-  type: cover
+    type: cover
 body: |-
-  [request_definition]
-  r = sub, obj, act
+    [request_definition]
+    r = sub, obj, act
 
-  [policy_definition]
-  p = sub, obj, act
+    [policy_definition]
+    p = sub, obj, act
 
-  [role_definition]
-  g = _, _
+    [role_definition]
+    g = _, _
 
-  [policy_effect]
-  e = some(where (p.eft == allow))
+    [policy_effect]
+    e = some(where (p.eft == allow))
 
-  [matchers]
-  m = g(r.sub, p.sub) && r.obj == p.obj && r.act == p.act
+    [matchers]
+    m = g(r.sub, p.sub) && r.obj == p.obj && r.act == p.act
 

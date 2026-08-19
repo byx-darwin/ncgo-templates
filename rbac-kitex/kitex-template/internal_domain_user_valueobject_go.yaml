@@ -6,9 +6,10 @@ body: |
     package user
 
     // PasswordHash is a value object wrapping an argon2id-encoded password hash.
-    // It exists so password hashing stays explicit and cannot be confused with a
-    // plaintext password at call sites.
     type PasswordHash string
 
-    // Value returns the raw hash string.
-    func (p PasswordHash) Value() string {{ "{" }} return string(p) {{ "}" }}
+    // String returns the raw encoded hash.
+    func (h PasswordHash) String() string {{ "{" }} return string(h) {{ "}" }}
+
+    // Empty reports whether the hash is unset.
+    func (h PasswordHash) Empty() bool {{ "{" }} return h == "" {{ "}" }}

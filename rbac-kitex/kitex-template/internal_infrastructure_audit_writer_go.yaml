@@ -1,84 +1,84 @@
-# rbac-kitex template — internal/infrastructure/audit/writer.go
+# ncgo exported template — internal/infrastructure/audit/writer.go
 path: internal/infrastructure/audit/writer.go
 update_behavior:
-  type: cover
+    type: cover
 body: |-
-  package audit
+    package audit
 
-  import (
-  	"context"
-  	"sync"
+    import (
+    	"context"
+    	"sync"
 
-  	"{{.Module}}/internal/db/gen"
-  )
+    	"github.com/byx-darwin/rbac-rpc/internal/db/gen"
+    )
 
-  // Writer records RBAC mutation audit events (who/what/when).
-  type Writer interface {
-  	Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error
-  }
+    // Entry is a single audit log line.
+    type Entry struct {
+    	ActorUID   int64
+    	Action     string
+    	Target     string
+    	DetailJSON string
+    }
 
-  // SQLWriter persists audit events to the audit_log table.
-  type SQLWriter struct {
-  	q *gen.Queries
-  }
+    // Writer records RBAC mutations for audit.
+    type Writer interface {
+    	Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error
+    }
 
-  // NewSQLWriter creates an audit writer backed by sqlc queries.
-  func NewSQLWriter(q *gen.Queries) *SQLWriter {
-  	return &SQLWriter{q: q}
-  }
+    // SQLWriter persists audit entries via sqlc.
+    type SQLWriter struct {
+    	q *gen.Queries
+    }
 
-  // Write inserts an audit_log row. An empty detailJSON becomes "{}".
-  func (w *SQLWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
-  	if detailJSON == "" {
-  		detailJSON = "{}"
-  	}
-  	_, err := w.q.InsertAuditLog(ctx, gen.InsertAuditLogParams{
-  		ActorUid:   &actorUID,
-  		Action:     action,
-  		Target:     target,
-  		DetailJson: detailJSON,
-  	})
-  	return err
-  }
+    // NewSQLWriter creates an audit writer backed by the audit_log table.
+    func NewSQLWriter(q *gen.Queries) *SQLWriter {
+    	return &SQLWriter{q: q}
+    }
 
-  // Entry is an in-memory audit record.
-  type Entry struct {
-  	ActorUID   int64
-  	Action     string
-  	Target     string
-  	DetailJSON string
-  }
+    func (w *SQLWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
+    	var actor *int64
+    	if actorUID != 0 {
+    		v := actorUID
+    		actor = &v
+    	}
+    	_, err := w.q.InsertAuditLog(ctx, gen.InsertAuditLogParams{
+    		ActorUid:   actor,
+    		Action:     action,
+    		Target:     target,
+    		DetailJson: detailJSON,
+    	})
+    	return err
+    }
 
-  // MemoryWriter is a test-only audit sink.
-  type MemoryWriter struct {
-  	mu      sync.Mutex
-  	entries []Entry
-  }
+    // MemoryWriter is a test-only in-memory audit writer.
+    type MemoryWriter struct {
+    	mu      sync.Mutex
+    	entries []Entry
+    }
 
-  // NewMemoryWriter creates an empty in-memory audit sink.
-  func NewMemoryWriter() *MemoryWriter {
-  	return &MemoryWriter{}
-  }
+    // NewMemoryWriter creates an in-memory audit writer.
+    func NewMemoryWriter() *MemoryWriter {
+    	return &MemoryWriter{}
+    }
 
-  // Write appends an entry.
-  func (w *MemoryWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
-  	w.mu.Lock()
-  	defer w.mu.Unlock()
-  	w.entries = append(w.entries, Entry{
-  		ActorUID:   actorUID,
-  		Action:     action,
-  		Target:     target,
-  		DetailJSON: detailJSON,
-  	})
-  	return nil
-  }
+    func (w *MemoryWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
+    	w.mu.Lock()
+    	defer w.mu.Unlock()
+    	w.entries = append(w.entries, Entry{
+    		ActorUID:   actorUID,
+    		Action:     action,
+    		Target:     target,
+    		DetailJSON: detailJSON,
+    	})
+    	return nil
+    }
 
-  // Entries returns a copy of the recorded entries.
-  func (w *MemoryWriter) Entries() []Entry {
-  	w.mu.Lock()
-  	defer w.mu.Unlock()
-  	out := make([]Entry, len(w.entries))
-  	copy(out, w.entries)
-  	return out
-  }
+    // Entries returns a copy of the recorded audit entries.
+    func (w *MemoryWriter) Entries() []Entry {
+    	w.mu.Lock()
+    	defer w.mu.Unlock()
+    	out := make([]Entry, len(w.entries))
+    	copy(out, w.entries)
+    	return out
+    }
 

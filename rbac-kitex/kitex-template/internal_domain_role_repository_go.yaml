@@ -1,0 +1,40 @@
+# ncgo exported template — internal/domain/role/repository.go
+path: internal/domain/role/repository.go
+update_behavior:
+    type: skip
+body: |
+    package role
+
+    import (
+    	"context"
+    	"fmt"
+    )
+
+    // Repository is the persistence port for the role aggregate.
+    type Repository interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*Role, error)
+    	GetByCode(ctx context.Context, code string) (*Role, error)
+    	List(ctx context.Context, limit, offset int32) ([]*Role, error)
+    	Count(ctx context.Context) (int64, error)
+    	Save(ctx context.Context, r *Role) (*Role, error)
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}
+
+    // NotFoundError is returned when a role does not exist.
+    type NotFoundError struct {{ "{" }}
+    	Key string
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }}
+    	return fmt.Sprintf("role not found: %s", e.Key)
+    {{ "}" }}
+
+    // ValidationError is returned when role input violates a domain rule.
+    type ValidationError struct {{ "{" }}
+    	Field string
+    	Msg   string
+    {{ "}" }}
+
+    func (e ValidationError) Error() string {{ "{" }}
+    	return fmt.Sprintf("role validation error: %s %s", e.Field, e.Msg)
+    {{ "}" }}

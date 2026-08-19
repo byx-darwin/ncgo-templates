@@ -1,0 +1,88 @@
+# ncgo exported template — internal/repository/user/repo_test.go
+path: internal/repository/user/repo_test.go
+update_behavior:
+    type: skip
+
+body: |
+    package userrepo
+
+    import (
+    	"context"
+    	"os"
+    	"os/exec"
+    	"testing"
+    	"time"
+
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    // TestUserRepoPostgresRoundTrip exercises the user repo against a real
+    // postgres. It is gated on `pg_isready` plus a reachable POSTGRES_DSN so the
+    // happy-path seed/test/e2e runs stay hermetic. When the gate is absent the
+    // test prints an explicit `skipped:` line instead of silently passing.
+    func TestUserRepoPostgresRoundTrip(t *testing.T) {{ "{" }}
+    	if _, err := exec.LookPath("pg_isready"); err != nil {{ "{" }}
+    		t.Skipf("skipped: pg_isready not installed (install postgres client to run)")
+    	{{ "}" }}
+    	dsn := os.Getenv("POSTGRES_DSN")
+    	if dsn == "" {{ "{" }}
+    		t.Skipf("skipped: POSTGRES_DSN not set")
+    	{{ "}" }}
+    	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    	defer cancel()
+    	pool, err := pgxpool.New(ctx, dsn)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("connect postgres: %v", err)
+    	{{ "}" }}
+    	defer pool.Close()
+    	if err := pool.Ping(ctx); err != nil {{ "{" }}
+    		t.Fatalf("ping postgres: %v", err)
+    	{{ "}" }}
+
+    	q := gen.New(pool)
+    	repo := New(q, pool)
+
+    	// Create → GetByUsername → SetStatus → Delete round-trip.
+    	created, err := repo.Save(ctx, &user.User{{ "{" }}
+    		Username:     "integration-user",
+    		PasswordHash: "argon2hash-placeholder",
+    		Status:       user.StatusEnabled,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Save(create): %v", err)
+    	{{ "}" }}
+    	if created.ID == 0 {{ "{" }}
+    		t.Fatal("created user has id 0")
+    	{{ "}" }}
+
+    	got, err := repo.GetByUsername(ctx, created.Username)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByUsername: %v", err)
+    	{{ "}" }}
+    	if got.Username != created.Username {{ "{" }}
+    		t.Fatalf("got username %q, want %q", got.Username, created.Username)
+    	{{ "}" }}
+
+    	if err := repo.SetStatus(ctx, created.ID, user.StatusDisabled); err != nil {{ "{" }}
+    		t.Fatalf("SetStatus: %v", err)
+    	{{ "}" }}
+    	got, err = repo.GetByID(ctx, created.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID after SetStatus: %v", err)
+    	{{ "}" }}
+    	if got.Status != user.StatusDisabled {{ "{" }}
+    		t.Fatalf("status = %d, want %d", got.Status, user.StatusDisabled)
+    	{{ "}" }}
+
+    	if err := repo.Delete(ctx, created.ID); err != nil {{ "{" }}
+    		t.Fatalf("Delete: %v", err)
+    	{{ "}" }}
+    	if _, err := repo.GetByID(ctx, created.ID); err == nil {{ "{" }}
+    		t.Fatal("GetByID after Delete: want error")
+    	{{ "}" }} else if _, ok := err.(user.NotFoundError); !ok {{ "{" }}
+    		t.Fatalf("GetByID after Delete error = %v, want user.NotFoundError", err)
+    	{{ "}" }}
+    {{ "}" }}

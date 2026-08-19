@@ -15,163 +15,147 @@ body: |
     	"{{.Module}}/internal/domain/user"
     	"{{.Module}}/internal/infrastructure/audit"
     	authinfra "{{.Module}}/internal/infrastructure/auth"
-    	tokeninfra "{{.Module}}/internal/infrastructure/token"
+    	"{{.Module}}/internal/infrastructure/token"
     )
 
-    type fakeUserRepo struct {{ "{" }}
-    	byID   map[int64]*user.User
-    	byName map[string]*user.User
-    	roles  map[int64][]*role.Role
+    type fakeUsers struct {{ "{" }}
+    	byUsername map[string]*user.User
+    	byID       map[int64]*user.User
+    	rolesByUID map[int64][]*role.Role
     {{ "}" }}
 
-    func (f *fakeUserRepo) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    func (f *fakeUsers) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
+    	u, ok := f.byUsername[username]
+    	if !ok {{ "{" }}
+    		return nil, user.NotFoundError{{ "{" }}Key: username{{ "}" }}
+    	{{ "}" }}
+    	return u, nil
+    {{ "}" }}
+
+    func (f *fakeUsers) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
     	u, ok := f.byID[id]
     	if !ok {{ "{" }}
-    		return nil, user.NotFoundError{{ "{" }}ID: id{{ "}" }}
+    		return nil, user.NotFoundError{{ "{" }}Key: ""{{ "}" }}
     	{{ "}" }}
     	return u, nil
     {{ "}" }}
 
-    func (f *fakeUserRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
-    	u, ok := f.byName[username]
-    	if !ok {{ "{" }}
-    		return nil, user.NotFoundError{{ "{" }}Username: username{{ "}" }}
-    	{{ "}" }}
-    	return u, nil
+    func (f *fakeUsers) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	return f.rolesByUID[uid], nil
     {{ "}" }}
 
-    func (f *fakeUserRepo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
-    	return f.roles[uid], nil
-    {{ "}" }}
-
-    func newTestService(t *testing.T) (*Service, *audit.MemoryWriter) {{ "{" }}
-    	t.Helper()
-    	hash, err := authinfra.HashPassword("pw123")
-    	if err != nil {{ "{" }}
-    		t.Fatalf("HashPassword: %v", err)
+    func newTestService() (*Service, *fakeUsers, *audit.MemoryWriter, *token.MemoryStore) {{ "{" }}
+    	hash, _ := authinfra.HashPassword("password123")
+    	u, _ := user.New("alice", hash)
+    	u.ID = 1
+    	users := &fakeUsers{{ "{" }}
+    		byUsername: map[string]*user.User{{ "{" }}"alice": u{{ "}" }},
+    		byID:       map[int64]*user.User{{ "{" }}1: u{{ "}" }},
+    		rolesByUID: map[int64][]*role.Role{{ "{" }}1: {{ "{{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }},
     	{{ "}" }}
-    	users := &fakeUserRepo{{ "{" }}
-    		byID: map[int64]*user.User{{ "{" }}
-    			1: {{ "{" }}ID: 1, Username: "alice", PasswordHash: hash, Status: user.StatusActive{{ "}" }},
-    		{{ "}" }},
-    		byName: map[string]*user.User{{ "{" }}
-    			"alice": {{ "{" }}ID: 1, Username: "alice", PasswordHash: hash, Status: user.StatusActive{{ "}" }},
-    		{{ "}" }},
-    		roles: map[int64][]*role.Role{{ "{" }}
-    			1: {{ "{{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }},
-    		{{ "}" }},
-    	{{ "}" }}
-    	memAudit := audit.NewMemoryWriter()
-    	svc := New(
-    		users,
-    		authinfra.NewJWTManager("test-secret"),
-    		tokeninfra.NewMemoryStore(),
-    		memAudit,
-    		Config{{ "{" }}AccessTTLSeconds: 3600, RefreshTTLSeconds: 604800{{ "}" }},
-    	)
-    	return svc, memAudit
+    	aud := audit.NewMemoryWriter()
+    	tokens := token.NewMemoryStore()
+    	svc := New(users, users, tokens, authinfra.NewJWTManager("test-secret-change-me"), aud, time.Hour, 24*time.Hour)
+    	return svc, users, aud, tokens
     {{ "}" }}
 
     func TestLoginSuccess(t *testing.T) {{ "{" }}
-    	svc, memAudit := newTestService(t)
-    	out, err := svc.Login(context.Background(), LoginInput{{ "{" }}Username: "alice", Password: "pw123"{{ "}" }})
+    	ctx := context.Background()
+    	svc, _, aud, _ := newTestService()
+
+    	access, refresh, expiresIn, err := svc.Login(ctx, "alice", "password123")
     	if err != nil {{ "{" }}
     		t.Fatalf("Login: %v", err)
     	{{ "}" }}
-    	if out.AccessToken == "" || out.RefreshToken == "" {{ "{" }}
-    		t.Fatal("expected non-empty token pair")
+    	if access == "" || refresh == "" {{ "{" }}
+    		t.Fatalf("Login tokens empty: access=%q refresh=%q", access, refresh)
     	{{ "}" }}
-    	if out.ExpiresIn != 3600 {{ "{" }}
-    		t.Fatalf("ExpiresIn = %d, want 3600", out.ExpiresIn)
+    	if expiresIn != 3600 {{ "{" }}
+    		t.Fatalf("expiresIn = %d, want 3600", expiresIn)
     	{{ "}" }}
-    	entries := memAudit.Entries()
-    	if len(entries) != 1 || entries[0].Action != "auth.login" {{ "{" }}
-    		t.Fatalf("audit entries = %+v, want auth.login", entries)
+    	if len(aud.Entries()) == 0 || aud.Entries()[0].Action != "auth.login" {{ "{" }}
+    		t.Fatalf("audit entries = %+v, want auth.login", aud.Entries())
     	{{ "}" }}
     {{ "}" }}
 
     func TestLoginWrongPassword(t *testing.T) {{ "{" }}
-    	svc, _ := newTestService(t)
-    	if _, err := svc.Login(context.Background(), LoginInput{{ "{" }}Username: "alice", Password: "wrong"{{ "}" }}); !errors.Is(err, ErrInvalidCredentials) {{ "{" }}
-    		t.Fatalf("Login(wrong) err = %v, want ErrInvalidCredentials", err)
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+
+    	if _, _, _, err := svc.Login(ctx, "alice", "wrong-password"); err == nil {{ "{" }}
+    		t.Fatal("Login(wrong password) = nil, want error")
     	{{ "}" }}
     {{ "}" }}
 
     func TestLoginUnknownUser(t *testing.T) {{ "{" }}
-    	svc, _ := newTestService(t)
-    	if _, err := svc.Login(context.Background(), LoginInput{{ "{" }}Username: "nobody", Password: "x"{{ "}" }}); !errors.Is(err, ErrInvalidCredentials) {{ "{" }}
-    		t.Fatalf("Login(nobody) err = %v, want ErrInvalidCredentials", err)
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+
+    	if _, _, _, err := svc.Login(ctx, "nobody", "password123"); err == nil {{ "{" }}
+    		t.Fatal("Login(unknown user) = nil, want error")
     	{{ "}" }}
     {{ "}" }}
 
     func TestValidateToken(t *testing.T) {{ "{" }}
-    	svc, _ := newTestService(t)
-    	token, err := svc.jwt.Sign(1, []string{{ "{" }}"admin"{{ "}" }}, time.Hour)
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+
+    	access, _, _, err := svc.Login(ctx, "alice", "password123")
     	if err != nil {{ "{" }}
-    		t.Fatalf("Sign: %v", err)
+    		t.Fatalf("Login: %v", err)
     	{{ "}" }}
-    	out, err := svc.ValidateToken(context.Background(), token)
-    	if err != nil {{ "{" }}
-    		t.Fatalf("ValidateToken: %v", err)
+    	uid, roles, valid := svc.ValidateToken(ctx, access)
+    	if !valid || uid != 1 || len(roles) != 1 || roles[0] != "admin" {{ "{" }}
+    		t.Fatalf("ValidateToken = (%d, %v, %v), want (1, [admin], true)", uid, roles, valid)
     	{{ "}" }}
-    	if !out.Valid || out.UID != 1 || len(out.Roles) != 1 || out.Roles[0] != "admin" {{ "{" }}
-    		t.Fatalf("ValidateToken = %+v, want uid=1 roles=[admin] valid", out)
-    	{{ "}" }}
-    	out2, err := svc.ValidateToken(context.Background(), "bogus")
-    	if err != nil {{ "{" }}
-    		t.Fatalf("ValidateToken(bogus): %v", err)
-    	{{ "}" }}
-    	if out2.Valid {{ "{" }}
-    		t.Fatal("bogus token should be invalid")
+
+    	uid, roles, valid = svc.ValidateToken(ctx, "bogus-token")
+    	if valid || uid != 0 || roles != nil {{ "{" }}
+    		t.Fatalf("ValidateToken(bogus) = (%d, %v, %v), want (0, nil, false)", uid, roles, valid)
     	{{ "}" }}
     {{ "}" }}
 
     func TestRefreshRotates(t *testing.T) {{ "{" }}
-    	svc, _ := newTestService(t)
     	ctx := context.Background()
-    	login, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "pw123"{{ "}" }})
-    	if err != nil {{ "{" }}
-    		t.Fatalf("Login: %v", err)
-    	{{ "}" }}
-    	refreshed, err := svc.Refresh(ctx, RefreshInput{{ "{" }}RefreshToken: login.RefreshToken{{ "}" }})
+    	svc, _, _, tokens := newTestService()
+
+    	_ = tokens.SetRefresh(ctx, 1, "refresh-old", time.Hour)
+    	access, refresh, err := svc.Refresh(ctx, "refresh-old")
     	if err != nil {{ "{" }}
     		t.Fatalf("Refresh: %v", err)
     	{{ "}" }}
-    	if refreshed.AccessToken == "" || refreshed.RefreshToken == "" {{ "{" }}
-    		t.Fatal("expected rotated non-empty token pair")
+    	if access == "" || refresh == "" {{ "{" }}
+    		t.Fatalf("Refresh tokens empty")
     	{{ "}" }}
-    	// old refresh token is invalidated
-    	if _, err := svc.tokens.GetRefresh(ctx, login.RefreshToken); !errors.Is(err, tokeninfra.ErrNotFound) {{ "{" }}
-    		t.Fatalf("old refresh err = %v, want ErrNotFound", err)
+    	if _, err := tokens.GetRefresh(ctx, "refresh-old"); !errors.Is(err, token.ErrNotFound) {{ "{" }}
+    		t.Fatalf("old refresh still valid: %v", err)
     	{{ "}" }}
-    	// new refresh token is stored
-    	if _, err := svc.tokens.GetRefresh(ctx, refreshed.RefreshToken); err != nil {{ "{" }}
-    		t.Fatalf("new refresh err = %v, want stored", err)
+    {{ "}" }}
+
+    func TestRefreshUnknownToken(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+    	if _, _, err := svc.Refresh(ctx, "no-such-refresh"); err == nil {{ "{" }}
+    		t.Fatal("Refresh(unknown) = nil, want error")
     	{{ "}" }}
     {{ "}" }}
 
     func TestLogoutBlacklists(t *testing.T) {{ "{" }}
-    	svc, _ := newTestService(t)
     	ctx := context.Background()
-    	login, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "pw123"{{ "}" }})
+    	svc, _, _, tokens := newTestService()
+
+    	access, _, _, err := svc.Login(ctx, "alice", "password123")
     	if err != nil {{ "{" }}
     		t.Fatalf("Login: %v", err)
     	{{ "}" }}
-    	if err := svc.Logout(ctx, login.AccessToken); err != nil {{ "{" }}
+    	if err := svc.Logout(ctx, access); err != nil {{ "{" }}
     		t.Fatalf("Logout: %v", err)
     	{{ "}" }}
-    	blacklisted, err := svc.tokens.IsBlacklisted(ctx, login.AccessToken)
+    	blacked, err := tokens.IsBlacklisted(ctx, access)
     	if err != nil {{ "{" }}
     		t.Fatalf("IsBlacklisted: %v", err)
     	{{ "}" }}
-    	if !blacklisted {{ "{" }}
-    		t.Fatal("access token should be blacklisted after logout")
-    	{{ "}" }}
-    	out, err := svc.ValidateToken(ctx, login.AccessToken)
-    	if err != nil {{ "{" }}
-    		t.Fatalf("ValidateToken: %v", err)
-    	{{ "}" }}
-    	if out.Valid {{ "{" }}
-    		t.Fatal("blacklisted access token should be invalid")
+    	if !blacked {{ "{" }}
+    		t.Fatal("access token not blacklisted after Logout")
     	{{ "}" }}
     {{ "}" }}

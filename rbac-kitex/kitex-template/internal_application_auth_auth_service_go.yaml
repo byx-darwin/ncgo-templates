@@ -7,155 +7,155 @@ body: |
 
     import (
     	"context"
+    	"crypto/rand"
+    	"encoding/hex"
     	"errors"
-    	"fmt"
     	"time"
 
     	"{{.Module}}/internal/domain/role"
     	"{{.Module}}/internal/domain/user"
     	"{{.Module}}/internal/infrastructure/audit"
     	authinfra "{{.Module}}/internal/infrastructure/auth"
-    	tokeninfra "{{.Module}}/internal/infrastructure/token"
+    	"{{.Module}}/internal/infrastructure/token"
     )
 
-    // ErrInvalidCredentials is returned for a bad username/password pair.
-    var ErrInvalidCredentials = errors.New("invalid credentials")
-
-    // userRepo is the auth service's data-access port.
-    type userRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    // UserRepo is the user lookup port consumed by the auth service.
+    type UserRepo interface {{ "{" }}
     	GetByUsername(ctx context.Context, username string) (*user.User, error)
+    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    {{ "}" }}
+
+    // RoleReader provides the role codes for a user's JWT claims.
+    type RoleReader interface {{ "{" }}
     	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
     {{ "}" }}
 
-    // Service implements the login / refresh / logout / validate flows.
+    // JWTManager signs and parses HS256 access tokens.
+    type JWTManager interface {{ "{" }}
+    	Sign(uid int64, roles []string, ttl time.Duration) (string, error)
+    	Parse(tokenString string) (*authinfra.Claims, error)
+    {{ "}" }}
+
+    // Service implements the authentication use cases.
     type Service struct {{ "{" }}
-    	users  userRepo
-    	jwt    *authinfra.JWTManager
-    	tokens tokeninfra.Store
-    	audit  audit.Writer
-    	cfg    Config
+    	users      UserRepo
+    	roles      RoleReader
+    	tokens     token.Store
+    	jwt        JWTManager
+    	audit      audit.Writer
+    	accessTTL  time.Duration
+    	refreshTTL time.Duration
     {{ "}" }}
 
-    // New wires the auth service.
-    func New(users userRepo, jwt *authinfra.JWTManager, tokens tokeninfra.Store, audit audit.Writer, cfg Config) *Service {{ "{" }}
-    	return &Service{{ "{" }}users: users, jwt: jwt, tokens: tokens, audit: audit, cfg: cfg{{ "}" }}
+    // New creates the auth application service.
+    func New(users UserRepo, roles RoleReader, tokens token.Store, jwt JWTManager, audit audit.Writer, accessTTL, refreshTTL time.Duration) *Service {{ "{" }}
+    	return &Service{{ "{" }}
+    		users:      users,
+    		roles:      roles,
+    		tokens:     tokens,
+    		jwt:        jwt,
+    		audit:      audit,
+    		accessTTL:  accessTTL,
+    		refreshTTL: refreshTTL,
+    	{{ "}" }}
     {{ "}" }}
 
-    // Login verifies credentials, issues an access+refresh pair, and records the
-    // refresh token. The access token carries the user's role codes.
-    func (s *Service) Login(ctx context.Context, in LoginInput) (LoginOutput, error) {{ "{" }}
-    	var out LoginOutput
-    	u, err := s.users.GetByUsername(ctx, in.Username)
+    // Login authenticates a user and issues an access + refresh token pair.
+    func (s *Service) Login(ctx context.Context, username, password string) (access, refresh string, expiresIn int32, err error) {{ "{" }}
+    	u, err := s.users.GetByUsername(ctx, username)
     	if err != nil {{ "{" }}
-    		var nf user.NotFoundError
-    		if errors.As(err, &nf) {{ "{" }}
-    			return out, ErrInvalidCredentials
-    		{{ "}" }}
-    		return out, err
+    		return "", "", 0, err
     	{{ "}" }}
-    	if u.Status != user.StatusActive {{ "{" }}
-    		return out, errors.New("account is disabled")
+    	if u.Status == user.StatusDisabled {{ "{" }}
+    		return "", "", 0, errors.New("auth: user disabled")
     	{{ "}" }}
-    	ok, err := authinfra.VerifyPassword(u.PasswordHash, in.Password)
+    	ok, err := authinfra.VerifyPassword(u.PasswordHash, password)
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", 0, err
     	{{ "}" }}
     	if !ok {{ "{" }}
-    		return out, ErrInvalidCredentials
+    		return "", "", 0, errors.New("auth: invalid credentials")
     	{{ "}" }}
-
-    	roles, err := s.rolesFor(ctx, u.ID)
+    	roles, err := s.roleCodes(ctx, u.ID)
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", 0, err
     	{{ "}" }}
-    	accessTTL := time.Duration(s.cfg.AccessTTLSeconds) * time.Second
-    	refreshTTL := time.Duration(s.cfg.RefreshTTLSeconds) * time.Second
-    	access, err := s.jwt.Sign(u.ID, roles, accessTTL)
+    	access, err = s.jwt.Sign(u.ID, roles, s.accessTTL)
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", 0, err
     	{{ "}" }}
-    	refresh, err := s.jwt.Sign(u.ID, roles, refreshTTL)
+    	refresh, err = newRefreshToken()
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", 0, err
     	{{ "}" }}
-    	if err := s.tokens.SetRefresh(ctx, u.ID, refresh, refreshTTL); err != nil {{ "{" }}
-    		return out, err
+    	if err := s.tokens.SetRefresh(ctx, u.ID, refresh, s.refreshTTL); err != nil {{ "{" }}
+    		return "", "", 0, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, u.ID, "auth.login", "auth", `{{ "{" }}{{ "}" }}`)
-    	return LoginOutput{{ "{" }}
-    		AccessToken:  access,
-    		RefreshToken: refresh,
-    		ExpiresIn:    int32(s.cfg.AccessTTLSeconds),
-    	{{ "}" }}, nil
+    	_ = s.audit.Write(ctx, u.ID, "auth.login", username, "{{ "{" }}{{ "}" }}")
+    	return access, refresh, int32(s.accessTTL.Seconds()), nil
     {{ "}" }}
 
-    // Refresh rotates a valid refresh token into a new access+refresh pair.
-    func (s *Service) Refresh(ctx context.Context, in RefreshInput) (RefreshOutput, error) {{ "{" }}
-    	var out RefreshOutput
-    	uid, err := s.tokens.GetRefresh(ctx, in.RefreshToken)
+    // Refresh rotates a refresh token and issues a new access token.
+    func (s *Service) Refresh(ctx context.Context, refreshToken string) (access, refresh string, err error) {{ "{" }}
+    	uid, err := s.tokens.GetRefresh(ctx, refreshToken)
     	if err != nil {{ "{" }}
-    		return out, fmt.Errorf("invalid refresh token: %w", err)
+    		return "", "", err
     	{{ "}" }}
     	u, err := s.users.GetByID(ctx, uid)
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", err
     	{{ "}" }}
-    	if u.Status != user.StatusActive {{ "{" }}
-    		return out, errors.New("account is disabled")
+    	if u.Status == user.StatusDisabled {{ "{" }}
+    		return "", "", errors.New("auth: user disabled")
     	{{ "}" }}
-    	roles, err := s.rolesFor(ctx, uid)
+    	roles, err := s.roleCodes(ctx, uid)
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", err
     	{{ "}" }}
-    	// Rotate: invalidate the presented refresh token, then issue a new pair.
-    	_ = s.tokens.DeleteRefresh(ctx, in.RefreshToken)
-
-    	accessTTL := time.Duration(s.cfg.AccessTTLSeconds) * time.Second
-    	refreshTTL := time.Duration(s.cfg.RefreshTTLSeconds) * time.Second
-    	access, err := s.jwt.Sign(uid, roles, accessTTL)
+    	access, err = s.jwt.Sign(uid, roles, s.accessTTL)
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", err
     	{{ "}" }}
-    	refresh, err := s.jwt.Sign(uid, roles, refreshTTL)
+    	refresh, err = newRefreshToken()
     	if err != nil {{ "{" }}
-    		return out, err
+    		return "", "", err
     	{{ "}" }}
-    	if err := s.tokens.SetRefresh(ctx, uid, refresh, refreshTTL); err != nil {{ "{" }}
-    		return out, err
+    	_ = s.tokens.DeleteRefresh(ctx, refreshToken)
+    	if err := s.tokens.SetRefresh(ctx, uid, refresh, s.refreshTTL); err != nil {{ "{" }}
+    		return "", "", err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, uid, "auth.refresh", "auth", `{{ "{" }}{{ "}" }}`)
-    	return RefreshOutput{{ "{" }}AccessToken: access, RefreshToken: refresh{{ "}" }}, nil
+    	_ = s.audit.Write(ctx, uid, "auth.refresh", "", "{{ "{" }}{{ "}" }}")
+    	return access, refresh, nil
     {{ "}" }}
 
-    // Logout revokes the access token by blacklisting it for the access TTL.
+    // Logout blacklists the access token for the remainder of its TTL.
     func (s *Service) Logout(ctx context.Context, accessToken string) error {{ "{" }}
-    	ttl := time.Duration(s.cfg.AccessTTLSeconds) * time.Second
-    	if err := s.tokens.Blacklist(ctx, accessToken, ttl); err != nil {{ "{" }}
+    	var uid int64
+    	if claims, err := s.jwt.Parse(accessToken); err == nil {{ "{" }}
+    		uid = claims.Uid
+    	{{ "}" }}
+    	if err := s.tokens.Blacklist(ctx, accessToken, s.accessTTL); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "auth.logout", "auth", `{{ "{" }}{{ "}" }}`)
+    	_ = s.audit.Write(ctx, uid, "auth.logout", "", "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
-    // ValidateToken verifies the access token signature and blacklist state.
-    func (s *Service) ValidateToken(ctx context.Context, accessToken string) (ValidateTokenOutput, error) {{ "{" }}
+    // ValidateToken reports whether the access token is valid and returns its claims.
+    func (s *Service) ValidateToken(ctx context.Context, accessToken string) (uid int64, roles []string, valid bool) {{ "{" }}
+    	blacked, err := s.tokens.IsBlacklisted(ctx, accessToken)
+    	if err != nil || blacked {{ "{" }}
+    		return 0, nil, false
+    	{{ "}" }}
     	claims, err := s.jwt.Parse(accessToken)
     	if err != nil {{ "{" }}
-    		return ValidateTokenOutput{{ "{" }}Valid: false{{ "}" }}, nil
+    		return 0, nil, false
     	{{ "}" }}
-    	blacklisted, err := s.tokens.IsBlacklisted(ctx, accessToken)
-    	if err != nil {{ "{" }}
-    		return ValidateTokenOutput{{ "{" }}Valid: false{{ "}" }}, err
-    	{{ "}" }}
-    	if blacklisted {{ "{" }}
-    		return ValidateTokenOutput{{ "{" }}Valid: false{{ "}" }}, nil
-    	{{ "}" }}
-    	return ValidateTokenOutput{{ "{" }}UID: claims.Uid, Roles: claims.Roles, Valid: true{{ "}" }}, nil
+    	return claims.Uid, claims.Roles, true
     {{ "}" }}
 
-    func (s *Service) rolesFor(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
-    	roles, err := s.users.ListRoles(ctx, uid)
+    func (s *Service) roleCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    	roles, err := s.roles.ListRoles(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -164,4 +164,12 @@ body: |
     		codes = append(codes, r.Code)
     	{{ "}" }}
     	return codes, nil
+    {{ "}" }}
+
+    func newRefreshToken() (string, error) {{ "{" }}
+    	buf := make([]byte, 32)
+    	if _, err := rand.Read(buf); err != nil {{ "{" }}
+    		return "", err
+    	{{ "}" }}
+    	return hex.EncodeToString(buf), nil
     {{ "}" }}

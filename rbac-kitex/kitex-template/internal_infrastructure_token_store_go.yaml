@@ -1,26 +1,25 @@
-# rbac-kitex template — internal/infrastructure/token/store.go
+# ncgo exported template — internal/infrastructure/token/store.go
 path: internal/infrastructure/token/store.go
 update_behavior:
-  type: cover
+    type: cover
 body: |-
-  package token
+    package token
 
-  import (
-  	"context"
-  	"errors"
-  	"time"
-  )
+    import (
+    	"context"
+    	"errors"
+    	"time"
+    )
 
-  // ErrNotFound is returned when a refresh token is unknown, expired, or deleted.
-  var ErrNotFound = errors.New("token not found")
+    // ErrNotFound is returned when a refresh token or blacklist entry is absent.
+    var ErrNotFound = errors.New("token: not found")
 
-  // Store persists refresh tokens and access-token blacklist entries. The
-  // memory store is the hermetic default; the Redis store is a production seam.
-  type Store interface {
-  	SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error
-  	GetRefresh(ctx context.Context, refreshToken string) (int64, error)
-  	DeleteRefresh(ctx context.Context, refreshToken string) error
-  	Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error
-  	IsBlacklisted(ctx context.Context, accessToken string) (bool, error)
-  }
+    // Store manages refresh tokens and the access-token blacklist.
+    type Store interface {
+    	SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error
+    	GetRefresh(ctx context.Context, refreshToken string) (uid int64, err error)
+    	DeleteRefresh(ctx context.Context, refreshToken string) error
+    	Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error
+    	IsBlacklisted(ctx context.Context, accessToken string) (bool, error)
+    }
 

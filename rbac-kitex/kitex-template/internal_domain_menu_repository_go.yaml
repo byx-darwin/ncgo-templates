@@ -1,0 +1,37 @@
+# ncgo exported template — internal/domain/menu/repository.go
+path: internal/domain/menu/repository.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import (
+    	"context"
+    	"fmt"
+    )
+
+    // Repository is the persistence port for the menu read-only query aggregate.
+    // It queries the permissions table filtered by type ∈ {{ "{" }}catalog, menu{{ "}" }}.
+    type Repository interface {{ "{" }}
+    	ListMenusAsTree(ctx context.Context) ([]*Menu, error)
+    	ListMenusByParentID(ctx context.Context, parentID int64) ([]*Menu, error)
+    {{ "}" }}
+
+    // NotFoundError is returned when a menu does not exist.
+    type NotFoundError struct {{ "{" }}
+    	Key string
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }}
+    	return fmt.Sprintf("menu not found: %s", e.Key)
+    {{ "}" }}
+
+    // ValidationError is returned when menu input violates a domain rule.
+    type ValidationError struct {{ "{" }}
+    	Field string
+    	Msg   string
+    {{ "}" }}
+
+    func (e ValidationError) Error() string {{ "{" }}
+    	return fmt.Sprintf("menu validation error: %s %s", e.Field, e.Msg)
+    {{ "}" }}

@@ -5,27 +5,25 @@ update_behavior:
 body: |
     package rolesvc
 
-    // CreateRoleInput carries a role creation request.
+    import "{{.Module}}/internal/domain/role"
+
+    // CreateRoleInput is the command to create a role.
     type CreateRoleInput struct {{ "{" }}
-    	Code string
-    	Name string
+    	Code   string
+    	Name   string
+    	Remark string
     {{ "}" }}
 
-    // UpdateRoleInput carries a role rename.
+    // UpdateRoleInput is the command to update a role.
     type UpdateRoleInput struct {{ "{" }}
-    	ID   int64
-    	Name string
+    	ID     int64
+    	Name   string
+    	Status *int
+    	Remark *string
     {{ "}" }}
 
-    // ListRolesOutput carries a page of roles plus the total count.
-    type ListRolesOutput struct {{ "{" }}
-    	Roles []*RoleRow
-    	Total int64
-    {{ "}" }}
-
-    // RoleRow is a role.
-    type RoleRow struct {{ "{" }}
-    	ID   int64
-    	Code string
-    	Name string
+    // ListRolesResult is a page of roles plus the total count.
+    type ListRolesResult struct {{ "{" }}
+    	Roles []*role.Role
+    	Total int32
     {{ "}" }}

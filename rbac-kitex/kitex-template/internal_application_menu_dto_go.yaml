@@ -5,25 +5,5 @@ update_behavior:
 body: |
     package menusvc
 
-    // CreateMenuInput carries a menu creation request.
-    type CreateMenuInput struct {{ "{" }}
-    	ParentID  int64
-    	Type      string
-    	Name      string
-    	Path      string
-    	Component string
-    	PermCode  string
-    	SortOrder int32
-    {{ "}" }}
-
-    // UpdateMenuInput carries a partial menu update; nil fields are left unchanged.
-    type UpdateMenuInput struct {{ "{" }}
-    	ID        int64
-    	ParentID  *int64
-    	Type      *string
-    	Name      *string
-    	Path      *string
-    	Component *string
-    	PermCode  *string
-    	SortOrder *int32
-    {{ "}" }}
+    // Menu query service has no write DTOs — writes go through permission.Service.
+    // This file is intentionally empty; kept for package documentation.

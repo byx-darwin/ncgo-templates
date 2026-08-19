@@ -1,81 +1,64 @@
-# rbac-kitex template — internal/infrastructure/auth/jwt.go
+# ncgo exported template — internal/infrastructure/auth/jwt.go
 path: internal/infrastructure/auth/jwt.go
 update_behavior:
-  type: cover
+    type: cover
 body: |-
-  package auth
+    package auth
 
-  import (
-  	"crypto/rand"
-  	"encoding/hex"
-  	"errors"
-  	"fmt"
-  	"time"
+    import (
+    	"errors"
+    	"time"
 
-  	"github.com/golang-jwt/jwt/v5"
-  )
+    	"github.com/golang-jwt/jwt/v5"
+    )
 
-  // newJTI returns a random 16-byte hex identifier used as the jti claim so
-  // refresh rotation always produces a distinct token string.
-  func newJTI() string {
-  	var b [16]byte
-  	if _, err := rand.Read(b[:]); err != nil {
-  		return fmt.Sprintf("x%d", time.Now().UnixNano())
-  	}
-  	return hex.EncodeToString(b[:])
-  }
+    // Claims is the JWT payload: the authenticated user id plus role codes.
+    type Claims struct {
+    	Uid   int64    `json:"uid"`
+    	Roles []string `json:"roles"`
+    	jwt.RegisteredClaims
+    }
 
-  // Claims is the JWT payload: the user id, the role codes, and the standard
-  // registered claims (exp, iat, ...). HS256 is the default signing method;
-  // RS256/JWKS is a documented seam.
-  type Claims struct {
-  	Uid   int64    `json:"uid"`
-  	Roles []string `json:"roles"`
-  	jwt.RegisteredClaims
-  }
+    // JWTManager signs and parses HS256 tokens.
+    type JWTManager struct {
+    	secret []byte
+    }
 
-  // JWTManager signs and verifies HS256 JWTs.
-  type JWTManager struct {
-  	secret []byte
-  }
+    // NewJWTManager creates an HS256 JWT manager with the given secret.
+    func NewJWTManager(secret string) *JWTManager {
+    	return &JWTManager{secret: []byte(secret)}
+    }
 
-  // NewJWTManager creates a JWTManager with the given HS256 secret.
-  func NewJWTManager(secret string) *JWTManager {
-  	return &JWTManager{secret: []byte(secret)}
-  }
+    // Sign issues an HS256 token carrying uid and roles, expiring after ttl.
+    func (m *JWTManager) Sign(uid int64, roles []string, ttl time.Duration) (string, error) {
+    	now := time.Now()
+    	claims := Claims{
+    		Uid:   uid,
+    		Roles: roles,
+    		RegisteredClaims: jwt.RegisteredClaims{
+    			IssuedAt:  jwt.NewNumericDate(now),
+    			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+    		},
+    	}
+    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    	return token.SignedString(m.secret)
+    }
 
-  // Sign issues a token for the given uid and role codes valid for ttl. Each
-  // token carries a random jti so rotation always produces a distinct string.
-  func (m *JWTManager) Sign(uid int64, roles []string, ttl time.Duration) (string, error) {
-  	now := time.Now()
-  	claims := Claims{
-  		Uid:   uid,
-  		Roles: roles,
-  		RegisteredClaims: jwt.RegisteredClaims{
-  			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-  			IssuedAt:  jwt.NewNumericDate(now),
-  			ID:        newJTI(),
-  		},
-  	}
-  	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-  	return token.SignedString(m.secret)
-  }
-
-  // Parse verifies the signature and expiry, returning the claims.
-  func (m *JWTManager) Parse(token string) (*Claims, error) {
-  	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(t *jwt.Token) (interface{}, error) {
-  		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-  			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-  		}
-  		return m.secret, nil
-  	})
-  	if err != nil {
-  		return nil, err
-  	}
-  	claims, ok := parsed.Claims.(*Claims)
-  	if !ok || !parsed.Valid {
-  		return nil, errors.New("invalid token")
-  	}
-  	return claims, nil
-  }
+    // Parse verifies the token signature and expiry, returning its claims.
+    func (m *JWTManager) Parse(tokenString string) (*Claims, error) {
+    	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (any, error) {
+    		if t.Method != jwt.SigningMethodHS256 {
+    			return nil, errors.New("unexpected signing method")
+    		}
+    		return m.secret, nil
+    	})
+    	if err != nil {
+    		return nil, err
+    	}
+    	claims, ok := token.Claims.(*Claims)
+    	if !ok || !token.Valid {
+    		return nil, errors.New("invalid token")
+    	}
+    	return claims, nil
+    }
 

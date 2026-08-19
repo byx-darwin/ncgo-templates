@@ -3,7 +3,7 @@ path: Makefile
 update_behavior:
     type: cover
 body: |
-    APP_NAME = {{.ServiceName}}-rpc
+    APP_NAME = rbacservice-rpc
     MODULE   = {{.Module}}
     # auth.proto is the basename of the IDL file kitex is processing, so the
     # update target always re-runs against the same proto (e.g. the rule-center

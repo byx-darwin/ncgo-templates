@@ -1,0 +1,134 @@
+# ncgo exported template — internal/application/menu/menu_query_service.go
+path: internal/application/menu/menu_query_service.go
+update_behavior:
+    type: skip
+body: |
+    package menusvc
+
+    import (
+    	"context"
+    	"math"
+
+    	"{{.Module}}/internal/domain/menu"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    )
+
+    // AdminRoleCode grants full menu/permission visibility.
+    const AdminRoleCode = "admin"
+
+    // MenuRepo is the read-only menu persistence port consumed by the service.
+    type MenuRepo interface {{ "{" }}
+    	ListMenusAsTree(ctx context.Context) ([]*menu.Menu, error)
+    {{ "}" }}
+
+    // UserRoleReader resolves a user's roles for menu/permission visibility.
+    type UserRoleReader interface {{ "{" }}
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    {{ "}" }}
+
+    // PermReader resolves a user's granted permissions.
+    type PermReader interface {{ "{" }}
+    	ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error)
+    	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
+    {{ "}" }}
+
+    // QueryService implements the read-only menu use cases.
+    type QueryService struct {{ "{" }}
+    	menus MenuRepo
+    	users UserRoleReader
+    	perms PermReader
+    {{ "}" }}
+
+    // New creates the menu query service.
+    func New(menus MenuRepo, users UserRoleReader, perms PermReader) *QueryService {{ "{" }}
+    	return &QueryService{{ "{" }}menus: menus, users: users, perms: perms{{ "}" }}
+    {{ "}" }}
+
+    // ListMenus returns every enabled menu (catalog+menu types) as a flat list.
+    func (s *QueryService) ListMenus(ctx context.Context) ([]*menu.Menu, error) {{ "{" }}
+    	return s.menus.ListMenusAsTree(ctx)
+    {{ "}" }}
+
+    // UserPermCodes returns the unified permission codes visible to a user. The
+    // admin role sees every permission.
+    func (s *QueryService) UserPermCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    	roles, err := s.users.ListRoles(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if hasRole(roles, AdminRoleCode) {{ "{" }}
+    		all, err := s.perms.List(ctx, math.MaxInt32, 0)
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		codes := make([]string, 0, len(all))
+    		for _, p := range all {{ "{" }}
+    			codes = append(codes, p.Code)
+    		{{ "}" }}
+    		return codes, nil
+    	{{ "}" }}
+    	roleIDs := make([]int64, 0, len(roles))
+    	for _, r := range roles {{ "{" }}
+    		roleIDs = append(roleIDs, r.ID)
+    	{{ "}" }}
+    	perms, err := s.perms.ListByRoleIDs(ctx, roleIDs)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	seen := map[string]bool{{ "{" }}{{ "}" }}
+    	codes := make([]string, 0, len(perms))
+    	for _, p := range perms {{ "{" }}
+    		if seen[p.Code] {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		seen[p.Code] = true
+    		codes = append(codes, p.Code)
+    	{{ "}" }}
+    	return codes, nil
+    {{ "}" }}
+
+    // UserMenuTree returns the menu forest visible to a user. The admin role sees
+    // the full menu tree; other users only see menus whose code they hold.
+    func (s *QueryService) UserMenuTree(ctx context.Context, uid int64) ([]*menu.Node, error) {{ "{" }}
+    	roles, err := s.users.ListRoles(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if hasRole(roles, AdminRoleCode) {{ "{" }}
+    		items, err := s.menus.ListMenusAsTree(ctx)
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		return menu.BuildTree(items), nil
+    	{{ "}" }}
+    	codes, err := s.UserPermCodes(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	// Filter the full menu tree to only include menus whose code is in the user's codes.
+    	items, err := s.menus.ListMenusAsTree(ctx)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	codeSet := make(map[string]bool, len(codes))
+    	for _, c := range codes {{ "{" }}
+    		codeSet[c] = true
+    	{{ "}" }}
+    	filtered := make([]*menu.Menu, 0, len(items))
+    	for _, m := range items {{ "{" }}
+    		if codeSet[m.Code] {{ "{" }}
+    			filtered = append(filtered, m)
+    		{{ "}" }}
+    	{{ "}" }}
+    	return menu.BuildTree(filtered), nil
+    {{ "}" }}
+
+    func hasRole(roles []*role.Role, code string) bool {{ "{" }}
+    	for _, r := range roles {{ "{" }}
+    		if r.Code == code {{ "{" }}
+    			return true
+    		{{ "}" }}
+    	{{ "}" }}
+    	return false
+    {{ "}" }}

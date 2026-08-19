@@ -9,140 +9,158 @@ body: |
     	"context"
     	"fmt"
 
-    	rbacsvc "{{.Module}}/internal/application/rbac"
+    	"{{.Module}}/internal/db/gen"
     	"{{.Module}}/internal/domain/permission"
     	"{{.Module}}/internal/domain/role"
     	"{{.Module}}/internal/infrastructure/audit"
     )
 
-    // roleRepo is the role service's data-access port.
-    type roleRepo interface {{ "{" }}
+    // RoleRepo is the role persistence + permission-assignment port.
+    type RoleRepo interface {{ "{" }}
     	GetByID(ctx context.Context, id int64) (*role.Role, error)
+    	GetByCode(ctx context.Context, code string) (*role.Role, error)
     	List(ctx context.Context, limit, offset int32) ([]*role.Role, error)
     	Count(ctx context.Context) (int64, error)
-    	Save(ctx context.Context, r *role.Role) error
+    	Save(ctx context.Context, r *role.Role) (*role.Role, error)
+    	Update(ctx context.Context, r *role.Role) (*role.Role, error)
     	Delete(ctx context.Context, id int64) error
     	AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error
-    	ClearPermissions(ctx context.Context, roleID int64) error
-    	ListPermissions(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error)
+    	ListPermissionCodes(ctx context.Context, roleID int64) ([]string, error)
+    	ListPermissionIDsByCodes(ctx context.Context, codes []string) ([]gen.ListPermissionIDsByCodesRow, error)
     {{ "}" }}
 
-    // permRepo resolves permissions by ids for enforcer policy sync.
-    type permRepo interface {{ "{" }}
-    	ListByIDs(ctx context.Context, ids []int64) ([]*permission.Permission, error)
+    // PermReader resolves permissions for the grant use case.
+    type PermReader interface {{ "{" }}
+    	ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error)
     {{ "}" }}
 
-    // Service implements role management and permission granting.
+    // Enforcer syncs permission grants into Casbin (p policies).
+    type Enforcer interface {{ "{" }}
+    	AddPolicy(params ...any) (bool, error)
+    	RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error)
+    {{ "}" }}
+
+    // Service implements the role management use cases.
     type Service struct {{ "{" }}
-    	roles    roleRepo
-    	perms    permRepo
-    	enforcer rbacsvc.Enforcer
+    	roles    RoleRepo
+    	perms    PermReader
+    	enforcer Enforcer
     	audit    audit.Writer
     {{ "}" }}
 
-    // New wires the role service.
-    func New(roles roleRepo, perms permRepo, enforcer rbacsvc.Enforcer, audit audit.Writer) *Service {{ "{" }}
+    // New creates the role application service.
+    func New(roles RoleRepo, perms PermReader, enforcer Enforcer, audit audit.Writer) *Service {{ "{" }}
     	return &Service{{ "{" }}roles: roles, perms: perms, enforcer: enforcer, audit: audit{{ "}" }}
     {{ "}" }}
 
-    // Create validates and persists a role.
+    // Create persists a new role.
     func (s *Service) Create(ctx context.Context, in CreateRoleInput) (*role.Role, error) {{ "{" }}
     	r, err := role.New(in.Code, in.Name)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	if err := s.roles.Save(ctx, r); err != nil {{ "{" }}
+    	if in.Remark != "" {{ "{" }}
+    		r.Remark = in.Remark
+    	{{ "}" }}
+    	saved, err := s.roles.Save(ctx, r)
+    	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "role.create", r.Code, `{{ "{" }}{{ "}" }}`)
-    	return r, nil
+    	_ = s.audit.Write(ctx, 0, "role.create", in.Code, "{{ "{" }}{{ "}" }}")
+    	return saved, nil
     {{ "}" }}
 
-    // Update renames a role.
+    // Update renames a role and optionally changes status/remark.
     func (s *Service) Update(ctx context.Context, in UpdateRoleInput) (*role.Role, error) {{ "{" }}
     	r, err := s.roles.GetByID(ctx, in.ID)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
     	r.Name = in.Name
-    	if err := s.roles.Save(ctx, r); err != nil {{ "{" }}
+    	if in.Status != nil {{ "{" }}
+    		r.Status = *in.Status
+    	{{ "}" }}
+    	if in.Remark != nil {{ "{" }}
+    		r.Remark = *in.Remark
+    	{{ "}" }}
+    	saved, err := s.roles.Update(ctx, r)
+    	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, in.ID, "role.update", r.Code, `{{ "{" }}{{ "}" }}`)
-    	return r, nil
+    	_ = s.audit.Write(ctx, 0, "role.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	return saved, nil
     {{ "}" }}
 
-    // Delete removes a role and its Casbin policies/groupings.
+    // Delete removes a role.
     func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
-    	r, err := s.roles.GetByID(ctx, id)
-    	if err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
     	if err := s.roles.Delete(ctx, id); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_, _ = s.enforcer.RemoveFilteredPolicy(0, r.Code)
-    	_, _ = s.enforcer.RemoveFilteredGroupingPolicy(1, r.Code)
-    	_ = s.audit.Write(ctx, id, "role.delete", r.Code, `{{ "{" }}{{ "}" }}`)
+    	_ = s.audit.Write(ctx, 0, "role.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
-    // List returns a page of roles plus the total count.
-    func (s *Service) List(ctx context.Context, page, pageSize int32) (*ListRolesOutput, error) {{ "{" }}
-    	page, pageSize = normalizePage(page, pageSize)
-    	roles, err := s.roles.List(ctx, pageSize, (page-1)*pageSize)
+    // List returns a page of roles and the total count.
+    func (s *Service) List(ctx context.Context, page, pageSize int32) ([]*role.Role, int32, error) {{ "{" }}
+    	offset := int32(0)
+    	if page > 1 {{ "{" }}
+    		offset = (page - 1) * pageSize
+    	{{ "}" }}
+    	roles, err := s.roles.List(ctx, pageSize, offset)
     	if err != nil {{ "{" }}
-    		return nil, err
+    		return nil, 0, err
     	{{ "}" }}
     	total, err := s.roles.Count(ctx)
     	if err != nil {{ "{" }}
-    		return nil, err
+    		return nil, 0, err
     	{{ "}" }}
-    	rows := make([]*RoleRow, 0, len(roles))
-    	for _, r := range roles {{ "{" }}
-    		rows = append(rows, &RoleRow{{ "{" }}ID: r.ID, Code: r.Code, Name: r.Name{{ "}" }})
-    	{{ "}" }}
-    	return &ListRolesOutput{{ "{" }}Roles: rows, Total: total{{ "}" }}, nil
+    	return roles, int32(total), nil
     {{ "}" }}
 
-    // GrantPermissions rewrites a role's permission set and syncs the Casbin
-    // p(role_code, perm_code, method) rules for the granted permissions.
-    func (s *Service) GrantPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    // GrantPermissions assigns permissions to a role using permission codes (not IDs).
+    // Unknown codes produce a domain error.
+    func (s *Service) GrantPermissions(ctx context.Context, roleID int64, permissionCodes []string) error {{ "{" }}
+    	if err := role.Assign(ctx, roleID, permissionCodes); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
     	r, err := s.roles.GetByID(ctx, roleID)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	perms, err := s.perms.ListByIDs(ctx, permissionIDs)
+    	// Resolve codes → permissions
+    	perms, err := s.perms.ListByCodes(ctx, permissionCodes)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	if err := s.roles.ClearPermissions(ctx, roleID); err != nil {{ "{" }}
+    	// Check all codes were resolved
+    	resolved := make(map[string]bool, len(perms))
+    	for _, p := range perms {{ "{" }}
+    		resolved[p.Code] = true
+    	{{ "}" }}
+    	for _, c := range permissionCodes {{ "{" }}
+    		if !resolved[c] {{ "{" }}
+    			return permission.NotFoundError{{ "{" }}Key: c{{ "}" }}
+    		{{ "}" }}
+    	{{ "}" }}
+    	// Resolve codes → IDs for the role_permissions join table
+    	rows, err := s.roles.ListPermissionIDsByCodes(ctx, permissionCodes)
+    	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	if err := s.roles.AssignPermissions(ctx, roleID, permissionIDs); err != nil {{ "{" }}
+    	ids := make([]int64, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		ids = append(ids, row.ID)
+    	{{ "}" }}
+    	if err := s.roles.AssignPermissions(ctx, roleID, ids); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	if _, err := s.enforcer.RemoveFilteredPolicy(0, r.Code); err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
+    	// Sync Casbin policies: clear existing then add new.
+    	_, _ = s.enforcer.RemoveFilteredPolicy(0, r.Code)
     	for _, p := range perms {{ "{" }}
     		if _, err := s.enforcer.AddPolicy(r.Code, p.Code, p.Method); err != nil {{ "{" }}
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, roleID, "role.grant_permissions", r.Code, fmt.Sprintf(`{{ "{" }}"permission_ids":%v{{ "}" }}`, permissionIDs))
+    	_ = s.audit.Write(ctx, 0, "role.grant_permissions", fmt.Sprint(roleID), "{{ "{" }}{{ "}" }}")
     	return nil
-    {{ "}" }}
-
-    func normalizePage(page, pageSize int32) (int32, int32) {{ "{" }}
-    	if page < 1 {{ "{" }}
-    		page = 1
-    	{{ "}" }}
-    	if pageSize < 1 {{ "{" }}
-    		pageSize = 20
-    	{{ "}" }}
-    	if pageSize > 100 {{ "{" }}
-    		pageSize = 100
-    	{{ "}" }}
-    	return page, pageSize
     {{ "}" }}

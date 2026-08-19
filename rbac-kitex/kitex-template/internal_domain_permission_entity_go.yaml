@@ -5,76 +5,104 @@ update_behavior:
 body: |
     package permission
 
-    import (
-    	"context"
-    	"fmt"
-    	"strings"
-    )
+    import "strings"
 
-    // Kind constants for a permission.
     const (
-    	KindMenu   = "menu"
-    	KindButton = "button"
-    	KindAPI    = "api"
+    	// TypeCatalog is a top-level classification node in the permission tree.
+    	TypeCatalog = "catalog"
+    	// TypeMenu is a navigation menu node in the permission tree.
+    	TypeMenu = "menu"
+    	// TypeButton is a frontend button-level permission.
+    	TypeButton = "button"
+    	// TypeAPI is a backend API endpoint permission.
+    	TypeAPI = "api"
+
+    	// StatusEnabled marks an active permission.
+    	StatusEnabled = 1
+    	// StatusDisabled marks a disabled permission.
+    	StatusDisabled = 0
     )
 
-    // Permission is the aggregate root for the permission aggregate. Code is the
-    // unified permission code: it equals the Casbin obj and the menu/button
-    // perm_code, so one code drives frontend menus and backend API enforcement.
-    type Permission struct {{ "{" }}
-    	ID     int64
-    	Code   string
-    	Name   string
-    	Kind   string
-    	Method string
+    // validTypes is the set of allowed permission types.
+    var validTypes = map[string]bool{{ "{" }}
+    	TypeCatalog: true,
+    	TypeMenu:    true,
+    	TypeButton:  true,
+    	TypeAPI:     true,
     {{ "}" }}
 
-    // New creates a Permission with validated invariants. Kind must be one of
-    // menu/button/api. Method is normalized to "*" for menu/button and defaults to
-    // "GET" for api when empty.
-    func New(code, name, kind, method string) (*Permission, error) {{ "{" }}
+    // validMethods is the set of allowed HTTP methods for api-type permissions.
+    var validMethods = map[string]bool{{ "{" }}
+    	"GET":    true,
+    	"POST":   true,
+    	"PUT":    true,
+    	"DELETE": true,
+    {{ "}" }}
+
+    // Permission is the aggregate root for the permission aggregate.
+    // It represents a single tree node with type ∈ {{ "{" }}catalog, menu, button, api{{ "}" }}.
+    type Permission struct {{ "{" }}
+    	ID          int64
+    	Code        string
+    	Type        string
+    	Name        string
+    	ParentID    int64  // 0 = root
+    	Path        string
+    	Icon        string
+    	RouteName   string
+    	Redirect    string
+    	KeepAlive   *bool
+    	HideInMenu  *bool
+    	IsExternal  *bool
+    	Method      string // required when Type=api
+    	Sort        int32
+    	Status      int // StatusEnabled or StatusDisabled
+    	Description string
+    {{ "}" }}
+
+    // New creates a Permission with full validation:
+    //   - type ∈ {{ "{" }}catalog, menu, button, api{{ "}" }}
+    //   - when type = api, method is required and ∈ {{ "{" }}GET, POST, PUT, DELETE{{ "}" }}
+    //   - when type ∈ {{ "{" }}catalog, menu{{ "}" }}, tree fields may be filled
+    //   - when type = button, tree fields should be empty (not enforced, just allowed)
+    func New(code, typ, name string, parentID int64, path, icon, routeName, redirect string, keepAlive, hideInMenu, isExternal *bool, method string, sort int32, status int, description string) (*Permission, error) {{ "{" }}
     	code = strings.TrimSpace(code)
     	if code == "" {{ "{" }}
-    		return nil, ValidationError("permission code is required")
+    		return nil, ValidationError{{ "{" }}Field: "code", Msg: "must not be empty"{{ "}" }}
     	{{ "}" }}
-    	switch kind {{ "{" }}
-    	case KindMenu, KindButton:
-    		method = "*"
-    	case KindAPI:
-    		if method == "" {{ "{" }}
-    			method = "GET"
+    	if !validTypes[typ] {{ "{" }}
+    		return nil, ValidationError{{ "{" }}Field: "type", Msg: "must be catalog, menu, button, or api"{{ "}" }}
+    	{{ "}" }}
+    	name = strings.TrimSpace(name)
+    	if name == "" {{ "{" }}
+    		return nil, ValidationError{{ "{" }}Field: "name", Msg: "must not be empty"{{ "}" }}
+    	{{ "}" }}
+    	if typ == TypeAPI {{ "{" }}
+    		method = strings.ToUpper(strings.TrimSpace(method))
+    		if !validMethods[method] {{ "{" }}
+    			return nil, ValidationError{{ "{" }}Field: "method", Msg: "required when type=api; must be GET, POST, PUT, or DELETE"{{ "}" }}
     		{{ "}" }}
-    	default:
-    		return nil, ValidationError("permission kind must be menu, button, or api")
+    	{{ "}" }} else {{ "{" }}
+    		method = ""
     	{{ "}" }}
-    	return &Permission{{ "{" }}Code: code, Name: name, Kind: kind, Method: method{{ "}" }}, nil
-    {{ "}" }}
-
-    // NotFoundError reports that a permission does not exist.
-    type NotFoundError struct {{ "{" }}
-    	ID   int64
-    	Code string
-    {{ "}" }}
-
-    func (e NotFoundError) Error() string {{ "{" }}
-    	if e.ID != 0 {{ "{" }}
-    		return fmt.Sprintf("permission %d not found", e.ID)
+    	if status != StatusEnabled && status != StatusDisabled {{ "{" }}
+    		status = StatusEnabled
     	{{ "}" }}
-    	return fmt.Sprintf("permission %q not found", e.Code)
-    {{ "}" }}
-
-    // ValidationError reports an invalid permission operation.
-    type ValidationError string
-
-    func (e ValidationError) Error() string {{ "{" }} return string(e) {{ "}" }}
-
-    // Repository is the persistence port for the permission aggregate.
-    type Repository interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*Permission, error)
-    	GetByCode(ctx context.Context, code string) (*Permission, error)
-    	ListByIDs(ctx context.Context, ids []int64) ([]*Permission, error)
-    	List(ctx context.Context, limit, offset int32) ([]*Permission, error)
-    	ListByCodes(ctx context.Context, codes []string) ([]*Permission, error)
-    	Save(ctx context.Context, p *Permission) error
-    	Delete(ctx context.Context, id int64) error
+    	return &Permission{{ "{" }}
+    		Code:        code,
+    		Type:        typ,
+    		Name:        name,
+    		ParentID:    parentID,
+    		Path:        path,
+    		Icon:        icon,
+    		RouteName:   routeName,
+    		Redirect:    redirect,
+    		KeepAlive:   keepAlive,
+    		HideInMenu:  hideInMenu,
+    		IsExternal:  isExternal,
+    		Method:      method,
+    		Sort:        sort,
+    		Status:      status,
+    		Description: description,
+    	{{ "}" }}, nil
     {{ "}" }}

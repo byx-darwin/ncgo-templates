@@ -1,7 +1,7 @@
 # rbac-kitex
 
 Official **RBAC + auth authority** Kitex RPC template — a DDD service that owns
-users / roles / permissions / menus, Casbin enforcement, JWT login, and audit
+users / roles / permissions, Casbin enforcement, JWT login, and audit
 logging. Other services (e.g. an admin BFF) call it to validate tokens and
 answer authorization questions.
 
@@ -20,12 +20,17 @@ ncgo new rbac --module github.com/acme/rbac --kind kitex \
 ## Contents
 
 - `idl/auth.proto` — `rbac.v1`: `AuthService` (Login / Refresh / Logout /
-  ValidateToken) + `RBACService` (user / role / permission / menu CRUD,
-  AssignRolesToUser, GrantPermissionsToRole, Enforce, GetUserMenuTree,
-  GetUserPermCodes).
+  ValidateToken) + `RBACService`:
+  - **User**: CreateUser / UpdateUser / DeleteUser / GetUser / ListUsers
+  - **Role**: CreateRole / UpdateRole / DeleteRole / ListRoles
+  - **Permission** (all writes): CreatePermission / UpdatePermission / DeletePermission / GetPermission / ListPermissions
+  - **Menu** (read-only): ListMenus (returns tree view filtered to catalog+menu types)
+  - **Grant/Assign**: AssignRolesToUser / GrantPermissionsToRole (takes `permission_codes []string`)
+  - **AuthZ**: Enforce / GetUserMenuTree / GetUserPermCodes
 - **DDD layers** (`internal/domain/<agg>` + `internal/application/<agg>`):
-  - `user`, `role`, `permission`, `menu` aggregates (entities + ports +
-    validation), plus `rbac` (Enforce).
+  - `user`, `role`, `permission` aggregates (entities + ports + validation).
+  - `menu` aggregate is **read-only** (query service): ListMenus, GetUserMenuTree, UserPermCodes.
+  - `rbac` aggregate (Enforce).
   - Cross-aggregate consistency (grant → role, assign → user) lives in the
     application services, which **sync into Casbin** in the same flow.
 - **Infrastructure** (`internal/infrastructure/`):
@@ -41,6 +46,22 @@ ncgo new rbac --module github.com/acme/rbac --kind kitex \
   server; `conf/` carries the JWT secret + token TTLs.
 
 Variables: `{{.Module}}`, `{{.ServiceName}}`, `{{ToLower .ServiceName}}`.
+
+## Data Model
+
+7 tables (Postgres):
+
+| Table | Key Columns |
+|---|---|
+| `users` | id, username, password_hash, nickname, avatar, email, phone, **status int (1=enabled, 0=disabled)**, created_at, updated_at |
+| `roles` | id, code, name, **status int**, **remark text**, created_at, updated_at |
+| `permissions` | id, code, **type** (catalog\|menu\|button\|api), name, **parent_id** (self-FK), path, icon, route_name, redirect, keep_alive, hide_in_menu, is_external, method, sort, status, description, created_at, updated_at — **UNIQUE(code, type)** |
+| `user_roles` | user_id, role_id |
+| `role_permissions` | role_id, permission_id |
+| `casbin_rule` | id, ptype, v0..v5 |
+| `audit_log` | id, actor_uid, action, target, detail_json, created_at |
+
+**Single Permission tree**: the `permissions` table replaces the former `permissions + menus` two-table design. Menu tree queries are a filtered view: `WHERE type IN ('catalog', 'menu')`. Casbin only consumes `code`; the `code+type` composite uniqueness is transparent to it.
 
 ## Seams (documented TODO)
 

@@ -1,5 +1,0 @@
-# Kitex custom template — migrations directory marker
-path: internal/db/migrations/.gitkeep
-update_behavior:
-  type: skip
-body: ""

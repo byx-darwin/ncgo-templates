@@ -9,7 +9,7 @@ body: |-
     	"context"
     	"sync"
 
-    	"github.com/byx-darwin/rbac-rpc/internal/db/gen"
+    	"{{.Module}}/internal/db/gen"
     )
 
     // Entry is a single audit log line.

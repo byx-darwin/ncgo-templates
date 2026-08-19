@@ -189,7 +189,7 @@ message ListMenusResp { repeated Menu menus = 1; }
 message AssignRolesToUserReq { int64 user_id = 1; repeated int64 role_ids = 2; }
 message GrantPermissionsToRoleReq {
   int64 role_id = 1;
-  repeated string permission_codes = 2; // was: repeated int64 permission_ids
+  repeated string permission_codes = 2;
 }
 message EnforceReq { int64 uid = 1; string obj = 2; string act = 3; }
 message EnforceResp { bool allowed = 1; }

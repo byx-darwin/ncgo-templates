@@ -1,0 +1,39 @@
+# ncgo exported template — internal/domain/menu/repository.go
+path: internal/domain/menu/repository.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import (
+    	"context"
+    	"fmt"
+    )
+
+    // Repository is the persistence port for the menu aggregate.
+    type Repository interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*Menu, error)
+    	List(ctx context.Context) ([]*Menu, error)
+    	ListByPermCodes(ctx context.Context, codes []string) ([]*Menu, error)
+    	Save(ctx context.Context, m *Menu) (*Menu, error)
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}
+
+    // NotFoundError is returned when a menu does not exist.
+    type NotFoundError struct {{ "{" }}
+    	Key string
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }}
+    	return fmt.Sprintf("menu not found: %s", e.Key)
+    {{ "}" }}
+
+    // ValidationError is returned when menu input violates a domain rule.
+    type ValidationError struct {{ "{" }}
+    	Field string
+    	Msg   string
+    {{ "}" }}
+
+    func (e ValidationError) Error() string {{ "{" }}
+    	return fmt.Sprintf("menu validation error: %s %s", e.Field, e.Msg)
+    {{ "}" }}

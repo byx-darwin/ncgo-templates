@@ -1,0 +1,175 @@
+# ncgo exported template — internal/application/auth/auth_service.go
+path: internal/application/auth/auth_service.go
+update_behavior:
+    type: skip
+body: |
+    package authsvc
+
+    import (
+    	"context"
+    	"crypto/rand"
+    	"encoding/hex"
+    	"errors"
+    	"time"
+
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	authinfra "{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/infrastructure/token"
+    )
+
+    // UserRepo is the user lookup port consumed by the auth service.
+    type UserRepo interface {{ "{" }}
+    	GetByUsername(ctx context.Context, username string) (*user.User, error)
+    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    {{ "}" }}
+
+    // RoleReader provides the role codes for a user's JWT claims.
+    type RoleReader interface {{ "{" }}
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    {{ "}" }}
+
+    // JWTManager signs and parses HS256 access tokens.
+    type JWTManager interface {{ "{" }}
+    	Sign(uid int64, roles []string, ttl time.Duration) (string, error)
+    	Parse(tokenString string) (*authinfra.Claims, error)
+    {{ "}" }}
+
+    // Service implements the authentication use cases.
+    type Service struct {{ "{" }}
+    	users      UserRepo
+    	roles      RoleReader
+    	tokens     token.Store
+    	jwt        JWTManager
+    	audit      audit.Writer
+    	accessTTL  time.Duration
+    	refreshTTL time.Duration
+    {{ "}" }}
+
+    // New creates the auth application service.
+    func New(users UserRepo, roles RoleReader, tokens token.Store, jwt JWTManager, audit audit.Writer, accessTTL, refreshTTL time.Duration) *Service {{ "{" }}
+    	return &Service{{ "{" }}
+    		users:      users,
+    		roles:      roles,
+    		tokens:     tokens,
+    		jwt:        jwt,
+    		audit:      audit,
+    		accessTTL:  accessTTL,
+    		refreshTTL: refreshTTL,
+    	{{ "}" }}
+    {{ "}" }}
+
+    // Login authenticates a user and issues an access + refresh token pair.
+    func (s *Service) Login(ctx context.Context, username, password string) (access, refresh string, expiresIn int32, err error) {{ "{" }}
+    	u, err := s.users.GetByUsername(ctx, username)
+    	if err != nil {{ "{" }}
+    		return "", "", 0, err
+    	{{ "}" }}
+    	if u.Status == user.StatusDisabled {{ "{" }}
+    		return "", "", 0, errors.New("auth: user disabled")
+    	{{ "}" }}
+    	ok, err := authinfra.VerifyPassword(u.PasswordHash, password)
+    	if err != nil {{ "{" }}
+    		return "", "", 0, err
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		return "", "", 0, errors.New("auth: invalid credentials")
+    	{{ "}" }}
+    	roles, err := s.roleCodes(ctx, u.ID)
+    	if err != nil {{ "{" }}
+    		return "", "", 0, err
+    	{{ "}" }}
+    	access, err = s.jwt.Sign(u.ID, roles, s.accessTTL)
+    	if err != nil {{ "{" }}
+    		return "", "", 0, err
+    	{{ "}" }}
+    	refresh, err = newRefreshToken()
+    	if err != nil {{ "{" }}
+    		return "", "", 0, err
+    	{{ "}" }}
+    	if err := s.tokens.SetRefresh(ctx, u.ID, refresh, s.refreshTTL); err != nil {{ "{" }}
+    		return "", "", 0, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, u.ID, "auth.login", username, "{{ "{" }}{{ "}" }}")
+    	return access, refresh, int32(s.accessTTL.Seconds()), nil
+    {{ "}" }}
+
+    // Refresh rotates a refresh token and issues a new access token.
+    func (s *Service) Refresh(ctx context.Context, refreshToken string) (access, refresh string, err error) {{ "{" }}
+    	uid, err := s.tokens.GetRefresh(ctx, refreshToken)
+    	if err != nil {{ "{" }}
+    		return "", "", err
+    	{{ "}" }}
+    	u, err := s.users.GetByID(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return "", "", err
+    	{{ "}" }}
+    	if u.Status == user.StatusDisabled {{ "{" }}
+    		return "", "", errors.New("auth: user disabled")
+    	{{ "}" }}
+    	roles, err := s.roleCodes(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return "", "", err
+    	{{ "}" }}
+    	access, err = s.jwt.Sign(uid, roles, s.accessTTL)
+    	if err != nil {{ "{" }}
+    		return "", "", err
+    	{{ "}" }}
+    	refresh, err = newRefreshToken()
+    	if err != nil {{ "{" }}
+    		return "", "", err
+    	{{ "}" }}
+    	_ = s.tokens.DeleteRefresh(ctx, refreshToken)
+    	if err := s.tokens.SetRefresh(ctx, uid, refresh, s.refreshTTL); err != nil {{ "{" }}
+    		return "", "", err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, uid, "auth.refresh", "", "{{ "{" }}{{ "}" }}")
+    	return access, refresh, nil
+    {{ "}" }}
+
+    // Logout blacklists the access token for the remainder of its TTL.
+    func (s *Service) Logout(ctx context.Context, accessToken string) error {{ "{" }}
+    	var uid int64
+    	if claims, err := s.jwt.Parse(accessToken); err == nil {{ "{" }}
+    		uid = claims.Uid
+    	{{ "}" }}
+    	if err := s.tokens.Blacklist(ctx, accessToken, s.accessTTL); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, uid, "auth.logout", "", "{{ "{" }}{{ "}" }}")
+    	return nil
+    {{ "}" }}
+
+    // ValidateToken reports whether the access token is valid and returns its claims.
+    func (s *Service) ValidateToken(ctx context.Context, accessToken string) (uid int64, roles []string, valid bool) {{ "{" }}
+    	blacked, err := s.tokens.IsBlacklisted(ctx, accessToken)
+    	if err != nil || blacked {{ "{" }}
+    		return 0, nil, false
+    	{{ "}" }}
+    	claims, err := s.jwt.Parse(accessToken)
+    	if err != nil {{ "{" }}
+    		return 0, nil, false
+    	{{ "}" }}
+    	return claims.Uid, claims.Roles, true
+    {{ "}" }}
+
+    func (s *Service) roleCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    	roles, err := s.roles.ListRoles(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	codes := make([]string, 0, len(roles))
+    	for _, r := range roles {{ "{" }}
+    		codes = append(codes, r.Code)
+    	{{ "}" }}
+    	return codes, nil
+    {{ "}" }}
+
+    func newRefreshToken() (string, error) {{ "{" }}
+    	buf := make([]byte, 32)
+    	if _, err := rand.Read(buf); err != nil {{ "{" }}
+    		return "", err
+    	{{ "}" }}
+    	return hex.EncodeToString(buf), nil
+    {{ "}" }}

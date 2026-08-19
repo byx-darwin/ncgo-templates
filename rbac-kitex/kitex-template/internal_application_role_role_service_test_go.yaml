@@ -1,0 +1,124 @@
+# ncgo exported template — internal/application/role/role_service_test.go
+path: internal/application/role/role_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package rolesvc
+
+    import (
+    	"context"
+    	"fmt"
+    	"testing"
+
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	"{{.Module}}/internal/infrastructure/casbin"
+    )
+
+    type fakeRoleRepo struct {{ "{" }}
+    	roles map[int64]*role.Role
+    	next  int64
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) GetByID(ctx context.Context, id int64) (*role.Role, error) {{ "{" }}
+    	r, ok := f.roles[id]
+    	if !ok {{ "{" }}
+    		return nil, role.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
+    	{{ "}" }}
+    	return r, nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) GetByCode(ctx context.Context, code string) (*role.Role, error) {{ "{" }}
+    	for _, r := range f.roles {{ "{" }}
+    		if r.Code == code {{ "{" }}
+    			return r, nil
+    		{{ "}" }}
+    	{{ "}" }}
+    	return nil, role.NotFoundError{{ "{" }}Key: code{{ "}" }}
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) List(ctx context.Context, limit, offset int32) ([]*role.Role, error) {{ "{" }}
+    	var out []*role.Role
+    	for _, r := range f.roles {{ "{" }}
+    		out = append(out, r)
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.roles)), nil {{ "}" }}
+
+    func (f *fakeRoleRepo) Save(ctx context.Context, r *role.Role) (*role.Role, error) {{ "{" }}
+    	if r.ID == 0 {{ "{" }}
+    		f.next++
+    		r.ID = f.next
+    	{{ "}" }}
+    	f.roles[r.ID] = r
+    	return r, nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	delete(f.roles, id)
+    	return nil
+    {{ "}" }}
+
+    func (f *fakeRoleRepo) AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    	return nil
+    {{ "}" }}
+
+    type fakePermRepo struct {{ "{" }}
+    	perms map[int64]*permission.Permission
+    {{ "}" }}
+
+    func (f *fakePermRepo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    	p, ok := f.perms[id]
+    	if !ok {{ "{" }}
+    		return nil, permission.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
+    	{{ "}" }}
+    	return p, nil
+    {{ "}" }}
+
+    func newRoleService(t *testing.T) (*Service, *casbin.MemoryPolicyStore, *audit.MemoryWriter) {{ "{" }}
+    	t.Helper()
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	roles := &fakeRoleRepo{{ "{" }}roles: map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }}
+    	perms := &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}1: {{ "{" }}ID: 1, Code: "user:create", Name: "Create User", Kind: permission.KindAPI, Method: "POST"{{ "}}" }}{{ "}" }}
+    	aud := audit.NewMemoryWriter()
+    	return New(roles, perms, e, aud), store, aud
+    {{ "}" }}
+
+    func TestGrantPermissionsSyncsCasbin(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, store, aud := newRoleService(t)
+
+    	if err := svc.GrantPermissions(ctx, 1, []int64{{ "{" }}1{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("GrantPermissions: %v", err)
+    	{{ "}" }}
+    	// role code admin now has p(admin, user:create, POST)
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", "user:create", "POST"); !allowed {{ "{" }}
+    		t.Fatal("Enforce(admin, user:create, POST) = false, want true")
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", "user:delete", "DELETE"); allowed {{ "{" }}
+    		t.Fatal("Enforce(admin, user:delete, DELETE) = true, want false")
+    	{{ "}" }}
+    	entries := aud.Entries()
+    	if len(entries) == 0 || entries[0].Action != "role.grant_permissions" {{ "{" }}
+    		t.Fatalf("audit entries = %+v, want role.grant_permissions", entries)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestCreateValidatesRole(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newRoleService(t)
+    	if _, err := svc.Create(ctx, CreateRoleInput{{ "{" }}Code: "", Name: "Bad"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Create(empty code) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}

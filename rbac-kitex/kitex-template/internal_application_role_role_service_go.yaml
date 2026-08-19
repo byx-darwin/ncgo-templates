@@ -1,0 +1,133 @@
+# ncgo exported template — internal/application/role/role_service.go
+path: internal/application/role/role_service.go
+update_behavior:
+    type: skip
+body: |
+    package rolesvc
+
+    import (
+    	"context"
+    	"fmt"
+
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/infrastructure/audit"
+    )
+
+    // RoleRepo is the role persistence + permission-assignment port.
+    type RoleRepo interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*role.Role, error)
+    	GetByCode(ctx context.Context, code string) (*role.Role, error)
+    	List(ctx context.Context, limit, offset int32) ([]*role.Role, error)
+    	Count(ctx context.Context) (int64, error)
+    	Save(ctx context.Context, r *role.Role) (*role.Role, error)
+    	Delete(ctx context.Context, id int64) error
+    	AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error
+    {{ "}" }}
+
+    // PermReader resolves permissions for the grant use case.
+    type PermReader interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*permission.Permission, error)
+    {{ "}" }}
+
+    // Enforcer syncs permission grants into Casbin (p policies).
+    type Enforcer interface {{ "{" }}
+    	AddPolicy(params ...any) (bool, error)
+    {{ "}" }}
+
+    // Service implements the role management use cases.
+    type Service struct {{ "{" }}
+    	roles    RoleRepo
+    	perms    PermReader
+    	enforcer Enforcer
+    	audit    audit.Writer
+    {{ "}" }}
+
+    // New creates the role application service.
+    func New(roles RoleRepo, perms PermReader, enforcer Enforcer, audit audit.Writer) *Service {{ "{" }}
+    	return &Service{{ "{" }}roles: roles, perms: perms, enforcer: enforcer, audit: audit{{ "}" }}
+    {{ "}" }}
+
+    // Create persists a new role.
+    func (s *Service) Create(ctx context.Context, in CreateRoleInput) (*role.Role, error) {{ "{" }}
+    	r, err := role.New(in.Code, in.Name)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	saved, err := s.roles.Save(ctx, r)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "role.create", in.Code, "{{ "{" }}{{ "}" }}")
+    	return saved, nil
+    {{ "}" }}
+
+    // Update renames a role.
+    func (s *Service) Update(ctx context.Context, in UpdateRoleInput) (*role.Role, error) {{ "{" }}
+    	r, err := s.roles.GetByID(ctx, in.ID)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	r.Name = in.Name
+    	saved, err := s.roles.Save(ctx, r)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "role.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	return saved, nil
+    {{ "}" }}
+
+    // Delete removes a role.
+    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	if err := s.roles.Delete(ctx, id); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "role.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
+    	return nil
+    {{ "}" }}
+
+    // List returns a page of roles and the total count.
+    func (s *Service) List(ctx context.Context, page, pageSize int32) ([]*role.Role, int32, error) {{ "{" }}
+    	offset := int32(0)
+    	if page > 1 {{ "{" }}
+    		offset = (page - 1) * pageSize
+    	{{ "}" }}
+    	roles, err := s.roles.List(ctx, pageSize, offset)
+    	if err != nil {{ "{" }}
+    		return nil, 0, err
+    	{{ "}" }}
+    	total, err := s.roles.Count(ctx)
+    	if err != nil {{ "{" }}
+    		return nil, 0, err
+    	{{ "}" }}
+    	return roles, int32(total), nil
+    {{ "}" }}
+
+    // GrantPermissions assigns permissions to a role and syncs Casbin policies.
+    func (s *Service) GrantPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    	if err := role.Assign(ctx, roleID, permissionIDs); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	r, err := s.roles.GetByID(ctx, roleID)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	perms := make([]*permission.Permission, 0, len(permissionIDs))
+    	for _, pid := range permissionIDs {{ "{" }}
+    		p, err := s.perms.GetByID(ctx, pid)
+    		if err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    		perms = append(perms, p)
+    	{{ "}" }}
+    	if err := s.roles.AssignPermissions(ctx, roleID, permissionIDs); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	for _, p := range perms {{ "{" }}
+    		if _, err := s.enforcer.AddPolicy(r.Code, p.Code, p.Method); err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "role.grant_permissions", fmt.Sprint(roleID), "{{ "{" }}{{ "}" }}")
+    	return nil
+    {{ "}" }}

@@ -1,0 +1,50 @@
+# ncgo exported template — internal/application/rbac/enforce_service_test.go
+path: internal/application/rbac/enforce_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package rbacsvc
+
+    import (
+    	"context"
+    	"testing"
+
+    	"{{.Module}}/internal/infrastructure/casbin"
+    )
+
+    func newEnforceService(t *testing.T) (*EnforceService, *casbin.Enforcer) {{ "{" }}
+    	t.Helper()
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	return New(e), e
+    {{ "}" }}
+
+    func TestEnforce(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, e := newEnforceService(t)
+
+    	if _, err := e.AddRoleForUser("1", "admin"); err != nil {{ "{" }}
+    		t.Fatalf("AddRoleForUser: %v", err)
+    	{{ "}" }}
+    	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
+    		t.Fatalf("AddPolicy: %v", err)
+    	{{ "}" }}
+
+    	allowed, err := svc.Enforce(ctx, 1, "user:create", "POST")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Enforce: %v", err)
+    	{{ "}" }}
+    	if !allowed {{ "{" }}
+    		t.Fatal("Enforce(1, user:create, POST) = false, want true")
+    	{{ "}" }}
+    	allowed, err = svc.Enforce(ctx, 1, "user:delete", "DELETE")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Enforce: %v", err)
+    	{{ "}" }}
+    	if allowed {{ "{" }}
+    		t.Fatal("Enforce(1, user:delete, DELETE) = true, want false")
+    	{{ "}" }}
+    {{ "}" }}

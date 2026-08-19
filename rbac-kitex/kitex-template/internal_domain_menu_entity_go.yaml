@@ -1,0 +1,74 @@
+# ncgo exported template — internal/domain/menu/entity.go
+path: internal/domain/menu/entity.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import "sort"
+
+    const (
+    	// KindDir is a directory node in the menu tree.
+    	KindDir = "dir"
+    	// KindMenu is a navigation menu node.
+    	KindMenu = "menu"
+    	// KindButton is a button-level node carrying a perm_code.
+    	KindButton = "button"
+    )
+
+    // Menu is the aggregate root for the menu aggregate. PermCode references
+    // permissions.code (the unified permission code).
+    type Menu struct {{ "{" }}
+    	ID        int64
+    	ParentID  int64
+    	Type      string
+    	Name      string
+    	Path      string
+    	Component string
+    	PermCode  string
+    	SortOrder int32
+    {{ "}" }}
+
+    // Node is a menu tree node.
+    type Node struct {{ "{" }}
+    	Menu     *Menu
+    	Children []*Node
+    {{ "}" }}
+
+    // BuildTree assembles a flat menu list into a forest ordered by SortOrder then
+    // ID. Nodes whose parent is absent hang as roots (orphans).
+    func BuildTree(items []*Menu) []*Node {{ "{" }}
+    	if len(items) == 0 {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	byID := make(map[int64]*Node, len(items))
+    	for _, m := range items {{ "{" }}
+    		if m == nil {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		byID[m.ID] = &Node{{ "{" }}Menu: m{{ "}" }}
+    	{{ "}" }}
+    	var roots []*Node
+    	for _, n := range byID {{ "{" }}
+    		parent := n.Menu.ParentID
+    		if p, ok := byID[parent]; ok && parent != n.Menu.ID {{ "{" }}
+    			p.Children = append(p.Children, n)
+    		{{ "}" }} else {{ "{" }}
+    			roots = append(roots, n)
+    		{{ "}" }}
+    	{{ "}" }}
+    	sortNodes(roots)
+    	for _, n := range byID {{ "{" }}
+    		sortNodes(n.Children)
+    	{{ "}" }}
+    	return roots
+    {{ "}" }}
+
+    func sortNodes(nodes []*Node) {{ "{" }}
+    	sort.SliceStable(nodes, func(i, j int) bool {{ "{" }}
+    		if nodes[i].Menu.SortOrder == nodes[j].Menu.SortOrder {{ "{" }}
+    			return nodes[i].Menu.ID < nodes[j].Menu.ID
+    		{{ "}" }}
+    		return nodes[i].Menu.SortOrder < nodes[j].Menu.SortOrder
+    	{{ "}" }})
+    {{ "}" }}

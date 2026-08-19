@@ -1,0 +1,22 @@
+# ncgo exported template — internal/application/permission/dto.go
+path: internal/application/permission/dto.go
+update_behavior:
+    type: skip
+body: |
+    package permsvc
+
+    import "{{.Module}}/internal/domain/permission"
+
+    // CreatePermissionInput is the command to create a permission.
+    type CreatePermissionInput struct {{ "{" }}
+    	Code   string
+    	Name   string
+    	Kind   string
+    	Method string
+    {{ "}" }}
+
+    // ListPermissionsResult is a page of permissions plus the total count.
+    type ListPermissionsResult struct {{ "{" }}
+    	Permissions []*permission.Permission
+    	Total       int32
+    {{ "}" }}

@@ -1,0 +1,199 @@
+# ncgo exported template — internal/application/menu/menu_service.go
+path: internal/application/menu/menu_service.go
+update_behavior:
+    type: skip
+body: |
+    package menusvc
+
+    import (
+    	"context"
+    	"fmt"
+    	"math"
+
+    	"{{.Module}}/internal/domain/menu"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/infrastructure/audit"
+    )
+
+    // AdminRoleCode grants full menu/permission visibility.
+    const AdminRoleCode = "admin"
+
+    // MenuRepo is the menu persistence port consumed by the service.
+    type MenuRepo interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*menu.Menu, error)
+    	List(ctx context.Context) ([]*menu.Menu, error)
+    	ListByPermCodes(ctx context.Context, codes []string) ([]*menu.Menu, error)
+    	Save(ctx context.Context, m *menu.Menu) (*menu.Menu, error)
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}
+
+    // UserRoleReader resolves a user's roles for menu/permission visibility.
+    type UserRoleReader interface {{ "{" }}
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    {{ "}" }}
+
+    // PermReader resolves a user's granted permissions.
+    type PermReader interface {{ "{" }}
+    	ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error)
+    	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
+    {{ "}" }}
+
+    // Service implements the menu management + per-user visibility use cases.
+    type Service struct {{ "{" }}
+    	menus MenuRepo
+    	users UserRoleReader
+    	perms PermReader
+    	audit audit.Writer
+    {{ "}" }}
+
+    // New creates the menu application service.
+    func New(menus MenuRepo, users UserRoleReader, perms PermReader, audit audit.Writer) *Service {{ "{" }}
+    	return &Service{{ "{" }}menus: menus, users: users, perms: perms, audit: audit{{ "}" }}
+    {{ "}" }}
+
+    // Create persists a new menu (validating type via the domain).
+    func (s *Service) Create(ctx context.Context, in CreateMenuInput) (*menu.Menu, error) {{ "{" }}
+    	if err := menu.ValidateType(in.Type); err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	m := &menu.Menu{{ "{" }}
+    		ParentID:  in.ParentID,
+    		Type:      in.Type,
+    		Name:      in.Name,
+    		Path:      in.Path,
+    		Component: in.Component,
+    		PermCode:  in.PermCode,
+    		SortOrder: in.SortOrder,
+    	{{ "}" }}
+    	saved, err := s.menus.Save(ctx, m)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "menu.create", in.Name, "{{ "{" }}{{ "}" }}")
+    	return saved, nil
+    {{ "}" }}
+
+    // Update persists menu field changes.
+    func (s *Service) Update(ctx context.Context, in UpdateMenuInput) (*menu.Menu, error) {{ "{" }}
+    	m, err := s.menus.GetByID(ctx, in.ID)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if in.ParentID != nil {{ "{" }}
+    		m.ParentID = *in.ParentID
+    	{{ "}" }}
+    	if in.Type != nil {{ "{" }}
+    		if err := menu.ValidateType(*in.Type); err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		m.Type = *in.Type
+    	{{ "}" }}
+    	if in.Name != nil {{ "{" }}
+    		m.Name = *in.Name
+    	{{ "}" }}
+    	if in.Path != nil {{ "{" }}
+    		m.Path = *in.Path
+    	{{ "}" }}
+    	if in.Component != nil {{ "{" }}
+    		m.Component = *in.Component
+    	{{ "}" }}
+    	if in.PermCode != nil {{ "{" }}
+    		m.PermCode = *in.PermCode
+    	{{ "}" }}
+    	if in.SortOrder != nil {{ "{" }}
+    		m.SortOrder = *in.SortOrder
+    	{{ "}" }}
+    	saved, err := s.menus.Save(ctx, m)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "menu.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	return saved, nil
+    {{ "}" }}
+
+    // Delete removes a menu.
+    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	if err := s.menus.Delete(ctx, id); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, 0, "menu.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
+    	return nil
+    {{ "}" }}
+
+    // List returns every menu.
+    func (s *Service) List(ctx context.Context) ([]*menu.Menu, error) {{ "{" }}
+    	return s.menus.List(ctx)
+    {{ "}" }}
+
+    // UserPermCodes returns the unified permission codes visible to a user. The
+    // admin role sees every permission.
+    func (s *Service) UserPermCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    	roles, err := s.users.ListRoles(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if hasRole(roles, AdminRoleCode) {{ "{" }}
+    		all, err := s.perms.List(ctx, math.MaxInt32, 0)
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		codes := make([]string, 0, len(all))
+    		for _, p := range all {{ "{" }}
+    			codes = append(codes, p.Code)
+    		{{ "}" }}
+    		return codes, nil
+    	{{ "}" }}
+    	roleIDs := make([]int64, 0, len(roles))
+    	for _, r := range roles {{ "{" }}
+    		roleIDs = append(roleIDs, r.ID)
+    	{{ "}" }}
+    	perms, err := s.perms.ListByRoleIDs(ctx, roleIDs)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	seen := map[string]bool{{ "{" }}{{ "}" }}
+    	codes := make([]string, 0, len(perms))
+    	for _, p := range perms {{ "{" }}
+    		if seen[p.Code] {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		seen[p.Code] = true
+    		codes = append(codes, p.Code)
+    	{{ "}" }}
+    	return codes, nil
+    {{ "}" }}
+
+    // UserMenuTree returns the menu forest visible to a user. The admin role sees
+    // the full menu tree; other users only see menus whose perm_code they hold.
+    func (s *Service) UserMenuTree(ctx context.Context, uid int64) ([]*menu.Node, error) {{ "{" }}
+    	roles, err := s.users.ListRoles(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	if hasRole(roles, AdminRoleCode) {{ "{" }}
+    		items, err := s.menus.List(ctx)
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		return menu.BuildTree(items), nil
+    	{{ "}" }}
+    	codes, err := s.UserPermCodes(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	items, err := s.menus.ListByPermCodes(ctx, codes)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return menu.BuildTree(items), nil
+    {{ "}" }}
+
+    func hasRole(roles []*role.Role, code string) bool {{ "{" }}
+    	for _, r := range roles {{ "{" }}
+    		if r.Code == code {{ "{" }}
+    			return true
+    		{{ "}" }}
+    	{{ "}" }}
+    	return false
+    {{ "}" }}

@@ -1,0 +1,18 @@
+# ncgo exported template — internal/application/rbac/dto.go
+path: internal/application/rbac/dto.go
+update_behavior:
+    type: skip
+body: |
+    package rbacsvc
+
+    // EnforceInput is the command to check a permission.
+    type EnforceInput struct {{ "{" }}
+    	Uid int64
+    	Obj string
+    	Act string
+    {{ "}" }}
+
+    // EnforceResult carries the authorization decision.
+    type EnforceResult struct {{ "{" }}
+    	Allowed bool
+    {{ "}" }}

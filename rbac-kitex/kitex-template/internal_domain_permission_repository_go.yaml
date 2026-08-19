@@ -1,0 +1,42 @@
+# ncgo exported template — internal/domain/permission/repository.go
+path: internal/domain/permission/repository.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    import (
+    	"context"
+    	"fmt"
+    )
+
+    // Repository is the persistence port for the permission aggregate.
+    type Repository interface {{ "{" }}
+    	GetByID(ctx context.Context, id int64) (*Permission, error)
+    	GetByCode(ctx context.Context, code string) (*Permission, error)
+    	ListByIDs(ctx context.Context, ids []int64) ([]*Permission, error)
+    	ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*Permission, error)
+    	List(ctx context.Context, limit, offset int32) ([]*Permission, error)
+    	Count(ctx context.Context) (int64, error)
+    	Save(ctx context.Context, p *Permission) (*Permission, error)
+    	Delete(ctx context.Context, id int64) error
+    {{ "}" }}
+
+    // NotFoundError is returned when a permission does not exist.
+    type NotFoundError struct {{ "{" }}
+    	Key string
+    {{ "}" }}
+
+    func (e NotFoundError) Error() string {{ "{" }}
+    	return fmt.Sprintf("permission not found: %s", e.Key)
+    {{ "}" }}
+
+    // ValidationError is returned when permission input violates a domain rule.
+    type ValidationError struct {{ "{" }}
+    	Field string
+    	Msg   string
+    {{ "}" }}
+
+    func (e ValidationError) Error() string {{ "{" }}
+    	return fmt.Sprintf("permission validation error: %s %s", e.Field, e.Msg)
+    {{ "}" }}

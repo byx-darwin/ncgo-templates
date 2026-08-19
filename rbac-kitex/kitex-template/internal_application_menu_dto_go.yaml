@@ -1,0 +1,29 @@
+# ncgo exported template — internal/application/menu/dto.go
+path: internal/application/menu/dto.go
+update_behavior:
+    type: skip
+body: |
+    package menusvc
+
+    // CreateMenuInput is the command to create a menu node.
+    type CreateMenuInput struct {{ "{" }}
+    	ParentID  int64
+    	Type      string
+    	Name      string
+    	Path      string
+    	Component string
+    	PermCode  string
+    	SortOrder int32
+    {{ "}" }}
+
+    // UpdateMenuInput is the command to update menu fields (all optional).
+    type UpdateMenuInput struct {{ "{" }}
+    	ID        int64
+    	ParentID  *int64
+    	Type      *string
+    	Name      *string
+    	Path      *string
+    	Component *string
+    	PermCode  *string
+    	SortOrder *int32
+    {{ "}" }}

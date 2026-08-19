@@ -1,0 +1,52 @@
+# ncgo exported template — internal/domain/user/entity_test.go
+path: internal/domain/user/entity_test.go
+update_behavior:
+    type: skip
+body: |
+    package user
+
+    import (
+    	"strings"
+    	"testing"
+    )
+
+    func TestNewRejectsShortUsername(t *testing.T) {{ "{" }}
+    	cases := []string{{ "{" }}"", "  ", "ab"{{ "}" }}
+    	for _, name := range cases {{ "{" }}
+    		u, err := New(name, "hash")
+    		if err == nil {{ "{" }}
+    			t.Fatalf("New(%q) = %+v, want error", name, u)
+    		{{ "}" }}
+    		var ve ValidationError
+    		if !strings.Contains(err.Error(), "username") {{ "{" }}
+    			t.Fatalf("New(%q) error %v, want username validation error", name, err)
+    		{{ "}" }}
+    		_ = ve
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewAcceptsValidUsername(t *testing.T) {{ "{" }}
+    	u, err := New("alice", "hash")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New: %v", err)
+    	{{ "}" }}
+    	if u.Username != "alice" {{ "{" }}
+    		t.Fatalf("Username = %q, want alice", u.Username)
+    	{{ "}" }}
+    	if u.Status != StatusActive {{ "{" }}
+    		t.Fatalf("Status = %q, want %q", u.Status, StatusActive)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestSetStatusValidatesEnum(t *testing.T) {{ "{" }}
+    	u, err := New("alice", "hash")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New: %v", err)
+    	{{ "}" }}
+    	if err := u.SetStatus(StatusDisabled); err != nil {{ "{" }}
+    		t.Fatalf("SetStatus(disabled): %v", err)
+    	{{ "}" }}
+    	if err := u.SetStatus("bogus"); err == nil {{ "{" }}
+    		t.Fatal("SetStatus(bogus): want error")
+    	{{ "}" }}
+    {{ "}" }}

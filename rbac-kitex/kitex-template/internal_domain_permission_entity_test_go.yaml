@@ -1,0 +1,46 @@
+# ncgo exported template — internal/domain/permission/entity_test.go
+path: internal/domain/permission/entity_test.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    import "testing"
+
+    func TestNewRejectsUnknownKind(t *testing.T) {{ "{" }}
+    	p, err := New("user:create", "Create User", "bogus", "")
+    	if err == nil {{ "{" }}
+    		t.Fatalf("New with kind=bogus = %+v, want error", p)
+    	{{ "}" }}
+    	var ve ValidationError
+    	_ = ve
+    {{ "}" }}
+
+    func TestNewNormalizesMethod(t *testing.T) {{ "{" }}
+    	// menu/button always "*"
+    	for _, kind := range []string{{ "{" }}KindMenu, KindButton{{ "}" }} {{ "{" }}
+    		p, err := New("menu:user", "User Menu", kind, "GET")
+    		if err != nil {{ "{" }}
+    			t.Fatalf("New(%s): %v", kind, err)
+    		{{ "}" }}
+    		if p.Method != "*" {{ "{" }}
+    			t.Fatalf("method for kind=%s = %q, want *", kind, p.Method)
+    		{{ "}" }}
+    	{{ "}" }}
+    	// api defaults to GET when empty
+    	p, err := New("user:create", "Create User", KindAPI, "")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New(api, empty method): %v", err)
+    	{{ "}" }}
+    	if p.Method != "GET" {{ "{" }}
+    		t.Fatalf("api empty method = %q, want GET", p.Method)
+    	{{ "}" }}
+    	// api keeps uppercase
+    	p, err = New("user:delete", "Delete User", KindAPI, "delete")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New(api, delete): %v", err)
+    	{{ "}" }}
+    	if p.Method != "DELETE" {{ "{" }}
+    		t.Fatalf("api method = %q, want DELETE", p.Method)
+    	{{ "}" }}
+    {{ "}" }}

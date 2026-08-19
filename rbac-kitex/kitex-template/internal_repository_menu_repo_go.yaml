@@ -1,0 +1,182 @@
+# ncgo exported template — internal/repository/menu/repo.go
+path: internal/repository/menu/repo.go
+update_behavior:
+    type: skip
+
+body: |
+    package menurepo
+
+    import (
+    	"context"
+    	"errors"
+    	"fmt"
+
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/menu"
+    )
+
+    // Repo implements menu.Repository using sqlc queries.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a menu repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    // WithTx executes fn inside a database transaction.
+    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
+    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return fmt.Errorf("menu repository begin transaction: %w", err)
+    	{{ "}" }}
+    	defer func() {{ "{" }}
+    		if p := recover(); p != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    			panic(p)
+    		{{ "}" }}
+    		if err != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    		{{ "}" }}
+    	{{ "}" }}()
+    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
+    	if err = fn(txRepo); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err = tx.Commit(ctx); err != nil {{ "{" }}
+    		return fmt.Errorf("menu repository commit transaction: %w", err)
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*menu.Menu, error) {{ "{" }}
+    	row, err := r.q.GetMenuByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, id)
+    	{{ "}" }}
+    	return toDomainMenu(row), nil
+    {{ "}" }}
+
+    func (r *Repo) List(ctx context.Context) ([]*menu.Menu, error) {{ "{" }}
+    	rows, err := r.q.ListMenus(ctx)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*menu.Menu, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainMenu(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) ListByPermCodes(ctx context.Context, codes []string) ([]*menu.Menu, error) {{ "{" }}
+    	rows, err := r.q.ListMenusByPermCodes(ctx, codes)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*menu.Menu, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainMenu(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) Save(ctx context.Context, m *menu.Menu) (*menu.Menu, error) {{ "{" }}
+    	if m == nil {{ "{" }}
+    		return nil, errors.New("menu repository: nil menu")
+    	{{ "}" }}
+    	if m.ID == 0 {{ "{" }}
+    		row, err := r.q.CreateMenu(ctx, toCreateParams(m))
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		return toDomainMenu(row), nil
+    	{{ "}" }}
+    	row, err := r.q.UpdateMenu(ctx, toUpdateParams(m))
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, m.ID)
+    	{{ "}" }}
+    	return toDomainMenu(row), nil
+    {{ "}" }}
+
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeleteMenu(ctx, id)
+    {{ "}" }}
+
+    func toDomainMenu(row gen.Menu) *menu.Menu {{ "{" }}
+    	return &menu.Menu{{ "{" }}
+    		ID:        row.ID,
+    		ParentID:  int64Ptr(row.ParentID),
+    		Type:      row.Type,
+    		Name:      row.Name,
+    		Path:      strPtr(row.Path),
+    		Component: strPtr(row.Component),
+    		PermCode:  strPtr(row.PermCode),
+    		SortOrder: row.SortOrder,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func toCreateParams(m *menu.Menu) gen.CreateMenuParams {{ "{" }}
+    	return gen.CreateMenuParams{{ "{" }}
+    		ParentID:  int64Ref(m.ParentID),
+    		Type:      m.Type,
+    		Name:      m.Name,
+    		Path:      strRef(m.Path),
+    		Component: strRef(m.Component),
+    		PermCode:  strRef(m.PermCode),
+    		SortOrder: m.SortOrder,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func toUpdateParams(m *menu.Menu) gen.UpdateMenuParams {{ "{" }}
+    	return gen.UpdateMenuParams{{ "{" }}
+    		ParentID:  int64Ref(m.ParentID),
+    		Type:      m.Type,
+    		Name:      m.Name,
+    		Path:      strRef(m.Path),
+    		Component: strRef(m.Component),
+    		PermCode:  strRef(m.PermCode),
+    		SortOrder: m.SortOrder,
+    		ID:        m.ID,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func int64Ptr(p *int64) int64 {{ "{" }}
+    	if p == nil {{ "{" }}
+    		return 0
+    	{{ "}" }}
+    	return *p
+    {{ "}" }}
+
+    func int64Ref(v int64) *int64 {{ "{" }}
+    	if v == 0 {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &v
+    {{ "}" }}
+
+    func strPtr(p *string) string {{ "{" }}
+    	if p == nil {{ "{" }}
+    		return ""
+    	{{ "}" }}
+    	return *p
+    {{ "}" }}
+
+    func strRef(v string) *string {{ "{" }}
+    	if v == "" {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &v
+    {{ "}" }}
+
+    func mapErr(err error, key any) error {{ "{" }}
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return menu.NotFoundError{{ "{" }}Key: fmt.Sprint(key){{ "}" }}
+    	{{ "}" }}
+    	return err
+    {{ "}" }}

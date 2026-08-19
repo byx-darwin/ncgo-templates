@@ -1,0 +1,39 @@
+# ncgo exported template — internal/domain/role/service_test.go
+path: internal/domain/role/service_test.go
+update_behavior:
+    type: skip
+body: |
+    package role
+
+    import "testing"
+
+    func TestNewRejectsEmptyCode(t *testing.T) {{ "{" }}
+    	for _, code := range []string{{ "{" }}"", "  "{{ "}" }} {{ "{" }}
+    		r, err := New(code, "Admin")
+    		if err == nil {{ "{" }}
+    			t.Fatalf("New(%q) = %+v, want error", code, r)
+    		{{ "}" }}
+    		var ve ValidationError
+    		_ = ve
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewAcceptsValidCode(t *testing.T) {{ "{" }}
+    	r, err := New("admin", "Admin")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New: %v", err)
+    	{{ "}" }}
+    	if r.Code != "admin" || r.Name != "Admin" {{ "{" }}
+    		t.Fatalf("got %+v, want code=admin name=Admin", r)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestAssignValidatesRoleID(t *testing.T) {{ "{" }}
+    	ctx := t.Context()
+    	if err := Assign(ctx, 0, []int64{{ "{" }}1{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Assign with roleID 0: want error")
+    	{{ "}" }}
+    	if err := Assign(ctx, 1, []int64{{ "{" }}1{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("Assign with valid roleID: %v", err)
+    	{{ "}" }}
+    {{ "}" }}

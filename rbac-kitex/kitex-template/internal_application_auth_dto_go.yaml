@@ -1,0 +1,13 @@
+# ncgo exported template — internal/application/auth/dto.go
+path: internal/application/auth/dto.go
+update_behavior:
+    type: skip
+body: |
+    package authsvc
+
+    // LoginResult is the issued token pair returned by Login/Refresh.
+    type LoginResult struct {{ "{" }}
+    	AccessToken  string
+    	RefreshToken string
+    	ExpiresIn    int32
+    {{ "}" }}

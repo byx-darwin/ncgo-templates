@@ -1,0 +1,49 @@
+# ncgo exported template — internal/domain/permission/entity.go
+path: internal/domain/permission/entity.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    import "strings"
+
+    const (
+    	// KindMenu marks a permission that drives a frontend menu entry.
+    	KindMenu = "menu"
+    	// KindButton marks a permission that drives a frontend button.
+    	KindButton = "button"
+    	// KindAPI marks a permission enforced on a backend API endpoint.
+    	KindAPI = "api"
+    )
+
+    // Permission is the aggregate root for the permission aggregate. Code is the
+    // unified permission code: it equals the Casbin obj and menus.perm_code.
+    type Permission struct {{ "{" }}
+    	ID     int64
+    	Code   string
+    	Name   string
+    	Kind   string
+    	Method string
+    {{ "}" }}
+
+    // New creates a Permission and normalizes Method:
+    //   - menu/button always use "*";
+    //   - api defaults to "GET" when empty and is uppercased.
+    func New(code, name, kind, method string) (*Permission, error) {{ "{" }}
+    	code = strings.TrimSpace(code)
+    	if code == "" {{ "{" }}
+    		return nil, ValidationError{{ "{" }}Field: "code", Msg: "must not be empty"{{ "}" }}
+    	{{ "}" }}
+    	switch kind {{ "{" }}
+    	case KindMenu, KindButton:
+    		method = "*"
+    	case KindAPI:
+    		if strings.TrimSpace(method) == "" {{ "{" }}
+    			method = "GET"
+    		{{ "}" }}
+    		method = strings.ToUpper(method)
+    	default:
+    		return nil, ValidationError{{ "{" }}Field: "kind", Msg: "must be menu, button, or api"{{ "}" }}
+    	{{ "}" }}
+    	return &Permission{{ "{" }}Code: code, Name: name, Kind: kind, Method: method{{ "}" }}, nil
+    {{ "}" }}

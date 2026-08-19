@@ -1,0 +1,77 @@
+# rbac-kitex template — internal/db/schema/000001_rbac.sql
+path: internal/db/schema/000001_rbac.sql
+update_behavior:
+  type: cover
+body: |-
+  CREATE TABLE users (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  
+  CREATE TABLE roles (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  
+  CREATE TABLE permissions (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('menu','button','api')),
+      method TEXT NOT NULL DEFAULT '*',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  
+  CREATE TABLE user_roles (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      PRIMARY KEY (user_id, role_id)
+  );
+  
+  CREATE TABLE role_permissions (
+      role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      permission_id BIGINT NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+      PRIMARY KEY (role_id, permission_id)
+  );
+  
+  CREATE TABLE menus (
+      id BIGSERIAL PRIMARY KEY,
+      parent_id BIGINT REFERENCES menus(id) ON DELETE CASCADE,
+      type TEXT NOT NULL DEFAULT 'menu' CHECK (type IN ('dir','menu','button')),
+      name TEXT NOT NULL,
+      path TEXT,
+      component TEXT,
+      perm_code TEXT REFERENCES permissions(code) ON DELETE SET NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  
+  CREATE TABLE casbin_rule (
+      id BIGSERIAL PRIMARY KEY,
+      ptype TEXT NOT NULL,
+      v0 TEXT NOT NULL DEFAULT '',
+      v1 TEXT NOT NULL DEFAULT '',
+      v2 TEXT NOT NULL DEFAULT '',
+      v3 TEXT NOT NULL DEFAULT '',
+      v4 TEXT NOT NULL DEFAULT '',
+      v5 TEXT NOT NULL DEFAULT '',
+      UNIQUE (ptype, v0, v1, v2, v3, v4, v5)
+  );
+  
+  CREATE TABLE audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      actor_uid BIGINT,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  
+  CREATE INDEX idx_menus_parent ON menus(parent_id);
+  CREATE INDEX idx_casbin_rule_policy ON casbin_rule(ptype, v0, v1, v2);

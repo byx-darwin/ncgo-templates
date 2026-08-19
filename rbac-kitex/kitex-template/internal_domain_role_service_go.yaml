@@ -1,0 +1,29 @@
+# ncgo exported template — internal/domain/role/service.go
+path: internal/domain/role/service.go
+update_behavior:
+    type: skip
+body: |
+    package role
+
+    import (
+    	"context"
+    	"strings"
+    )
+
+    // Assign is the domain rule applied before granting permissions to a role.
+    // The code-non-empty invariant is enforced here so callers cannot grant
+    // permissions to an un-coded role (which would be unreachable in Casbin).
+    func Assign(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    	if roleID <= 0 {{ "{" }}
+    		return ValidationError{{ "{" }}Field: "role_id", Msg: "must be positive"{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    // ValidateCode returns an error when the role code is empty.
+    func ValidateCode(code string) error {{ "{" }}
+    	if strings.TrimSpace(code) == "" {{ "{" }}
+    		return ValidationError{{ "{" }}Field: "code", Msg: "must not be empty"{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}

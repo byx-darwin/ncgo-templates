@@ -1,0 +1,17 @@
+# ncgo exported template — internal/domain/menu/service.go
+path: internal/domain/menu/service.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    // ValidateType returns an error when the menu type is not one of the known
+    // kinds (dir, menu, button).
+    func ValidateType(t string) error {{ "{" }}
+    	switch t {{ "{" }}
+    	case KindDir, KindMenu, KindButton:
+    		return nil
+    	default:
+    		return ValidationError{{ "{" }}Field: "type", Msg: "must be dir, menu, or button"{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}

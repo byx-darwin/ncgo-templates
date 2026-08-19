@@ -1,0 +1,31 @@
+# ncgo exported template — internal/application/rbac/enforce_service.go
+path: internal/application/rbac/enforce_service.go
+update_behavior:
+    type: skip
+body: |
+    package rbacsvc
+
+    import (
+    	"context"
+    	"fmt"
+    )
+
+    // Enforcer evaluates authorization requests.
+    type Enforcer interface {{ "{" }}
+    	Enforce(rvals ...any) (bool, error)
+    {{ "}" }}
+
+    // EnforceService answers permission checks against the Casbin model.
+    type EnforceService struct {{ "{" }}
+    	enforcer Enforcer
+    {{ "}" }}
+
+    // New creates the enforce application service.
+    func New(enforcer Enforcer) *EnforceService {{ "{" }}
+    	return &EnforceService{{ "{" }}enforcer: enforcer{{ "}" }}
+    {{ "}" }}
+
+    // Enforce reports whether uid is allowed to perform act on obj.
+    func (s *EnforceService) Enforce(ctx context.Context, uid int64, obj, act string) (bool, error) {{ "{" }}
+    	return s.enforcer.Enforce(fmt.Sprint(uid), obj, act)
+    {{ "}" }}

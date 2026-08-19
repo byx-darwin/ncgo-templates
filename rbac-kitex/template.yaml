@@ -1,0 +1,18 @@
+name: rbac-kitex
+kind: kitex
+description: "Official RBAC + auth authority Kitex RPC template (DDD: users/roles/permissions/menus, Casbin enforcement, JWT login, audit)"
+version: "1"
+skip_default_templates:
+  - handler.yaml
+  - usecase.yaml
+  - repository.yaml
+  - server.yaml
+  - migration_init.yaml
+  - ratelimit_handler.yaml
+  - ratelimit_middleware.yaml
+  - ratelimit_middleware_test.yaml
+  - ratelimit_proto.yaml
+  - ratelimit_repository.yaml
+  - ratelimit_server.yaml
+  - ratelimit_sqlc_queries.yaml
+  - ratelimit_usecase.yaml

@@ -1,0 +1,145 @@
+# ncgo exported template — internal/repository/permission/repo.go
+path: internal/repository/permission/repo.go
+update_behavior:
+    type: skip
+
+body: |
+    package permissionrepo
+
+    import (
+    	"context"
+    	"errors"
+    	"fmt"
+
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/permission"
+    )
+
+    // Repo implements permission.Repository using sqlc queries.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a permission repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    // WithTx executes fn inside a database transaction.
+    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
+    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return fmt.Errorf("permission repository begin transaction: %w", err)
+    	{{ "}" }}
+    	defer func() {{ "{" }}
+    		if p := recover(); p != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    			panic(p)
+    		{{ "}" }}
+    		if err != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    		{{ "}" }}
+    	{{ "}" }}()
+    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
+    	if err = fn(txRepo); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err = tx.Commit(ctx); err != nil {{ "{" }}
+    		return fmt.Errorf("permission repository commit transaction: %w", err)
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    	row, err := r.q.GetPermissionByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, id)
+    	{{ "}" }}
+    	return toDomainPermission(row), nil
+    {{ "}" }}
+
+    func (r *Repo) GetByCode(ctx context.Context, code string) (*permission.Permission, error) {{ "{" }}
+    	row, err := r.q.GetPermissionByCode(ctx, code)
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, code)
+    	{{ "}" }}
+    	return toDomainPermission(row), nil
+    {{ "}" }}
+
+    func (r *Repo) ListByIDs(ctx context.Context, ids []int64) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByIDs(ctx, ids)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainPermission(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissionsByRoleIDs(ctx, roleIDs)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainPermission(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	rows, err := r.q.ListPermissions(ctx, gen.ListPermissionsParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*permission.Permission, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainPermission(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountPermissions(ctx)
+    {{ "}" }}
+
+    func (r *Repo) Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
+    	if p == nil {{ "{" }}
+    		return nil, errors.New("permission repository: nil permission")
+    	{{ "}" }}
+    	if p.ID != 0 {{ "{" }}
+    		return nil, errors.New("permission repository: update not supported")
+    	{{ "}" }}
+    	row, err := r.q.CreatePermission(ctx, gen.CreatePermissionParams{{ "{" }}
+    		Code:   p.Code,
+    		Name:   p.Name,
+    		Kind:   p.Kind,
+    		Method: p.Method,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainPermission(row), nil
+    {{ "}" }}
+
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeletePermission(ctx, id)
+    {{ "}" }}
+
+    func toDomainPermission(row gen.Permission) *permission.Permission {{ "{" }}
+    	return &permission.Permission{{ "{" }}ID: row.ID, Code: row.Code, Name: row.Name, Kind: row.Kind, Method: row.Method{{ "}" }}
+    {{ "}" }}
+
+    func mapErr(err error, key any) error {{ "{" }}
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return permission.NotFoundError{{ "{" }}Key: fmt.Sprint(key){{ "}" }}
+    	{{ "}" }}
+    	return err
+    {{ "}" }}

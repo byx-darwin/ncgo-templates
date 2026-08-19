@@ -1,0 +1,15 @@
+# ncgo exported template — internal/domain/user/service.go
+path: internal/domain/user/service.go
+update_behavior:
+    type: skip
+body: |
+    package user
+
+    // ValidatePassword applies the plaintext password policy. The returned error
+    // is a ValidationError when the policy is violated.
+    func ValidatePassword(plain string) error {{ "{" }}
+    	if len(plain) < 8 {{ "{" }}
+    		return ValidationError{{ "{" }}Field: "password", Msg: "must be at least 8 characters"{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}

@@ -1,0 +1,161 @@
+# ncgo exported template — internal/application/auth/auth_service_test.go
+path: internal/application/auth/auth_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package authsvc
+
+    import (
+    	"context"
+    	"errors"
+    	"testing"
+    	"time"
+
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
+    	authinfra "{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/infrastructure/token"
+    )
+
+    type fakeUsers struct {{ "{" }}
+    	byUsername map[string]*user.User
+    	byID       map[int64]*user.User
+    	rolesByUID map[int64][]*role.Role
+    {{ "}" }}
+
+    func (f *fakeUsers) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
+    	u, ok := f.byUsername[username]
+    	if !ok {{ "{" }}
+    		return nil, user.NotFoundError{{ "{" }}Key: username{{ "}" }}
+    	{{ "}" }}
+    	return u, nil
+    {{ "}" }}
+
+    func (f *fakeUsers) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    	u, ok := f.byID[id]
+    	if !ok {{ "{" }}
+    		return nil, user.NotFoundError{{ "{" }}Key: ""{{ "}" }}
+    	{{ "}" }}
+    	return u, nil
+    {{ "}" }}
+
+    func (f *fakeUsers) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	return f.rolesByUID[uid], nil
+    {{ "}" }}
+
+    func newTestService() (*Service, *fakeUsers, *audit.MemoryWriter, *token.MemoryStore) {{ "{" }}
+    	hash, _ := authinfra.HashPassword("password123")
+    	u, _ := user.New("alice", hash)
+    	u.ID = 1
+    	users := &fakeUsers{{ "{" }}
+    		byUsername: map[string]*user.User{{ "{" }}"alice": u{{ "}" }},
+    		byID:       map[int64]*user.User{{ "{" }}1: u{{ "}" }},
+    		rolesByUID: map[int64][]*role.Role{{ "{" }}1: {{ "{{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }},
+    	{{ "}" }}
+    	aud := audit.NewMemoryWriter()
+    	tokens := token.NewMemoryStore()
+    	svc := New(users, users, tokens, authinfra.NewJWTManager("test-secret-change-me"), aud, time.Hour, 24*time.Hour)
+    	return svc, users, aud, tokens
+    {{ "}" }}
+
+    func TestLoginSuccess(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, aud, _ := newTestService()
+
+    	access, refresh, expiresIn, err := svc.Login(ctx, "alice", "password123")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Login: %v", err)
+    	{{ "}" }}
+    	if access == "" || refresh == "" {{ "{" }}
+    		t.Fatalf("Login tokens empty: access=%q refresh=%q", access, refresh)
+    	{{ "}" }}
+    	if expiresIn != 3600 {{ "{" }}
+    		t.Fatalf("expiresIn = %d, want 3600", expiresIn)
+    	{{ "}" }}
+    	if len(aud.Entries()) == 0 || aud.Entries()[0].Action != "auth.login" {{ "{" }}
+    		t.Fatalf("audit entries = %+v, want auth.login", aud.Entries())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestLoginWrongPassword(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+
+    	if _, _, _, err := svc.Login(ctx, "alice", "wrong-password"); err == nil {{ "{" }}
+    		t.Fatal("Login(wrong password) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestLoginUnknownUser(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+
+    	if _, _, _, err := svc.Login(ctx, "nobody", "password123"); err == nil {{ "{" }}
+    		t.Fatal("Login(unknown user) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestValidateToken(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+
+    	access, _, _, err := svc.Login(ctx, "alice", "password123")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Login: %v", err)
+    	{{ "}" }}
+    	uid, roles, valid := svc.ValidateToken(ctx, access)
+    	if !valid || uid != 1 || len(roles) != 1 || roles[0] != "admin" {{ "{" }}
+    		t.Fatalf("ValidateToken = (%d, %v, %v), want (1, [admin], true)", uid, roles, valid)
+    	{{ "}" }}
+
+    	uid, roles, valid = svc.ValidateToken(ctx, "bogus-token")
+    	if valid || uid != 0 || roles != nil {{ "{" }}
+    		t.Fatalf("ValidateToken(bogus) = (%d, %v, %v), want (0, nil, false)", uid, roles, valid)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRefreshRotates(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, tokens := newTestService()
+
+    	_ = tokens.SetRefresh(ctx, 1, "refresh-old", time.Hour)
+    	access, refresh, err := svc.Refresh(ctx, "refresh-old")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Refresh: %v", err)
+    	{{ "}" }}
+    	if access == "" || refresh == "" {{ "{" }}
+    		t.Fatalf("Refresh tokens empty")
+    	{{ "}" }}
+    	if _, err := tokens.GetRefresh(ctx, "refresh-old"); !errors.Is(err, token.ErrNotFound) {{ "{" }}
+    		t.Fatalf("old refresh still valid: %v", err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRefreshUnknownToken(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, _ := newTestService()
+    	if _, _, err := svc.Refresh(ctx, "no-such-refresh"); err == nil {{ "{" }}
+    		t.Fatal("Refresh(unknown) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestLogoutBlacklists(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _, tokens := newTestService()
+
+    	access, _, _, err := svc.Login(ctx, "alice", "password123")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Login: %v", err)
+    	{{ "}" }}
+    	if err := svc.Logout(ctx, access); err != nil {{ "{" }}
+    		t.Fatalf("Logout: %v", err)
+    	{{ "}" }}
+    	blacked, err := tokens.IsBlacklisted(ctx, access)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("IsBlacklisted: %v", err)
+    	{{ "}" }}
+    	if !blacked {{ "{" }}
+    		t.Fatal("access token not blacklisted after Logout")
+    	{{ "}" }}
+    {{ "}" }}

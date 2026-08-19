@@ -1,0 +1,186 @@
+# ncgo exported template — internal/repository/user/repo.go
+path: internal/repository/user/repo.go
+update_behavior:
+    type: skip
+
+body: |
+    package userrepo
+
+    import (
+    	"context"
+    	"errors"
+    	"fmt"
+
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    // Repo implements user.Repository using sqlc queries.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a user repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    // WithTx executes fn inside a database transaction.
+    func (r *Repo) WithTx(ctx context.Context, fn func(*Repo) error) (err error) {{ "{" }}
+    	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{{ "{" }}{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return fmt.Errorf("user repository begin transaction: %w", err)
+    	{{ "}" }}
+    	defer func() {{ "{" }}
+    		if p := recover(); p != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    			panic(p)
+    		{{ "}" }}
+    		if err != nil {{ "{" }}
+    			_ = tx.Rollback(ctx)
+    		{{ "}" }}
+    	{{ "}" }}()
+    	txRepo := &Repo{{ "{" }}q: r.q.WithTx(tx), pool: r.pool{{ "}" }}
+    	if err = fn(txRepo); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err = tx.Commit(ctx); err != nil {{ "{" }}
+    		return fmt.Errorf("user repository commit transaction: %w", err)
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, id)
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
+    func (r *Repo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByUsername(ctx, username)
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, username)
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}
+    	rows, err := r.q.ListUsers(ctx, gen.ListUsersParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*user.User, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainUser(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountUsers(ctx)
+    {{ "}" }}
+
+    func (r *Repo) Save(ctx context.Context, u *user.User) (*user.User, error) {{ "{" }}
+    	if u == nil {{ "{" }}
+    		return nil, errors.New("user repository: nil user")
+    	{{ "}" }}
+    	if u.ID == 0 {{ "{" }}
+    		row, err := r.q.CreateUser(ctx, gen.CreateUserParams{{ "{" }}
+    			Username:     u.Username,
+    			PasswordHash: u.PasswordHash,
+    			Status:       u.Status,
+    		{{ "}" }})
+    		if err != nil {{ "{" }}
+    			return nil, err
+    		{{ "}" }}
+    		return toDomainUser(row), nil
+    	{{ "}" }}
+    	row, err := r.q.UpdateUser(ctx, gen.UpdateUserParams{{ "{" }}
+    		Username: u.Username,
+    		Status:   u.Status,
+    		ID:       u.ID,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, mapErr(err, u.ID)
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
+    func (r *Repo) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {{ "{" }}
+    	_, err := r.q.UpdateUserPassword(ctx, gen.UpdateUserPasswordParams{{ "{" }}
+    		PasswordHash: passwordHash,
+    		ID:           id,
+    	{{ "}" }})
+    	return err
+    {{ "}" }}
+
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    	return r.q.DeleteUser(ctx, id)
+    {{ "}" }}
+
+    func (r *Repo) SetStatus(ctx context.Context, id int64, status string) error {{ "{" }}
+    	_, err := r.q.UpdateUserStatus(ctx, gen.UpdateUserStatusParams{{ "{" }}
+    		Status: status,
+    		ID:     id,
+    	{{ "}" }})
+    	return mapErr(err, id)
+    {{ "}" }}
+
+    // AssignRoles replaces the user's role set with the given role IDs.
+    func (r *Repo) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    	if err := r.q.ClearUserRoles(ctx, uid); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	for _, rid := range roleIDs {{ "{" }}
+    		if err := r.q.AddUserRole(ctx, gen.AddUserRoleParams{{ "{" }}UserID: uid, RoleID: rid{{ "}" }}); err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+
+    // ClearRoles removes every role from the user.
+    func (r *Repo) ClearRoles(ctx context.Context, uid int64) error {{ "{" }}
+    	return r.q.ClearUserRoles(ctx, uid)
+    {{ "}" }}
+
+    // ListRoles returns the roles assigned to the user.
+    func (r *Repo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	rows, err := r.q.ListRolesByUserID(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*role.Role, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, &role.Role{{ "{" }}ID: row.ID, Code: row.Code, Name: row.Name{{ "}" }})
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    // ListRoleIDs returns the role IDs assigned to the user.
+    func (r *Repo) ListRoleIDs(ctx context.Context, uid int64) ([]int64, error) {{ "{" }}
+    	return r.q.ListRoleIDsByUserID(ctx, uid)
+    {{ "}" }}
+
+    func toDomainUser(row gen.User) *user.User {{ "{" }}
+    	return &user.User{{ "{" }}
+    		ID:           row.ID,
+    		Username:     row.Username,
+    		PasswordHash: row.PasswordHash,
+    		Status:       row.Status,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func mapErr(err error, key any) error {{ "{" }}
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return user.NotFoundError{{ "{" }}Key: fmt.Sprint(key){{ "}" }}
+    	{{ "}" }}
+    	return err
+    {{ "}" }}

@@ -1,0 +1,52 @@
+# rbac-kitex template — internal/infrastructure/token/redis.go
+path: internal/infrastructure/token/redis.go
+update_behavior:
+  type: cover
+body: |-
+  package token
+  
+  import (
+  	"context"
+  	"errors"
+  	"time"
+  )
+  
+  // RedisStore is the production seam for refresh tokens and the JWT blacklist.
+  //
+  // NOTE: v1 ships the type and the key scheme only — no Redis client is wired.
+  // SetRefresh/GetRefresh/DeleteRefresh map to SET/GET/DEL on `{prefix}:refresh:{token}`
+  // and Blacklist/IsBlacklisted map to SETEX/EXISTS on `{prefix}:blacklist:{token}`.
+  // Wire a client (e.g. github.com/redis/go-redis/v9) behind these methods before
+  // enabling `auth.token_store: redis` in production.
+  type RedisStore struct {
+  	addr      string
+  	keyPrefix string
+  }
+  
+  // NewRedisStore creates a Redis token store seam.
+  func NewRedisStore(redisAddr, keyPrefix string) *RedisStore {
+  	return &RedisStore{addr: redisAddr, keyPrefix: keyPrefix}
+  }
+  
+  func (s *RedisStore) refreshKey(tok string) string { return s.keyPrefix + ":refresh:" + tok }
+  func (s *RedisStore) blackKey(tok string) string   { return s.keyPrefix + ":blacklist:" + tok }
+  
+  func (s *RedisStore) SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error {
+  	return errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
+  }
+  
+  func (s *RedisStore) GetRefresh(ctx context.Context, refreshToken string) (int64, error) {
+  	return 0, errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
+  }
+  
+  func (s *RedisStore) DeleteRefresh(ctx context.Context, refreshToken string) error {
+  	return errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
+  }
+  
+  func (s *RedisStore) Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error {
+  	return errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
+  }
+  
+  func (s *RedisStore) IsBlacklisted(ctx context.Context, accessToken string) (bool, error) {
+  	return false, errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
+  }

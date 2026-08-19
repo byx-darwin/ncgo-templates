@@ -1,0 +1,42 @@
+# ncgo exported template — internal/domain/menu/entity_test.go
+path: internal/domain/menu/entity_test.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import "testing"
+
+    func TestBuildTree(t *testing.T) {{ "{" }}
+    	items := []*Menu{{ "{" }}
+    		{{ "{" }}ID: 1, ParentID: 0, Type: KindDir, Name: "System", SortOrder: 2{{ "}" }},
+    		{{ "{" }}ID: 2, ParentID: 1, Type: KindMenu, Name: "Users", SortOrder: 1{{ "}" }},
+    		{{ "{" }}ID: 3, ParentID: 1, Type: KindMenu, Name: "Roles", SortOrder: 2{{ "}" }},
+    		{{ "{" }}ID: 4, ParentID: 0, Type: KindDir, Name: "Dashboard", SortOrder: 1{{ "}" }},
+    		{{ "{" }}ID: 5, ParentID: 999, Type: KindButton, Name: "Orphan", SortOrder: 10{{ "}" }},
+    	{{ "}" }}
+
+    	roots := BuildTree(items)
+
+    	if len(roots) != 3 {{ "{" }}
+    		t.Fatalf("len(roots) = %d, want 3 (Dashboard, System, Orphan)", len(roots))
+    	{{ "}" }}
+    	// roots ordered by SortOrder then ID: Dashboard(1), System(2), Orphan(10).
+    	if roots[0].Menu.Name != "Dashboard" {{ "{" }}
+    		t.Fatalf("roots[0] = %q, want Dashboard", roots[0].Menu.Name)
+    	{{ "}" }}
+    	if roots[1].Menu.Name != "System" {{ "{" }}
+    		t.Fatalf("roots[1] = %q, want System", roots[1].Menu.Name)
+    	{{ "}" }}
+    	if roots[2].Menu.Name != "Orphan" {{ "{" }}
+    		t.Fatalf("roots[2] = %q, want Orphan", roots[2].Menu.Name)
+    	{{ "}" }}
+    	// System has two children ordered by SortOrder: Users(1), Roles(2)
+    	sys := roots[1]
+    	if len(sys.Children) != 2 {{ "{" }}
+    		t.Fatalf("System children = %d, want 2", len(sys.Children))
+    	{{ "}" }}
+    	if sys.Children[0].Menu.Name != "Users" || sys.Children[1].Menu.Name != "Roles" {{ "{" }}
+    		t.Fatalf("System children = [%s %s], want [Users Roles]", sys.Children[0].Menu.Name, sys.Children[1].Menu.Name)
+    	{{ "}" }}
+    {{ "}" }}

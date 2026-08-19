@@ -27,9 +27,9 @@ type Config struct {
     Env string `yaml:"env"`
     Debug bool `yaml:"debug"`
     ConfigCenter ConfigCenterConfig `yaml:"config_center"`
-    
+
     Database DatabaseConfig `yaml:"database"`
-    
+
     Redis       RedisConfig `yaml:"redis"`
     Server hertzconfig.ServerConfig `yaml:"server"`
     Swagger SwaggerConfig `yaml:"swagger"`
@@ -38,6 +38,8 @@ type Config struct {
     RateLimit RateLimitConfig `yaml:"rate_limit"`
     Idempotency IdempotencyConfig `yaml:"idempotency"`
     Auth AuthConfig `yaml:"auth"`
+    JWT JWTConfig `yaml:"jwt"`
+    GRPC GRPCConfig `yaml:"grpc"`
     Logging LoggingConfig `yaml:"logging"`
     Release ReleaseConfig `yaml:"release"`
     Log LogConfig `yaml:"log"`
@@ -369,6 +371,31 @@ type ReleasePolarisRuleConfig struct {
     Namespace string   `yaml:"namespace"`
     Group     string   `yaml:"group"`
     FileName  string   `yaml:"file_name"`
+}
+
+// JWT and gRPC client configuration for admin-bff
+type JWTConfig struct {
+	Secret                 string `yaml:"secret"`
+	AccessTokenTTLSeconds  int    `yaml:"access_token_ttl_seconds"`
+	RefreshTokenTTLSeconds int    `yaml:"refresh_token_ttl_seconds"`
+}
+
+type GRPCConfig struct {
+	RBAC       ClientConfig `yaml:"rbac"`
+	RuleCenter ClientConfig `yaml:"rule_center"`
+}
+
+type ClientConfig struct {
+	ServiceName                string      `yaml:"service_name"`
+	HostPorts                  []string    `yaml:"host_ports"`
+	RPCTimeoutSeconds          int         `yaml:"rpc_timeout_seconds"`
+	ConnectTimeoutMilliseconds int         `yaml:"connect_timeout_milliseconds"`
+	EnableMetaInfo             bool        `yaml:"enable_metainfo"`
+	Retry                      RetryConfig `yaml:"retry"`
+}
+
+type RetryConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 func RegisterConfigCenterLoader(provider string, loader ConfigCenterLoader) {

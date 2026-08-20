@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package app;
 
-option go_package = "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/internal/pb;pb";
+option go_package = "{{.Module}}/internal/pb;pb";
 
 import "api.proto";
 import "openapi/annotations.proto";

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.rbac.v1;
 
-option go_package = "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/kitex_gen/api/rbac/v1;rbacv1";
+option go_package = "{{.Module}}/kitex_gen/api/rbac/v1;rbacv1";
 
 import "api.proto";
 

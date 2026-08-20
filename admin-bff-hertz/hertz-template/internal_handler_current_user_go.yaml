@@ -13,8 +13,8 @@ body: |
 
     	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type CurrentUserHandler struct {{ "{" }}
@@ -26,37 +26,37 @@ body: |
     {{ "}" }}
 
     func (h *CurrentUserHandler) GetMenus(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	claims, ok := middleware.GetClaims(c)
+    	_, ok := middleware.GetClaims(c)
     	if !ok {{ "{" }}
     		response.ErrorCode(c, response.CodeUnauthorized)
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.GetUserMenuTree(ctx, &api.GetUserMenuTreeRequest{{ "{" }}
-    		UserId: claims.UUID,
+    	resp, err := h.rbacCli.GetUserMenuTree(ctx, &api.GetUserMenuTreeReq{{ "{" }}
+    		Uid: 0, // TODO: convert UUID to int64
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
 
-    	response.OK(c, resp.Menus)
+    	response.OK(c, resp.Roots)
     {{ "}" }}
 
     func (h *CurrentUserHandler) GetPerms(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	claims, ok := middleware.GetClaims(c)
+    	_, ok := middleware.GetClaims(c)
     	if !ok {{ "{" }}
     		response.ErrorCode(c, response.CodeUnauthorized)
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.GetUserPermCodes(ctx, &api.GetUserPermCodesRequest{{ "{" }}
-    		UserId: claims.UUID,
+    	resp, err := h.rbacCli.GetUserPermCodes(ctx, &api.GetUserPermCodesReq{{ "{" }}
+    		Uid: 0, // TODO: convert UUID to int64
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
 
-    	response.OK(c, resp.PermCodes)
+    	response.OK(c, resp.Codes)
     {{ "}" }}

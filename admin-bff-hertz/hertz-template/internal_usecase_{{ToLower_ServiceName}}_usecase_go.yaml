@@ -1,0 +1,38 @@
+# ncgo exported template — internal/usecase/{{ToLower .ServiceName}}/usecase.go
+path: internal/usecase/{{ToLower .ServiceName}}/usecase.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |-
+    package {{ToLower .ServiceName}}
+
+    import (
+        "context"
+
+        goerror "github.com/byx-darwin/go-tools/go-common/error"
+    )
+
+    // {{.ServiceName}}Repo defines the data-access port for this usecase.
+    // Implement it in internal/repository/{{ToLower .ServiceName}}/.
+    type {{.ServiceName}}Repo interface {{ "{" }}
+        // TODO: declare repository methods needed by the usecase
+    {{ "}" }}
+
+    // UseCase orchestrates business logic for {{.ServiceName}}.
+    // It depends on interfaces (ports), not concrete implementations.
+    type UseCase struct {{ "{" }}
+        repo {{.ServiceName}}Repo
+    {{ "}" }}
+
+    // New creates a UseCase wired to the given repository.
+    func New(repo {{.ServiceName}}Repo) *UseCase {{ "{" }}
+        return &UseCase{{ "{" }}repo: repo{{ "}" }}
+    {{ "}" }}
+
+    // Add HTTP methods to the IDL proto, then rerun `make update`.
+    // Implement handler methods here as:
+    //   func (uc *UseCase) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error) {{ "{" }}
+    //       // Placeholder code 10010 shares its value with frameworkerror.CodeRPCUnavailable;
+    //       // replace with a domain-specific error code when implementing.
+    //       return nil, goerror.In("{{ToLower .ServiceName}}.usecase").Code(10010).Public("not_implemented").Errorf("Ping: not implemented")
+    //   {{ "}" }}

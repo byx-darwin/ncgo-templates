@@ -14,8 +14,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type RoleHandler struct {{ "{" }}
@@ -27,7 +27,7 @@ body: |
     {{ "}" }}
 
     func (h *RoleHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rbacCli.ListRoles(ctx, &api.ListRolesRequest{{ "{" }}{{ "}" }})
+    	resp, err := h.rbacCli.ListRoles(ctx, &api.ListRolesReq{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -36,7 +36,7 @@ body: |
     {{ "}" }}
 
     func (h *RoleHandler) Create(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req api.CreateRoleRequest
+    	var req api.CreateRoleReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
@@ -54,7 +54,7 @@ body: |
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	var req api.UpdateRoleRequest
+    	var req api.UpdateRoleReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
@@ -73,7 +73,7 @@ body: |
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	_, err := h.rbacCli.DeleteRole(ctx, &api.DeleteRoleRequest{{ "{" }}Id: id{{ "}" }})
+    	_, err := h.rbacCli.DeleteRole(ctx, &api.DeleteRoleReq{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

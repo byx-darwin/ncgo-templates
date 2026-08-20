@@ -14,7 +14,7 @@ body: |
         network: "tcp"
         mode: 0
       registry:
-        name: "adminbffservice"
+        name: "{{ToLower .ServiceName}}"
       # 链路追踪（go-framework OTLP gRPC → Jaeger/collector）
       jaeger:
         # 默认关闭；置 true 并填写 collector 地址以启用
@@ -103,27 +103,13 @@ body: |
     # 配置中心：用于在本地文件之上叠加远程配置；默认关闭
     config_center:
       enabled: false
-    # JWT configuration for admin-bff authentication
-    jwt:
-      secret: "your-256-bit-secret-change-in-production"
-      access_token_ttl_seconds: 7200
-      refresh_token_ttl_seconds: 604800
-
-    # gRPC client configuration for backend services
+    # RPC 客户端配置
     grpc:
       rbac:
-        service_name: "rbacservice"
-        host_ports: ["localhost:8889"]
-        rpc_timeout_seconds: 3
-        connect_timeout_milliseconds: 100
-        enable_metainfo: true
-        retry:
-          enabled: false
-      rule_center:
-        service_name: "rulecenterservice"
-        host_ports: ["localhost:8890"]
-        rpc_timeout_seconds: 3
-        connect_timeout_milliseconds: 100
-        enable_metainfo: true
-        retry:
-          enabled: false
+        address: "localhost:8888"
+      rule:
+        address: "localhost:8889"
+
+    # JWT 配置（与 rbac 一致）
+    jwt:
+      secret: "your-256-bit-secret-for-jwt-token-signing"

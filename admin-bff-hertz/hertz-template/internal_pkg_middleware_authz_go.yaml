@@ -11,8 +11,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type permissionKey struct{{ "{" }}{{ "}" }}
@@ -49,15 +49,15 @@ body: |
     			return
     		{{ "}" }}
 
-    		claims, ok := GetClaims(c)
+    		_, ok := GetClaims(c)
     		if !ok {{ "{" }}
     			response.ErrorCode(c, response.CodeUnauthorized)
     			c.Abort()
     			return
     		{{ "}" }}
 
-    		resp, err := rbacCli.Enforce(ctx, &api.EnforceRequest{{ "{" }}
-    			Sub: claims.UUID,
+    		resp, err := rbacCli.Enforce(ctx, &api.EnforceReq{{ "{" }}
+    			Uid: 0, // TODO: convert claims.UserID to int64
     			Obj: perm,
     			Act: "execute",
     		{{ "}" }})

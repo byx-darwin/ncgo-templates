@@ -14,8 +14,8 @@ body: |
 
     	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/authservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/authservice"
     )
 
     type AuthHandler struct {{ "{" }}
@@ -26,19 +26,19 @@ body: |
     	return &AuthHandler{{ "{" }}rbacCli: rbacCli{{ "}" }}
     {{ "}" }}
 
-    type LoginRequest struct {{ "{" }}
+    type LoginReq struct {{ "{" }}
     	Username string `json:"username"`
     	Password string `json:"password"`
     {{ "}" }}
 
     func (h *AuthHandler) Login(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req LoginRequest
+    	var req LoginReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.Login(ctx, &api.LoginRequest{{ "{" }}
+    	resp, err := h.rbacCli.Login(ctx, &api.LoginReq{{ "{" }}
     		Username: req.Username,
     		Password: req.Password,
     	{{ "}" }})
@@ -63,7 +63,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.Refresh(ctx, &api.RefreshRequest{{ "{" }}
+    	resp, err := h.rbacCli.Refresh(ctx, &api.RefreshReq{{ "{" }}
     		RefreshToken: req.RefreshToken,
     	{{ "}" }})
     	if err != nil {{ "{" }}
@@ -85,9 +85,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	_, err := h.rbacCli.Logout(ctx, &api.LogoutRequest{{ "{" }}
-    		UserId: claims.UUID,
-    	{{ "}" }})
+    	_, err := h.rbacCli.Logout(ctx, &api.LogoutReq{{ "{" }}AccessToken: claims.UUID{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

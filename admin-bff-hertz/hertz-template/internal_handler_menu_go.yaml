@@ -12,8 +12,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type MenuHandler struct {{ "{" }}
@@ -25,7 +25,7 @@ body: |
     {{ "}" }}
 
     func (h *MenuHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rbacCli.ListMenus(ctx, &api.ListMenusRequest{{ "{" }}{{ "}" }})
+    	resp, err := h.rbacCli.ListMenus(ctx, &api.ListMenusReq{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

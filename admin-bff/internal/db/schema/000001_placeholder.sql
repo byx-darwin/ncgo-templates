@@ -1,2 +1,0 @@
--- Placeholder schema file so `make sqlc` works before real DDL exists.
--- Replace this file with real CREATE TABLE statements once your schema is ready.

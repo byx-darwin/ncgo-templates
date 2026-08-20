@@ -1,8 +1,0 @@
-{
-  "*": {
-    "GoModule": "github.com/byx-darwin/ncgo-templates/admin-bff-hertz",
-    "RuleCenterAddr": "",
-    "ServiceName": "admin-bff",
-    "WithDatabase": true
-  }
-}

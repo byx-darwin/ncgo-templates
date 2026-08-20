@@ -1,8 +1,0 @@
-# ncgo exported template — internal/pkg/middleware/observability_test.go
-path: internal/pkg/middleware/observability_test.go
-update_behavior:
-    type: cover
-body: |
-    package middleware
-
-    // Placeholder: filled by `ncgo add infra logging`.

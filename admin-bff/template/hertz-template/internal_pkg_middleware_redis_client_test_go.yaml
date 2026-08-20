@@ -1,8 +1,0 @@
-# ncgo exported template — internal/pkg/middleware/redis_client_test.go
-path: internal/pkg/middleware/redis_client_test.go
-update_behavior:
-    type: cover
-body: |
-    package middleware
-
-    // Placeholder: filled by `ncgo add infra redis`.

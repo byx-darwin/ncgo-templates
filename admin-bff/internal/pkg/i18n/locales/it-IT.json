@@ -1,8 +1,0 @@
-{
-  "language": "it-IT",
-  "aliases": ["it"],
-  "messages": {
-    "route_not_found": "interfaccia non trovata",
-    "order_conflict": "conflitto ordine"
-  }
-}

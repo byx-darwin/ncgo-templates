@@ -1,9 +1,0 @@
-output/
-*.exe
-*.test
-*.prof
-.DS_Store
-/.idea
-/.vscode
-*.local.yml
-dumped_hertz_remote_config.json

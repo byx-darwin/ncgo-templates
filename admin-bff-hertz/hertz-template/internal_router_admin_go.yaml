@@ -12,15 +12,16 @@ body: |
     	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/handler"
     	"{{.Module}}/internal/pkg/middleware"
-    	rbacclient "{{.Module}}/pkg/client/rbac"
-    	rulecenterclient "{{.Module}}/pkg/client/rulecenter"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/auth/v1/authservice"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+    	"github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
     )
 
     // RegisterAdminRoutes registers all admin BFF routes
-    func RegisterAdminRoutes(h *server.Hertz, rbacCli *rbacclient.Client, rulecenterCli *rulecenterclient.Client) {{ "{" }}
+    func RegisterAdminRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client) {{ "{" }}
     	cfg := conf.Get()
 
-    	authHandler := handler.NewAuthHandler(rbacCli)
+    	authHandler := handler.NewAuthHandler(rbacAuthCli)
     	userHandler := handler.NewUserHandler(rbacCli)
     	roleHandler := handler.NewRoleHandler(rbacCli)
     	permHandler := handler.NewPermissionHandler(rbacCli)

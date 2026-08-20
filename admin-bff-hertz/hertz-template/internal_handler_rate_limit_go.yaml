@@ -14,20 +14,20 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	rulecenterclient "{{.Module}}/pkg/client/rulecenter"
-    	api "{{.Module}}/kitex_gen/api/ratelimit/v1"
+    	api "github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1"
+    	"github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
     )
 
     type RateLimitHandler struct {{ "{" }}
-    	rulecenterCli *rulecenterclient.Client
+    	rulecenterCli ruleservice.Client
     {{ "}" }}
 
-    func NewRateLimitHandler(rulecenterCli *rulecenterclient.Client) *RateLimitHandler {{ "{" }}
+    func NewRateLimitHandler(rulecenterCli ruleservice.Client) *RateLimitHandler {{ "{" }}
     	return &RateLimitHandler{{ "{" }}rulecenterCli: rulecenterCli{{ "}" }}
     {{ "}" }}
 
     func (h *RateLimitHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rulecenterCli.RuleService().ListRules(ctx, &api.ListRulesRequest{{ "{" }}{{ "}" }})
+    	resp, err := h.rulecenterCli.ListRules(ctx, &api.ListRulesRequest{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -42,7 +42,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rulecenterCli.RuleService().CreateRule(ctx, &req)
+    	resp, err := h.rulecenterCli.CreateRule(ctx, &req)
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -61,7 +61,7 @@ body: |
     	{{ "}" }}
     	req.Id = id
 
-    	resp, err := h.rulecenterCli.RuleService().UpdateRule(ctx, &req)
+    	resp, err := h.rulecenterCli.UpdateRule(ctx, &req)
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -73,7 +73,7 @@ body: |
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	_, err := h.rulecenterCli.RuleService().DeleteRule(ctx, &api.DeleteRuleRequest{{ "{" }}Id: id{{ "}" }})
+    	_, err := h.rulecenterCli.DeleteRule(ctx, &api.DeleteRuleRequest{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

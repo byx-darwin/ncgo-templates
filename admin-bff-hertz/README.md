@@ -17,6 +17,50 @@ ncgo new admin-bff --module github.com/acme/admin-bff --kind hertz \
 > over Kitex RPC — set their addresses in `conf/dev/conf.yaml` under
 > `rpc.services.rbac_kitex` / `rpc.services.rule_center`.
 
+## Architecture
+
+This BFF template directly references RPC services' `kitex_gen` packages:
+
+- **No `pkg/client/` wrapper needed** — handlers import RPC services' generated
+  code directly, eliminating an extra abstraction layer.
+- **Go workspace module references** — `go.mod` uses `replace` directives to
+  point to local RPC service directories:
+  ```go
+  replace (
+      github.com/test/admin/services/rbac => ../../rbac
+      github.com/test/admin/services/rule => ../../rule
+  )
+  ```
+- **Direct imports** — BFF handlers import RPC kitex_gen packages like:
+  ```go
+  import (
+      "github.com/test/admin/services/rbac/kitex_gen/api/auth/v1/authservice"
+      "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+      "github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
+  )
+  ```
+
+### Prerequisites
+
+- All services (BFF, rbac, rule) must be in the same Go workspace or have
+  appropriate `replace` directives in `go.mod`.
+- RPC services must be built before the BFF so their `kitex_gen` packages
+  are available.
+- The directory structure should follow:
+  ```
+  admin/
+    services/
+      rbac/         # RBAC Kitex service
+      rule/         # Rule Center Kitex service
+      admin-bff/    # This BFF (generated)
+  ```
+
+### Benefits
+
+- **Simpler dependency graph** — no wrapper packages to maintain.
+- **Type safety** — direct use of generated types ensures compile-time checks.
+- **Easier updates** — regenerate RPC `kitex_gen` and BFF picks up changes.
+
 ## Contents
 
 - **IDL** (`idl/`):

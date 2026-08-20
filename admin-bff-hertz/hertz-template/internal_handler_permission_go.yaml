@@ -14,20 +14,20 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	rbacclient "{{.Module}}/pkg/client/rbac"
-    	api "{{.Module}}/kitex_gen/api/rbac/v1"
+    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type PermissionHandler struct {{ "{" }}
-    	rbacCli *rbacclient.Client
+    	rbacCli rbacservice.Client
     {{ "}" }}
 
-    func NewPermissionHandler(rbacCli *rbacclient.Client) *PermissionHandler {{ "{" }}
+    func NewPermissionHandler(rbacCli rbacservice.Client) *PermissionHandler {{ "{" }}
     	return &PermissionHandler{{ "{" }}rbacCli: rbacCli{{ "}" }}
     {{ "}" }}
 
     func (h *PermissionHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rbacCli.RBACService().ListPermissions(ctx, &api.ListPermissionsRequest{{ "{" }}{{ "}" }})
+    	resp, err := h.rbacCli.ListPermissions(ctx, &api.ListPermissionsRequest{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -39,7 +39,7 @@ body: |
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	resp, err := h.rbacCli.RBACService().GetPermission(ctx, &api.GetPermissionRequest{{ "{" }}Id: id{{ "}" }})
+    	resp, err := h.rbacCli.GetPermission(ctx, &api.GetPermissionRequest{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -54,7 +54,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.RBACService().CreatePermission(ctx, &req)
+    	resp, err := h.rbacCli.CreatePermission(ctx, &req)
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -73,7 +73,7 @@ body: |
     	{{ "}" }}
     	req.Id = id
 
-    	resp, err := h.rbacCli.RBACService().UpdatePermission(ctx, &req)
+    	resp, err := h.rbacCli.UpdatePermission(ctx, &req)
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -85,7 +85,7 @@ body: |
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	_, err := h.rbacCli.RBACService().DeletePermission(ctx, &api.DeletePermissionRequest{{ "{" }}Id: id{{ "}" }})
+    	_, err := h.rbacCli.DeletePermission(ctx, &api.DeletePermissionRequest{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

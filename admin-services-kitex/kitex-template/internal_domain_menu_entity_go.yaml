@@ -1,0 +1,77 @@
+# ncgo exported template — internal/domain/menu/entity.go
+path: internal/domain/menu/entity.go
+update_behavior:
+    type: skip
+body: |
+    package menu
+
+    import "sort"
+
+    const (
+    	// TypeCatalog is a top-level classification node.
+    	TypeCatalog = "catalog"
+    	// TypeMenu is a navigation menu node.
+    	TypeMenu = "menu"
+    )
+
+    // Menu is a read-only view over the permissions table (WHERE type IN ('catalog','menu')).
+    // It does not have its own write path — writes go through the permission aggregate.
+    type Menu struct {{ "{" }}
+    	ID         int64
+    	Code       string // permission code
+    	Name       string
+    	ParentID   int64
+    	Type       string // catalog | menu
+    	Path       string
+    	Icon       string
+    	RouteName  string
+    	Redirect   string
+    	KeepAlive  *bool
+    	HideInMenu *bool
+    	IsExternal *bool
+    	Sort       int32
+    {{ "}" }}
+
+    // Node is a menu tree node.
+    type Node struct {{ "{" }}
+    	Menu     *Menu
+    	Children []*Node
+    {{ "}" }}
+
+    // BuildTree assembles a flat menu list into a forest ordered by Sort then
+    // ID. Nodes whose parent is absent hang as roots (orphans).
+    func BuildTree(items []*Menu) []*Node {{ "{" }}
+    	if len(items) == 0 {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	byID := make(map[int64]*Node, len(items))
+    	for _, m := range items {{ "{" }}
+    		if m == nil {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		byID[m.ID] = &Node{{ "{" }}Menu: m{{ "}" }}
+    	{{ "}" }}
+    	var roots []*Node
+    	for _, n := range byID {{ "{" }}
+    		parent := n.Menu.ParentID
+    		if p, ok := byID[parent]; ok && parent != n.Menu.ID {{ "{" }}
+    			p.Children = append(p.Children, n)
+    		{{ "}" }} else {{ "{" }}
+    			roots = append(roots, n)
+    		{{ "}" }}
+    	{{ "}" }}
+    	sortNodes(roots)
+    	for _, n := range byID {{ "{" }}
+    		sortNodes(n.Children)
+    	{{ "}" }}
+    	return roots
+    {{ "}" }}
+
+    func sortNodes(nodes []*Node) {{ "{" }}
+    	sort.SliceStable(nodes, func(i, j int) bool {{ "{" }}
+    		if nodes[i].Menu.Sort == nodes[j].Menu.Sort {{ "{" }}
+    			return nodes[i].Menu.ID < nodes[j].Menu.ID
+    		{{ "}" }}
+    		return nodes[i].Menu.Sort < nodes[j].Menu.Sort
+    	{{ "}" }})
+    {{ "}" }}

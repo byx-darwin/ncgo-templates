@@ -35,16 +35,19 @@ body: |-
         CodeRequestTimeout        = frameworkerror.CodeRPCTimeout
 
         CodeUnauthorized          = frameworkerror.CodeAuthFailed
-        CodeSignatureMissing      = frameworkerror.CodeAuthFailed
-        CodeSignatureExpired      = frameworkerror.CodeAuthFailed
-        CodeSignatureInvalid      = frameworkerror.CodeAuthFailed
-        CodeTokenMissing          = frameworkerror.CodeAuthFailed
-        CodeTokenInvalid          = frameworkerror.CodeAuthFailed
-        CodeTokenExpired          = frameworkerror.CodeAuthFailed
-        CodeForbidden             = frameworkerror.CodeAuthFailed
-        CodeClaimsInvalid         = frameworkerror.CodeAuthFailed
-        CodeAppKeyInvalid         = frameworkerror.CodeAuthFailed
-        CodeSessionInvalid        = frameworkerror.CodeAuthFailed
+
+        // Signature errors
+        CodeSignatureMissing      = frameworkerror.CodeSignatureMissing
+        CodeSignatureExpired      = frameworkerror.CodeSignatureExpired
+        CodeSignatureInvalid      = frameworkerror.CodeSignatureInvalid
+        CodeAppKeyInvalid         = frameworkerror.CodeAppKeyInvalid
+
+        // Token / JWT errors
+        CodeTokenMissing          = frameworkerror.CodeTokenMissing
+        CodeTokenInvalid          = frameworkerror.CodeTokenInvalid
+        CodeTokenExpired          = frameworkerror.CodeTokenExpired
+        CodeClaimsInvalid         = frameworkerror.CodeTokenInvalid
+        CodeSessionInvalid        = frameworkerror.CodeTokenInvalid
 
         CodeCacheUnavailable      = 10304
         CodeDatabaseUnavailable   = 10303
@@ -142,6 +145,18 @@ body: |-
             return consts.StatusConflict
         case CodeIdempotencyKeyMissing:
             return consts.StatusBadRequest
+
+        // Signature errors → HTTP status from framework
+        case CodeSignatureMissing, CodeSignatureExpired:
+            return consts.StatusUnauthorized
+        case CodeSignatureInvalid, CodeAppKeyInvalid:
+            return consts.StatusForbidden
+
+        // Token / JWT errors → 401
+        case CodeTokenMissing, CodeTokenInvalid, CodeTokenExpired,
+            CodeClaimsInvalid, CodeSessionInvalid:
+            return consts.StatusUnauthorized
+
         case frameworkerror.CodeAuthFailed:
             return consts.StatusForbidden
         case CodePermissionDenied:
@@ -166,6 +181,20 @@ body: |-
             return "permission_denied"
         case CodeAuthFailed:
             return "auth_failed"
+        case CodeSignatureMissing:
+            return "signature_missing"
+        case CodeSignatureExpired:
+            return "signature_expired"
+        case CodeSignatureInvalid:
+            return "signature_invalid"
+        case CodeAppKeyInvalid:
+            return "app_key_invalid"
+        case CodeTokenMissing:
+            return "token_missing"
+        case CodeTokenInvalid:
+            return "token_invalid"
+        case CodeTokenExpired:
+            return "token_expired"
         case CodeConfigInvalid:
             return "config_invalid"
         case CodeRPCUnavailable:

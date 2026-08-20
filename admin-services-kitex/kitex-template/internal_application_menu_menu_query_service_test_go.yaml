@@ -1,0 +1,89 @@
+# ncgo exported template — internal/application/menu/menu_query_service_test.go
+path: internal/application/menu/menu_query_service_test.go
+update_behavior:
+    type: skip
+body: |
+    package menusvc
+
+    import (
+    	"context"
+    	"testing"
+
+    	"{{.Module}}/internal/domain/menu"
+    	"{{.Module}}/internal/domain/permission"
+    	"{{.Module}}/internal/domain/role"
+    )
+
+    type fakeMenuRepo struct {{ "{" }}
+    	menus []*menu.Menu
+    {{ "}" }}
+
+    func (f *fakeMenuRepo) ListMenusAsTree(ctx context.Context) ([]*menu.Menu, error) {{ "{" }}
+    	return f.menus, nil
+    {{ "}" }}
+
+    type fakeUserRoleReader struct {{ "{" }}
+    	roles []*role.Role
+    {{ "}" }}
+
+    func (f *fakeUserRoleReader) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    	return f.roles, nil
+    {{ "}" }}
+
+    type fakePermReader struct {{ "{" }}
+    	allPerms  []*permission.Permission
+    	rolePerms []*permission.Permission
+    {{ "}" }}
+
+    func (f *fakePermReader) ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    	return f.rolePerms, nil
+    {{ "}" }}
+
+    func (f *fakePermReader) List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    	return f.allPerms, nil
+    {{ "}" }}
+
+    func TestListMenus(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	repo := &fakeMenuRepo{{ "{" }}menus: []*menu.Menu{{ "{" }}
+    		{{ "{" }}ID: 1, Code: "system", Name: "System", Type: menu.TypeCatalog, Sort: 1{{ "}" }},
+    		{{ "{" }}ID: 2, Code: "system:user", Name: "Users", ParentID: 1, Type: menu.TypeMenu, Sort: 1{{ "}" }},
+    	{{ "}}" }}
+    	qs := New(repo, &fakeUserRoleReader{{ "{" }}{{ "}" }}, &fakePermReader{{ "{" }}{{ "}" }})
+    	menus, err := qs.ListMenus(ctx)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("ListMenus: %v", err)
+    	{{ "}" }}
+    	if len(menus) != 2 {{ "{" }}
+    		t.Fatalf("len = %d, want 2", len(menus))
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUserPermCodesAdmin(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: 1, Code: "admin"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}allPerms: []*permission.Permission{{ "{" }}
+    		{{ "{" }}Code: "user:create"{{ "}" }},
+    		{{ "{" }}Code: "user:delete"{{ "}" }},
+    	{{ "}}" }})
+    	codes, err := qs.UserPermCodes(ctx, 1)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("UserPermCodes: %v", err)
+    	{{ "}" }}
+    	if len(codes) != 2 {{ "{" }}
+    		t.Fatalf("codes = %v, want 2 entries", codes)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUserPermCodesNormal(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: 1, Code: "editor"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}rolePerms: []*permission.Permission{{ "{" }}
+    		{{ "{" }}Code: "user:create"{{ "}" }},
+    	{{ "}}" }})
+    	codes, err := qs.UserPermCodes(ctx, 1)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("UserPermCodes: %v", err)
+    	{{ "}" }}
+    	if len(codes) != 1 || codes[0] != "user:create" {{ "{" }}
+    		t.Fatalf("codes = %v, want [user:create]", codes)
+    	{{ "}" }}
+    {{ "}" }}

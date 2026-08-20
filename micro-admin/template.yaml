@@ -1,4 +1,4 @@
 name: micro-admin
 kind: micro
-description: "Official micro-admin workspace composition template (rbac-kitex + admin-bff-hertz + rule-center)"
+description: "Official micro-admin workspace composition template (admin-services-kitex + admin-bff-hertz)"
 version: "1"

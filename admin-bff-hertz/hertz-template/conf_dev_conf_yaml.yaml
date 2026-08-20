@@ -1,7 +1,7 @@
 # ncgo exported template — conf/dev/conf.yaml
 path: conf/dev/conf.yaml
 update_behavior:
-    type: skip
+    type: cover
 body: |
     # 本地开发环境配置（默认由 GO_ENV=dev 加载）
     # env 会决定默认读取 conf/<env>/conf.yaml；常见值为 dev/test/staging/prod
@@ -23,9 +23,9 @@ body: |
     # 数据库配置
     database:
       # 是否启用数据库连接
-      enabled: false
+      enabled: true
       # PostgreSQL DSN；例如 postgres://user:pass@host:5432/dbname?sslmode=disable
-      dsn: ""
+      dsn: "postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable"
       # 连接池最大连接数；需结合数据库实例上限和服务副本数评估
       max_conns: 20
       # 连接池最小空闲连接数；可减少突发流量时的建连开销
@@ -70,21 +70,21 @@ body: |
       mode: "both"
     # 结构化日志配置（与 ncgo add infra logging 生成的 optional 兼容）
     logging:
-      enabled: false
+      enabled: true
       mode: console
       format: json
       level: info
     # 发布/灰度配置（与 ncgo add infra canary 生成的 optional 兼容）
     release:
-      enabled: false
+      enabled: true
     # 跨域配置
     cors:
-      enabled: false
+      enabled: true
       allow_origins:
         - "*"
     # 限流配置
     rate_limit:
-      enabled: false
+      enabled: true
       # 可选：仅当需要覆盖顶层 redis 连接时填写；留空则复用顶层 redis
       # 结构与顶层 redis 完全一致
       redis: {{ "{" }}{{ "}" }}
@@ -93,6 +93,38 @@ body: |
       public_paths:
         - /healthz
         - /readyz
+      # 签名验证（开放 API 场景：AppKey + HMAC 签名）
+      signature:
+        enabled: false
+        header_app_key: "X-App-Key"
+        header_timestamp: "X-Timestamp"
+        header_nonce: "X-Nonce"
+        header_signature: "X-Signature"
+        static_secret: ""
+        max_clock_skew_seconds: "300s"
+        nonce:
+          enabled: false
+          backend: "memory"
+          key_prefix: "sig:nonce:"
+          ttl_seconds: "600s"
+          memory:
+            max_entries: 10000
+    # 幂等控制（防止重复提交：POST/PUT/DELETE 携带 Idempotency-Key）
+    idempotency:
+      enabled: false
+      backend: "memory"
+      fail_open: true
+      header: "Idempotency-Key"
+      app_key_header: "X-App-Key"
+      key_prefix: "idempotency:"
+      ttl_seconds: "86400s"
+      max_body_bytes: 0
+      methods:
+        - POST
+        - PUT
+      skip_paths: []
+      memory:
+        max_entries: 10000
     # 安全控制：这些路径只允许来自 internal_cidrs 的请求访问
     security:
       internal_paths:
@@ -102,13 +134,13 @@ body: |
         - 127.0.0.0/8
     # 配置中心：用于在本地文件之上叠加远程配置；默认关闭
     config_center:
-      enabled: false
+      enabled: true
     # RPC 客户端配置
     grpc:
-      rbac:
-        address: "localhost:8888"
-      rule:
-        address: "localhost:8889"
+      authority:
+        service_name: "authority"
+        host_ports:
+          - "127.0.0.1:8888"
 
     # JWT 配置（与 rbac 一致）
     jwt:

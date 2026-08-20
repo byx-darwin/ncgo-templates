@@ -1,0 +1,9 @@
+# Hertz custom template — internal/base/data/tx.go
+# Generates the database transaction helper (WithTx).
+path: internal/base/data/tx.go
+update_behavior:
+    type: cover
+body: |-
+    package data
+
+    // Transaction helpers are generated when WithDatabase=true.

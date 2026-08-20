@@ -1,166 +1,336 @@
 # admin-bff-hertz
 
-Official **admin BFF** Hertz HTTP template — a JSON API gateway for admin
-dashboards that authenticates via JWT, enforces RBAC authorization through
-`rbac-kitex`, and manages dynamic rate-limit rules through `rule-center`.
+Official **Admin BFF (Backend for Frontend)** Hertz HTTP template — JWT authentication, RBAC authorization, API signature, and idempotency support.
 
-## Use
+## Overview
 
-```bash
-ncgo template pull admin-bff-hertz
-ncgo new admin-bff --module github.com/acme/admin-bff --kind hertz \
-  --template admin-bff-hertz
+`admin-bff-hertz` is designed for building admin backends with fine-grained permission control. It connects to `admin-services-kitex` (authority service) for authentication and authorization:
+
+- ✅ **JWT Authentication** - Bearer token validation
+- ✅ **RBAC Authorization** - Permission-based access control via Casbin
+- ✅ **API Signature** - HMAC signature verification (optional)
+- ✅ **Idempotency** - Prevent duplicate requests (optional)
+- ✅ **Fine-grained Error Codes** - Aligned with go-framework v0.2.1
+
+**Architecture:**
+```
+Client → admin-bff-hertz (BFF) → admin-services-kitex (Authority)
+         - JWT validation        - AuthService (login/token)
+         - RBAC check            - RBACService (users/roles/permissions)
+         - Signature             - RuleService (rate limit rules)
 ```
 
-> The BFF is a pure HTTP facade; it does **not** own a database. Upstream
-> authority (`rbac-kitex`) and rate-limit rules (`rule-center`) are called
-> over Kitex RPC — set their addresses in `conf/dev/conf.yaml` under
-> `rpc.services.rbac_kitex` / `rpc.services.rule_center`.
+## Quick Start
 
-## Architecture
+```bash
+# Create admin BFF
+ncgo new admin-api --module github.com/acme/admin-api --kind hertz --db postgres --template admin-bff-hertz
 
-This BFF template directly references RPC services' `kitex_gen` packages:
-
-- **No `pkg/client/` wrapper needed** — handlers import RPC services' generated
-  code directly, eliminating an extra abstraction layer.
-- **Go workspace module references** — `go.mod` uses `replace` directives to
-  point to local RPC service directories:
-  ```go
-  replace (
-      github.com/test/admin/services/rbac => ../../rbac
-      github.com/test/admin/services/rule => ../../rule
-  )
-  ```
-- **Direct imports** — BFF handlers import RPC kitex_gen packages like:
-  ```go
-  import (
-      "github.com/test/admin/services/rbac/kitex_gen/api/auth/v1/authservice"
-      "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
-      "github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
-  )
-  ```
-
-### Prerequisites
-
-- All services (BFF, rbac, rule) must be in the same Go workspace or have
-  appropriate `replace` directives in `go.mod`.
-- RPC services must be built before the BFF so their `kitex_gen` packages
-  are available.
-- The directory structure should follow:
-  ```
-  admin/
-    services/
-      rbac/         # RBAC Kitex service
-      rule/         # Rule Center Kitex service
-      admin-bff/    # This BFF (generated)
-  ```
-
-### Benefits
-
-- **Simpler dependency graph** — no wrapper packages to maintain.
-- **Type safety** — direct use of generated types ensures compile-time checks.
-- **Easier updates** — regenerate RPC `kitex_gen` and BFF picks up changes.
-
-## Contents
-
-- **IDL** (`idl/`):
-  - `auth.proto` — `AuthService`: Login / Refresh / Logout (JWT issuance).
-  - `rbac.proto` — `RBACService`: users, roles, permissions, menus,
-    grant/assign, Enforce, GetUserMenuTree, GetUserPermCodes.
-  - `rule_center.proto` — `RuleService`: dynamic rate-limit rule CRUD.
-- **Handlers** (`internal/handler/`):
-  - `auth` — login / refresh / logout.
-  - `current_user` — current user's menu tree and permission codes.
-  - `user` / `role` / `permission` / `menu` — RBAC management.
-  - `rate_limit` — dynamic rate-limit rule management.
-  - `health` — `/healthz`, `/readyz`.
-- **Middleware** (`internal/pkg/middleware/`):
-  - `JWT` — HS256 validation; public paths skipped via `cfg.Auth.PublicPaths`.
-  - `Authz` — `RequirePermission(...)` enforcement by calling `rbac-kitex`.
-  - `CORS` — configurable origin/method/header allowlists.
-  - `Idempotency` — POST/PUT/PATCH/DELETE idempotency keys.
-  - `RateLimit` — pre-auth and post-auth phases; pulls rules from
-    `rule-center` at startup and hot-reloads on change.
-  - `Signature` / `Observability` / `RequestID` / `AccessLog` / `Recovery`.
-- **Architecture** — DDD-inspired layered split:
-  ```
-  handler/*  →  usecase/*  →  adapter/* (RPC clients)
-  ```
-  Handlers bind+validate then delegate to usecases; usecases call adapter
-  ports (Kitex RPC clients). No direct DB access in this template.
-- **Layer rules** (enforced by `ncgo doctor`):
-  - Handlers MUST NOT import `internal/repository/*` or `internal/base/data`.
-  - Usecases MUST NOT import `github.com/cloudwego/hertz/...`.
-  - Adapters MUST NOT import `internal/usecase/*`.
-- **Request lifecycle**:
-  ```
-  Recovery → RequestID → AccessLog → RequestTimeout
-    → CORS → RateLimit(pre_auth) → Signature → JWT → RateLimit(post_auth)
-    → Idempotency → hz-generated routes → Handler.Method
-  ```
-- **Responses** — `go-framework/hertz.Responder`; JSON by default, Protobuf
-  when `Accept: application/x-protobuf`. i18n via `internal/pkg/i18n`
-  (en, zh-CN, zh-TW, ja-JP, ko-KR, fr-FR, de-DE, es-ES).
-- **Error codes** — framework `10000–10499`, middleware `20000–20699`,
-  auth `40000–40099`, business `>= 40100`. Raised as
-  `goerror.In("...").Code(code).Public("msg")` chains.
+# Add authority service (required)
+ncgo add rpc authority --template admin-services-kitex
+```
 
 ## Configuration
 
-Configuration lives in `conf/<env>/conf.yaml`, selected by `GO_ENV`
-(defaults to `dev`). `Init()` is called once from `main.go`.
+### JWT Configuration
 
-Key sections:
+Must match the authority service's JWT secret:
 
-| Section | Purpose |
-|---|---|
-| `server` | Hertz listen address, read/write/idle timeouts. |
-| `rpc.services.rbac_kitex` | Kitex target for `rbac-kitex` (host:port). |
-| `rpc.services.rule_center` | Kitex target for `rule-center` (host:port). |
-| `rpc.request_timeout_seconds` | Default RPC deadline. |
-| `auth.public_paths` | JWT-skipped paths (login, health, etc.). |
-| `auth.jwt_secret` | HS256 signing secret. |
-| `cors` | Origin/method/header allowlists. |
-| `rate_limit.source` | `memory` / `redis` backend. |
-| `rate_limit.rule.*` | Default window/limit/strategy for the pre-auth phase. |
-| `idempotency` | Backend + TTL for idempotency keys. |
-| `security.internal_only` | CIDR/path allowlist for internal routes. |
-
-Duration-typed fields (timeouts, TTLs, windows) use `config.Duration` and
-accept duration strings like `"30s"` or `"200ms"` in YAML; bare integers
-are rejected.
-
-## Seams (extension points)
-
-Generated code marks customisation seams with `// TODO(ncgo):` comments.
-Replace the default stub with your own logic:
-
-| File | Seam |
-|---|---|
-| `internal/usecase/<service>/*.go` | Wire real RPC adapter ports instead of the `notImplementedUseCase` stub. |
-| `internal/adapter/rbac/client.go` | Replace the stubbed RBAC client with a real Kitex call to `rbac-kitex`. |
-| `internal/adapter/rulecenter/client.go` | Replace the stubbed RuleCenter client with a real Kitex call. |
-| `internal/handler/pb/{{.ServiceName}}_service.go` | Register additional middleware per-route (e.g. `RequirePermission("user:write")`). |
-| `internal/pkg/errcode/errcode.go` | Add business error codes (`>= 40100`) and their HTTP status mappings. |
-| `internal/pkg/i18n/locales/*.json` | Extend translations; run `make i18n` to regenerate `catalog_gen.go`. |
-| `internal/pkg/middleware/observability.go` | Swap the default logger for a structured-logging snippet (Redis / Kafka / ES / ClickHouse variants ship under `internal/pkg/middleware/snippets/`). |
-| `router/` | Add new routes after the generated block (between `// ncgo:managed` markers). |
-
-## Testing
-
-```bash
-cd <generated-project>
-go build ./...
-go test ./...
+```yaml
+jwt:
+  secret: "dev-secret-change-me"  # Must match authority service
+  access_token_ttl_seconds: 3600
+  refresh_token_ttl_seconds: 86400
 ```
 
-The template ships an E2E scaffold script at
-`admin-bff-hertz/test/e2e_test.sh` that generates a project from the
-template, builds it, and runs `go test ./...` — useful for CI smoke tests.
+### gRPC Connection
 
-## References
+Connect to authority service:
 
-- Hertz template design doc: [`admin-bff/CLAUDE.md`](../admin-bff/CLAUDE.md)
-- Upstream authority template: [`rbac-kitex/`](../rbac-kitex/)
-- Rate-limit rule service: [`rule-center/`](../rule-center/)
-- Base Hertz template: [`base-hertz/`](../base-hertz/)
+```yaml
+grpc:
+  authority:
+    service_name: "authority"
+    host_ports:
+      - "127.0.0.1:8888"
+    rpc_timeout_seconds: 5
+```
+
+### RBAC Authorization
+
+Authorization is handled via Casbin policies:
+
+```yaml
+auth:
+  public_paths:
+    - /healthz
+    - /readyz
+```
+
+### API Signature (Optional)
+
+For open API scenarios:
+
+```yaml
+auth:
+  signature:
+    enabled: true
+    static_secret: "your-app-secret"
+    header_app_key: "X-App-Key"
+    header_timestamp: "X-Timestamp"
+    header_nonce: "X-Nonce"
+    header_signature: "X-Signature"
+```
+
+## API Routes
+
+### Public Routes
+
+- `POST /api/v1/auth/login` - Login (returns JWT)
+- `POST /api/v1/auth/refresh` - Refresh token
+- `GET /healthz` - Liveness probe
+- `GET /readyz` - Readiness probe
+
+### Protected Routes (JWT + RBAC Required)
+
+#### Auth
+
+```
+POST /api/v1/auth/logout
+```
+
+#### Current User
+
+```
+GET /api/v1/me/menus      # Get current user's menu tree
+GET /api/v1/me/perms      # Get current user's permissions
+```
+
+#### User Management
+
+```
+GET    /api/v1/users      # permission: user:list
+GET    /api/v1/users/:id  # permission: user:read
+POST   /api/v1/users      # permission: user:create
+PUT    /api/v1/users/:id  # permission: user:update
+DELETE /api/v1/users/:id  # permission: user:delete
+```
+
+#### Role Management
+
+```
+GET    /api/v1/roles      # permission: role:list
+POST   /api/v1/roles      # permission: role:create
+PUT    /api/v1/roles/:id  # permission: role:update
+DELETE /api/v1/roles/:id  # permission: role:delete
+```
+
+#### Permission Management
+
+```
+GET    /api/v1/permissions      # permission: permission:list
+GET    /api/v1/permissions/:id  # permission: permission:read
+POST   /api/v1/permissions      # permission: permission:create
+PUT    /api/v1/permissions/:id  # permission: permission:update
+DELETE /api/v1/permissions/:id  # permission: permission:delete
+```
+
+#### Menu Management
+
+```
+GET /api/v1/menus  # permission: menu:list
+```
+
+#### Rate Limit Rules Management
+
+```
+GET    /api/v1/rate-limit-rules      # permission: rate_limit:list
+POST   /api/v1/rate-limit-rules      # permission: rate_limit:create
+PUT    /api/v1/rate-limit-rules/:id  # permission: rate_limit:update
+DELETE /api/v1/rate-limit-rules/:id  # permission: rate_limit:delete
+```
+
+## Middleware Stack
+
+### Request Flow
+
+```
+1. Signature Verification (if enabled)
+2. Idempotency Check (if enabled)
+3. JWT Authentication
+4. RBAC Authorization (Casbin)
+5. Permission Check (per-route)
+6. Handler Execution → gRPC call to authority
+```
+
+### Error Codes
+
+| Code | HTTP | Message | Description |
+|------|------|---------|-------------|
+| 10002 | 401 | auth_failed | Generic auth failure |
+| 10007 | 401 | signature_missing | Missing signature headers |
+| 10019 | 403 | signature_invalid | Invalid signature |
+| 10020 | 401 | token_missing | Missing JWT token |
+| 10021 | 401 | token_invalid | Invalid JWT token |
+| 10108 | 403 | permission_denied | Insufficient permissions |
+| 10203 | 400 | idempotency_key_missing | Missing Idempotency-Key |
+
+## Permission System
+
+### Permission Types
+
+- **catalog** - Top-level menu category
+- **menu** - Menu item
+- **button** - UI button/action
+- **api** - API endpoint permission
+
+### Permission Codes
+
+Standard naming convention: `resource:action`
+
+Examples:
+- `user:list` - List users
+- `user:create` - Create user
+- `role:update` - Update role
+- `permission:delete` - Delete permission
+
+### Casbin Policy Model
+
+```
+[request_definition]
+r = sub, obj, act
+
+[policy_definition]
+p = sub, obj, act
+
+[role_definition]
+g = user, role
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = g(r.sub, p.sub) && r.obj == p.obj && r.act == p.act
+```
+
+## Project Structure
+
+```
+admin-api/
+├── internal/
+│   ├── base/
+│   │   ├── conf/                  # Configuration
+│   │   ├── data/                  # Database clients
+│   │   └── server/                # HTTP server setup
+│   ├── handler/
+│   │   ├── auth.go                # Login/logout handlers
+│   │   ├── user.go                # User management
+│   │   ├── role.go                # Role management
+│   │   ├── permission.go          # Permission management
+│   │   ├── menu.go                # Menu management
+│   │   ├── rate_limit.go          # Rate limit rules
+│   │   ├── current_user.go        # Current user info
+│   │   └── pb/                    # Proto handlers
+│   ├── pkg/
+│   │   ├── middleware/
+│   │   │   ├── jwt.go             # JWT validation
+│   │   │   ├── authz.go           # RBAC authorization
+│   │   │   ├── signature.go       # API signature
+│   │   │   └── idempotency.go     # Idempotency
+│   │   └── response/              # Error codes
+│   └── router/
+│       └── adminbffservice.go     # Route registration
+├── conf/
+│   └── dev/conf.yaml              # Configuration
+└── idl/
+    └── *.proto                    # Proto definitions
+```
+
+## Login Flow
+
+```bash
+# 1. Login
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin@123"}'
+
+# Response:
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh_token": "9d4ab5f7bfb8...",
+    "expires_in": 3600
+  }
+}
+
+# 2. Use token
+curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  http://localhost:8080/api/v1/users
+```
+
+## API Signature Example
+
+```bash
+# Generate signature
+METHOD="POST"
+PATH="/api/v1/users"
+TIMESTAMP=$(date +%s)
+NONCE=$(openssl rand -hex 8)
+BODY='{"username":"testuser"}'
+SECRET="your-app-secret"
+
+CANONICAL="${METHOD}\n${PATH}\n\n${TIMESTAMP}\n${NONCE}\n${BODY}"
+SIGNATURE=$(echo -ne "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
+
+# Make request
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "X-App-Key: my-app" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Signature: $SIGNATURE" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+## Idempotency Example
+
+```bash
+# First request
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Idempotency-Key: unique-key-123" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"user1"}'
+
+# Second request with same key (returns cached response)
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Idempotency-Key: unique-key-123" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"different-user"}'  # Ignored, returns first response
+```
+
+## Development
+
+```bash
+# Run in development mode
+make dev
+
+# Build binary
+make build
+
+# Run tests
+make test
+```
+
+## Related Templates
+
+- **base-hertz** - Basic HTTP service (no RBAC)
+- **ratelimit-hertz** - HTTP service with rate limiting execution
+- **admin-services-kitex** - Authority service (RBAC + Rule Center)
+
+## License
+
+Part of the ncgo template registry.

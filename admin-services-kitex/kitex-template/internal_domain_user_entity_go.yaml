@@ -1,0 +1,49 @@
+# ncgo exported template — internal/domain/user/entity.go
+path: internal/domain/user/entity.go
+update_behavior:
+    type: skip
+body: |
+    package user
+
+    import "strings"
+
+    const (
+    	// StatusEnabled is the default active state.
+    	StatusEnabled = 1
+    	// StatusDisabled disables a user from logging in.
+    	StatusDisabled = 0
+    )
+
+    // User is the aggregate root for the user aggregate.
+    type User struct {{ "{" }}
+    	ID           int64
+    	Username     string
+    	PasswordHash string
+    	Nickname     string
+    	Avatar       string
+    	Email        string
+    	Phone        string
+    	Status       int // StatusEnabled (1) or StatusDisabled (0)
+    {{ "}" }}
+
+    // New creates a User with default status enabled. It validates the username.
+    func New(username, passwordHash string) (*User, error) {{ "{" }}
+    	username = strings.TrimSpace(username)
+    	if len(username) < 3 {{ "{" }}
+    		return nil, ValidationError{{ "{" }}Field: "username", Msg: "must be at least 3 characters"{{ "}" }}
+    	{{ "}" }}
+    	return &User{{ "{" }}
+    		Username:     username,
+    		PasswordHash: passwordHash,
+    		Status:       StatusEnabled,
+    	{{ "}" }}, nil
+    {{ "}" }}
+
+    // SetStatus validates and applies an account status.
+    func (u *User) SetStatus(status int) error {{ "{" }}
+    	if status != StatusEnabled && status != StatusDisabled {{ "{" }}
+    		return ValidationError{{ "{" }}Field: "status", Msg: "must be 1 (enabled) or 0 (disabled)"{{ "}" }}
+    	{{ "}" }}
+    	u.Status = status
+    	return nil
+    {{ "}" }}

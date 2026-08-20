@@ -1,0 +1,108 @@
+# ncgo exported template — internal/domain/permission/entity_test.go
+path: internal/domain/permission/entity_test.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    import (
+    	"strings"
+    	"testing"
+    )
+
+    func boolPtr(b bool) *bool {{ "{" }} return &b {{ "}" }}
+
+    func TestNewRejectsUnknownType(t *testing.T) {{ "{" }}
+    	p, err := New("user:create", "bogus", "Create User", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	if err == nil {{ "{" }}
+    		t.Fatalf("New with type=bogus = %+v, want error", p)
+    	{{ "}" }}
+    	var ve ValidationError
+    	_ = ve
+    {{ "}" }}
+
+    func TestNewAPIRequiresMethod(t *testing.T) {{ "{" }}
+    	p, err := New("user:create", TypeAPI, "Create User", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	if err == nil {{ "{" }}
+    		t.Fatalf("New(api, no method) = %+v, want error", p)
+    	{{ "}" }}
+    	if !strings.Contains(err.Error(), "method") {{ "{" }}
+    		t.Fatalf("error = %v, want method validation", err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewAPIRejectsInvalidMethod(t *testing.T) {{ "{" }}
+    	p, err := New("user:create", TypeAPI, "Create User", 0, "", "", "", "", nil, nil, nil, "PATCH", 0, StatusEnabled, "")
+    	if err == nil {{ "{" }}
+    		t.Fatalf("New(api, PATCH) = %+v, want error", p)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewAPIAcceptsValidMethods(t *testing.T) {{ "{" }}
+    	for _, m := range []string{{ "{" }}"GET", "POST", "PUT", "DELETE", "get"{{ "}" }} {{ "{" }}
+    		p, err := New("user:create", TypeAPI, "Create User", 0, "", "", "", "", nil, nil, nil, m, 0, StatusEnabled, "")
+    		if err != nil {{ "{" }}
+    			t.Fatalf("New(api, %s): %v", m, err)
+    		{{ "}" }}
+    		if p.Method != strings.ToUpper(m) {{ "{" }}
+    			t.Fatalf("method = %q, want %q", p.Method, strings.ToUpper(m))
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewMenuTypeClearsMethod(t *testing.T) {{ "{" }}
+    	for _, typ := range []string{{ "{" }}TypeCatalog, TypeMenu, TypeButton{{ "}" }} {{ "{" }}
+    		p, err := New("x:"+typ, typ, typ, 0, "", "", "", "", nil, nil, nil, "GET", 0, StatusEnabled, "")
+    		if err != nil {{ "{" }}
+    			t.Fatalf("New(%s): %v", typ, err)
+    		{{ "}" }}
+    		if p.Method != "" {{ "{" }}
+    			t.Fatalf("type=%s method = %q, want empty", typ, p.Method)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewAcceptsValidCatalog(t *testing.T) {{ "{" }}
+    	p, err := New("system", TypeCatalog, "System", 0, "/system", "setting", "", "", nil, nil, boolPtr(false), "", 1, StatusEnabled, "System module")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("New: %v", err)
+    	{{ "}" }}
+    	if p.Code != "system" || p.Type != TypeCatalog || p.Name != "System" {{ "{" }}
+    		t.Fatalf("got %+v", p)
+    	{{ "}" }}
+    	if p.Path != "/system" || p.Icon != "setting" {{ "{" }}
+    		t.Fatalf("tree fields: path=%q icon=%q", p.Path, p.Icon)
+    	{{ "}" }}
+    	if p.Status != StatusEnabled {{ "{" }}
+    		t.Fatalf("status = %d, want %d", p.Status, StatusEnabled)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewRejectsEmptyCode(t *testing.T) {{ "{" }}
+    	_, err := New("", TypeMenu, "Name", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	if err == nil {{ "{" }}
+    		t.Fatal("want error for empty code")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewRejectsEmptyName(t *testing.T) {{ "{" }}
+    	_, err := New("code", TypeMenu, "", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	if err == nil {{ "{" }}
+    		t.Fatal("want error for empty name")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestStatusConstants(t *testing.T) {{ "{" }}
+    	if StatusEnabled != 1 {{ "{" }}
+    		t.Fatalf("StatusEnabled = %d, want 1", StatusEnabled)
+    	{{ "}" }}
+    	if StatusDisabled != 0 {{ "{" }}
+    		t.Fatalf("StatusDisabled = %d, want 0", StatusDisabled)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTypeConstants(t *testing.T) {{ "{" }}
+    	if TypeCatalog != "catalog" || TypeMenu != "menu" || TypeButton != "button" || TypeAPI != "api" {{ "{" }}
+    		t.Fatal("type constants mismatch")
+    	{{ "}" }}
+    {{ "}" }}

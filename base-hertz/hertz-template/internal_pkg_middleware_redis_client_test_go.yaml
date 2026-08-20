@@ -1,0 +1,9 @@
+# Hertz custom template — internal/pkg/middleware/redis_client_test.go
+# Generates tests for internal/pkg/middleware/redis_client_test.go.
+path: internal/pkg/middleware/redis_client_test.go
+update_behavior:
+    type: cover
+body: |-
+    package middleware
+
+    // Placeholder: filled by `ncgo add infra redis`.

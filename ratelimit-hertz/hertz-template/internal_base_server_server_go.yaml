@@ -125,8 +125,11 @@ body: |-
         // Register health check routes
         health.Register(h)
 
-        // Register business routes
+        // Register auto-generated routes
         router.GeneratedRegister(h)
+
+        // Register custom service routes with JWT/signature middleware
+        router.RegisterServiceRoutes(h)
 
         // Start server
         h.Spin()

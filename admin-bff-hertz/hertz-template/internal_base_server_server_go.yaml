@@ -2,4 +2,110 @@
 path: internal/base/server/server.go
 update_behavior:
     type: cover
-body: "package server\n\nimport (\n    \"context\"\n    \"log\"\n\n\n    hertzframework \"github.com/byx-darwin/go-tools/go-framework/hertz\"\n    gfconfig \"github.com/byx-darwin/go-tools/go-framework/config\"\n    hertzobs \"github.com/byx-darwin/go-tools/go-framework/hertz/observability\"\n\n    \"{{.Module}}/internal/base/conf\"\n\n    \"{{.Module}}/internal/pkg/middleware\"\n    \"{{.Module}}/internal/pkg/response\"\n    \"{{.Module}}/internal/router\"\n    \"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/authservice\"\n    \"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/rbacservice\"\n    \"github.com/test/{{ToLower .ServiceName}}/services/rule/kitex_gen/api/ratelimit/v1/ruleservice\"\n    \"github.com/cloudwego/kitex/client\"\n    \"github.com/cloudwego/kitex/pkg/endpoint\"\n)\n\n\n\n// callerMiddleware adds x-caller-service header to RPC requests\nfunc callerMiddleware(serviceName string) endpoint.Middleware {{ \"{\" }}\n    return func(next endpoint.Endpoint) endpoint.Endpoint {{ \"{\" }}\n        return func(ctx context.Context, req, resp interface{{ \"{\" }}{{ \"}\" }}) (err error) {{ \"{\" }}\n            // Kitex will automatically add the caller service name\n            // For now, we just pass through\n            return next(ctx, req, resp)\n        {{ \"}\" }}\n    {{ \"}\" }}\n{{ \"}\" }}\n\nfunc Run() {{ \"{\" }}\n    cfg := conf.Get()\n\n    // ncgo:wire:logging:init\n    ctx := context.Background()\n    h, err := hertzframework.NewHTTPServer(ctx, &cfg.Server)\n    if err != nil {{ \"{\" }}\n        log.Fatalf(\"create server: %v\", err)\n    {{ \"}\" }}\n\n    // Responder middleware — injects RequestID / Lang / Responder into context\n    responder := response.NewResponder()\n    h.Use(responder.Middleware())\n\n    // AccessLog middleware — uses go-tools AccessLog\n    h.Use(middleware.AccessLog())\n\n    // OTel tracing — enabled when server.jaeger config is present\n    if cfg.Server.Jaeger != nil && cfg.Server.Jaeger.Enable {{ \"{\" }}\n        provider, obsErr := hertzobs.NewProvider(ctx, gfconfig.ObservabilityConfig{{ \"{\" }}\n            Enabled:     true,\n            Endpoint:    cfg.Server.Jaeger.Endpoint,\n            ServiceName: cfg.Server.Registry.Name,\n        {{ \"}\" }})\n        if obsErr != nil {{ \"{\" }}\n            log.Fatalf(\"init observability: %v\", obsErr)\n        {{ \"}\" }}\n        defer func() {{ \"{\" }}\n            if shutdownErr := provider.Shutdown(); shutdownErr != nil {{ \"{\" }}\n                log.Printf(\"shutdown observability: %v\", shutdownErr)\n            {{ \"}\" }}\n        {{ \"}\" }}()\n        h.Use(provider.ServerMiddleware())\n    {{ \"}\" }}\n\n    // Optional structured logging wiring (after `ncgo add infra logging`):\n    // import \"{{.Module}}/internal/base/logging\"\n    // ncgo:wire:logging:server-middleware\n    // h.Use(logging.HertzRecovery())\n    // h.Use(logging.HertzRequestID())\n    // h.Use(logging.HertzAccessLog())\n\n    // Optional release canary wiring (after `ncgo add infra canary`):\n    // import \"{{.Module}}/internal/base/release\"\n    // ncgo:wire:canary:server-traffic\n    // if cfg.Release.Enabled {{ \"{\" }}\n    //     h.Use(release.HertzTraffic())\n    // {{ \"}\" }}\n\n    // ncgo:wire:ddd — Wire DDD layers (data -> repository -> usecase)\n    \n\n    // Register routes\n\n    // Create RPC clients\n    rbacAuthCli, err := authservice.NewClient(\"rbac\",\n        client.WithHostPorts(\"localhost:8888\"),\n        client.WithMiddleware(callerMiddleware(\"admin-bff\")),\n    )\n    if err != nil {{ \"{\" }}\n        log.Fatalf(\"create rbac auth client: %v\", err)\n    {{ \"}\" }}\n    rbacCli, err := rbacservice.NewClient(\"rbac\",\n        client.WithHostPorts(\"localhost:8888\"),\n        client.WithMiddleware(callerMiddleware(\"admin-bff\")),\n    )\n    if err != nil {{ \"{\" }}\n        log.Fatalf(\"create rbac client: %v\", err)\n    {{ \"}\" }}\n    ruleCli, err := ruleservice.NewClient(\"rule\",\n        client.WithHostPorts(\"localhost:8889\"),\n        client.WithMiddleware(callerMiddleware(\"admin-bff\")),\n    )\n    if err != nil {{ \"{\" }}\n        log.Fatalf(\"create rule client: %v\", err)\n    {{ \"}\" }}\n\n    // Register {{ToLower .ServiceName}} routes\n    router.Register{{.ServiceName}}Routes(h, rbacAuthCli, rbacCli, ruleCli)\n\n    // Start server\n    h.Spin()\n{{ \"}\" }}"
+body: |
+    package server
+
+    import (
+        "context"
+        "log"
+
+        "github.com/cloudwego/kitex/client"
+
+        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
+        gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
+        hertzobs "github.com/byx-darwin/go-tools/go-framework/hertz/observability"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/response"
+        "{{.Module}}/internal/router"
+        "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/authservice"
+        "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/rbacservice"
+        "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/ruleservice"
+    )
+
+    func Run() {{ "{" }}
+        cfg := conf.Get()
+
+        // ncgo:wire:logging:init
+        ctx := context.Background()
+        h, err := hertzframework.NewHTTPServer(ctx, &cfg.Server)
+        if err != nil {{ "{" }}
+            log.Fatalf("create server: %v", err)
+        {{ "}" }}
+
+        // Responder middleware — injects RequestID / Lang / Responder into context
+        responder := response.NewResponder()
+        h.Use(responder.Middleware())
+
+        // AccessLog middleware — uses go-tools AccessLog
+        h.Use(middleware.AccessLog())
+
+        // OTel tracing — enabled when server.jaeger config is present
+        if cfg.Server.Jaeger != nil && cfg.Server.Jaeger.Enable {{ "{" }}
+            provider, obsErr := hertzobs.NewProvider(ctx, gfconfig.ObservabilityConfig{{ "{" }}
+                Enabled:     true,
+                Endpoint:    cfg.Server.Jaeger.Endpoint,
+                ServiceName: cfg.Server.Registry.Name,
+            {{ "}" }})
+            if obsErr != nil {{ "{" }}
+                log.Fatalf("init observability: %v", obsErr)
+            {{ "}" }}
+            defer func() {{ "{" }}
+                if shutdownErr := provider.Shutdown(); shutdownErr != nil {{ "{" }}
+                    log.Printf("shutdown observability: %v", shutdownErr)
+                {{ "}" }}
+            {{ "}" }}()
+            h.Use(provider.ServerMiddleware())
+        {{ "}" }}
+
+        // Optional structured logging wiring (after `ncgo add infra logging`):
+        // import "{{.Module}}/internal/base/logging"
+        // ncgo:wire:logging:server-middleware
+        // h.Use(logging.HertzRecovery())
+        // h.Use(logging.HertzRequestID())
+        // h.Use(logging.HertzAccessLog())
+
+        // Optional release canary wiring (after `ncgo add infra canary`):
+        // import "{{.Module}}/internal/base/release"
+        // ncgo:wire:canary:server-traffic
+        // if cfg.Release.Enabled {{ "{" }}
+        //     h.Use(release.HertzTraffic())
+        // {{ "}" }}
+
+        // ncgo:wire:ddd — Wire DDD layers (data -> repository -> usecase)
+
+        // Create Kitex RPC clients
+        rbacAddr := cfg.GRPC.Authority.HostPorts[0]
+        ruleAddr := cfg.GRPC.Authority.HostPorts[0]
+
+        rbacAuthCli, err := authservice.NewClient(
+            cfg.GRPC.Authority.ServiceName,
+            client.WithHostPorts(rbacAddr),
+        )
+        if err != nil {{ "{" }}
+            log.Fatalf("create rbac auth client: %v", err)
+        {{ "}" }}
+
+        rbacCli, err := rbacservice.NewClient(
+            cfg.GRPC.Authority.ServiceName,
+            client.WithHostPorts(rbacAddr),
+        )
+        if err != nil {{ "{" }}
+            log.Fatalf("create rbac client: %v", err)
+        {{ "}" }}
+
+        ruleCli, err := ruleservice.NewClient(
+            cfg.GRPC.Authority.ServiceName,
+            client.WithHostPorts(ruleAddr),
+        )
+        if err != nil {{ "{" }}
+            log.Fatalf("create rule client: %v", err)
+        {{ "}" }}
+
+        // Register routes
+        router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli)
+
+        // Start server
+        h.Spin()
+    {{ "}" }}

@@ -1,0 +1,89 @@
+# ncgo exported template — internal/infrastructure/token/memory.go
+path: internal/infrastructure/token/memory.go
+update_behavior:
+    type: cover
+body: |-
+    package token
+
+    import (
+    	"context"
+    	"strconv"
+    	"sync"
+    	"time"
+    )
+
+    type memoryEntry struct {
+    	value     string
+    	expiresAt time.Time
+    }
+
+    // MemoryStore is the default hermetic Store implementation.
+    type MemoryStore struct {
+    	mu      sync.Mutex
+    	refresh map[string]memoryEntry // refreshToken → {uid, expiry}
+    	black   map[string]time.Time   // accessToken → expiry
+    }
+
+    // NewMemoryStore creates an in-memory token store.
+    func NewMemoryStore() *MemoryStore {
+    	return &MemoryStore{
+    		refresh: make(map[string]memoryEntry),
+    		black:   make(map[string]time.Time),
+    	}
+    }
+
+    func (s *MemoryStore) SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error {
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	s.refresh[refreshToken] = memoryEntry{
+    		value:     strconv.FormatInt(uid, 10),
+    		expiresAt: time.Now().Add(ttl),
+    	}
+    	return nil
+    }
+
+    func (s *MemoryStore) GetRefresh(ctx context.Context, refreshToken string) (int64, error) {
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	entry, ok := s.refresh[refreshToken]
+    	if !ok || time.Now().After(entry.expiresAt) {
+    		if ok {
+    			delete(s.refresh, refreshToken)
+    		}
+    		return 0, ErrNotFound
+    	}
+    	uid, err := strconv.ParseInt(entry.value, 10, 64)
+    	if err != nil {
+    		return 0, ErrNotFound
+    	}
+    	return uid, nil
+    }
+
+    func (s *MemoryStore) DeleteRefresh(ctx context.Context, refreshToken string) error {
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	delete(s.refresh, refreshToken)
+    	return nil
+    }
+
+    func (s *MemoryStore) Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error {
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	s.black[accessToken] = time.Now().Add(ttl)
+    	return nil
+    }
+
+    func (s *MemoryStore) IsBlacklisted(ctx context.Context, accessToken string) (bool, error) {
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	expiry, ok := s.black[accessToken]
+    	if !ok {
+    		return false, nil
+    	}
+    	if time.Now().After(expiry) {
+    		delete(s.black, accessToken)
+    		return false, nil
+    	}
+    	return true, nil
+    }
+

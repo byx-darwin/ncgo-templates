@@ -1,0 +1,72 @@
+# Hertz custom template — internal/pkg/i18n/i18n_test.go
+# Generates tests for internal/pkg/i18n/i18n_test.go.
+path: internal/pkg/i18n/i18n_test.go
+update_behavior:
+    type: cover
+body: |-
+    package i18n
+
+    import "testing"
+
+    func TestFromAcceptLanguageChoosesHighestQualitySupportedLanguage(t *testing.T) {
+    	got := FromAcceptLanguage("en-US;q=0.5, zh-CN;q=0.9")
+    	if got != SimplifiedChinese {
+    		t.Fatalf("language = %q, want %q", got, SimplifiedChinese)
+    	}
+    }
+
+    func TestFromAcceptLanguageSupportsBuiltInLanguages(t *testing.T) {
+    	cases := map[string]string{
+    		"zh-TW": TraditionalChinese,
+    		"ja-JP": Japanese,
+    		"ko-KR": Korean,
+    		"fr-FR": French,
+    		"de-DE": German,
+    		"es-ES": Spanish,
+    	}
+    	for header, want := range cases {
+    		if got := FromAcceptLanguage(header); got != want {
+    			t.Fatalf("FromAcceptLanguage(%q) = %q, want %q", header, got, want)
+    		}
+    	}
+    }
+
+    func TestTranslateBuiltInLanguages(t *testing.T) {
+    	cases := map[string]string{
+    		"zh-TW": "介面不存在",
+    		"ja-JP": "インターフェースが存在しません",
+    		"ko-KR": "인터페이스가 존재하지 않습니다",
+    		"fr-FR": "interface introuvable",
+    		"de-DE": "Schnittstelle nicht gefunden",
+    		"es-ES": "interfaz no encontrada",
+    	}
+    	for lang, want := range cases {
+    		if got := Translate(lang, "route_not_found"); got != want {
+    			t.Fatalf("Translate(%q, route_not_found) = %q, want %q", lang, got, want)
+    		}
+    	}
+    }
+
+    func TestTranslateFallsBackToKey(t *testing.T) {
+    	if got := Translate("zh-CN", "missing_key"); got != "missing_key" {
+    		t.Fatalf("translation = %q, want key fallback", got)
+    	}
+    }
+
+    func TestRegisterBusinessMessage(t *testing.T) {
+    	Register("zh-CN", "order_conflict", "订单冲突")
+    	if got := Translate("zh-CN", "order_conflict"); got != "订单冲突" {
+    		t.Fatalf("translation = %q", got)
+    	}
+    }
+
+    func TestRegisterLanguageSupportsDynamicLanguage(t *testing.T) {
+    	RegisterLanguage("it-IT", "it")
+    	Register("it-IT", "route_not_found", "interfaccia non trovata")
+    	if got := FromAcceptLanguage("it;q=0.9, en;q=0.8"); got != "it-IT" {
+    		t.Fatalf("dynamic language = %q, want it-IT", got)
+    	}
+    	if got := Translate("it-IT", "route_not_found"); got != "interfaccia non trovata" {
+    		t.Fatalf("dynamic translation = %q", got)
+    	}
+    }

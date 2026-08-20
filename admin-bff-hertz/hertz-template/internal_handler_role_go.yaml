@@ -14,8 +14,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/rbacservice"
     )
 
     type RoleHandler struct {{ "{" }}

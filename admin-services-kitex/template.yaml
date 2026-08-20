@@ -1,0 +1,4 @@
+name: admin-services-kitex
+kind: kitex
+description: "Single unified admin service combining RBAC + Rule Center"
+version: "1"

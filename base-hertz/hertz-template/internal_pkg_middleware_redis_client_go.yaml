@@ -1,0 +1,27 @@
+# Hertz custom template — internal/pkg/middleware/redis_client.go
+# Resolves the process-wide shared Redis client used by the rate-limit store.
+# Delegates to internal/base/data.SharedRedisClient so the rate-limit middleware
+# and the DDD data layer share one connection pool (keyed by redis config).
+path: internal/pkg/middleware/redis_client.go
+update_behavior:
+    type: cover
+body: |-
+    package middleware
+
+    import (
+        "github.com/redis/go-redis/v9"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/base/data"
+    )
+
+    // sharedRedisClient returns the process-wide shared Redis client used by the
+    // rate-limit store. cfg is rate_limit.redis, which conf.Validate merges from
+    // the top-level redis when left empty. Returns nil when no addrs are
+    // configured, in which case NewStore falls back to the in-memory store.
+    func sharedRedisClient(cfg conf.RedisConfig) redis.UniversalClient {
+        if len(cfg.Addrs) == 0 {
+            return nil
+        }
+        return data.SharedRedisClient(cfg)
+    }

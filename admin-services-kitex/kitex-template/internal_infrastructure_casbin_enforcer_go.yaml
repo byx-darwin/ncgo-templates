@@ -1,0 +1,38 @@
+# ncgo exported template — internal/infrastructure/casbin/enforcer.go
+path: internal/infrastructure/casbin/enforcer.go
+update_behavior:
+    type: cover
+body: |-
+    package casbin
+
+    import (
+    	_ "embed"
+
+    	casbinlib "github.com/casbin/casbin/v2"
+    	"github.com/casbin/casbin/v2/model"
+    )
+
+    //go:embed model.conf
+    var modelConf string
+
+    // Enforcer is the Casbin enforcer type used by the RBAC services.
+    type Enforcer = casbinlib.Enforcer
+
+    // NewEnforcer builds a Casbin enforcer over the given policy store, loading
+    // the embedded basic model (sub, obj, act) and all persisted rules.
+    func NewEnforcer(store PolicyStore) (*Enforcer, error) {
+    	m, err := model.NewModelFromString(modelConf)
+    	if err != nil {
+    		return nil, err
+    	}
+    	e, err := casbinlib.NewEnforcer(m, NewAdapter(store))
+    	if err != nil {
+    		return nil, err
+    	}
+    	e.EnableAutoSave(true)
+    	if err := e.LoadPolicy(); err != nil {
+    		return nil, err
+    	}
+    	return e, nil
+    }
+

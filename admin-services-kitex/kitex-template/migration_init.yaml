@@ -1,0 +1,133 @@
+# ncgo exported template — internal/db/migrations/000001_init.sql
+path: internal/db/migrations/000001_init.sql
+update_behavior:
+    type: cover
+body: |-
+    -- +goose Up
+
+    -- =============================================
+    -- RBAC tables (users, roles, permissions)
+    -- =============================================
+
+    CREATE TABLE users (
+        id BIGSERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        nickname TEXT,
+        avatar TEXT,
+        email TEXT,
+        phone TEXT,
+        status INTEGER NOT NULL DEFAULT 1,  -- 1=enabled, 0=disabled
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE roles (
+        id BIGSERIAL PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        status INTEGER NOT NULL DEFAULT 1,
+        remark TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE permissions (
+        id BIGSERIAL PRIMARY KEY,
+        code TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('catalog','menu','button','api')),
+        name TEXT NOT NULL,
+        parent_id BIGINT REFERENCES permissions(id),  -- no ON DELETE CASCADE; app-layer cascade
+        path TEXT,
+        icon TEXT,
+        route_name TEXT,
+        redirect TEXT,
+        keep_alive BOOLEAN,
+        hide_in_menu BOOLEAN,
+        is_external BOOLEAN,
+        method TEXT CHECK (method IS NULL OR method IN ('GET','POST','PUT','DELETE')),
+        sort INTEGER,
+        status INTEGER NOT NULL DEFAULT 1,
+        description TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (code, type)
+    );
+
+    CREATE INDEX idx_permissions_parent ON permissions(parent_id);
+    CREATE INDEX idx_permissions_type ON permissions(type);
+
+    CREATE TABLE user_roles (
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        PRIMARY KEY (user_id, role_id)
+    );
+
+    CREATE TABLE role_permissions (
+        role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        permission_id BIGINT NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+        PRIMARY KEY (role_id, permission_id)
+    );
+
+    CREATE TABLE casbin_rule (
+        id BIGSERIAL PRIMARY KEY,
+        ptype TEXT NOT NULL,
+        v0 TEXT NOT NULL DEFAULT '',
+        v1 TEXT NOT NULL DEFAULT '',
+        v2 TEXT NOT NULL DEFAULT '',
+        v3 TEXT NOT NULL DEFAULT '',
+        v4 TEXT NOT NULL DEFAULT '',
+        v5 TEXT NOT NULL DEFAULT '',
+        UNIQUE (ptype, v0, v1, v2, v3, v4, v5)
+    );
+
+    CREATE TABLE audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        actor_uid BIGINT,
+        action TEXT NOT NULL,
+        target TEXT NOT NULL DEFAULT '',
+        detail_json TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX idx_casbin_rule_policy ON casbin_rule(ptype, v0, v1, v2);
+
+    -- =============================================
+    -- Rate-limit rules table (rule-center)
+    -- =============================================
+
+    CREATE TABLE rate_limit_rules (
+        id BIGSERIAL PRIMARY KEY,
+        service TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        method TEXT NOT NULL,
+        match_kind TEXT NOT NULL CHECK (match_kind IN ('exact', 'pattern')),
+        path TEXT NOT NULL DEFAULT '*',
+        path_pattern TEXT NOT NULL DEFAULT '*',
+        app_key TEXT,  -- NULL means fallback rule (no app_key match)
+        priority INTEGER NOT NULL DEFAULT 0,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        key_by TEXT[] NOT NULL DEFAULT ARRAY['ip']::TEXT[],
+        strategy TEXT NOT NULL DEFAULT 'fixed_window' CHECK (strategy IN ('fixed_window', 'sliding_window', 'token_bucket')),
+        window_seconds INTEGER NOT NULL DEFAULT 60,
+        max_requests INTEGER NOT NULL DEFAULT 100,
+        requests_per_second DOUBLE PRECISION NOT NULL DEFAULT 0,
+        burst INTEGER NOT NULL DEFAULT 0,
+        client_ttl_seconds INTEGER NOT NULL DEFAULT 300,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Index for efficient rule lookups
+    CREATE INDEX idx_rate_limit_rules_lookup ON rate_limit_rules (service, phase, method, match_kind, enabled, priority DESC);
+    CREATE INDEX idx_rate_limit_rules_app_key ON rate_limit_rules (app_key) WHERE app_key IS NOT NULL;
+
+    -- +goose Down
+    DROP TABLE IF EXISTS rate_limit_rules;
+    DROP TABLE IF EXISTS audit_log;
+    DROP TABLE IF EXISTS casbin_rule;
+    DROP TABLE IF EXISTS role_permissions;
+    DROP TABLE IF EXISTS user_roles;
+    DROP TABLE IF EXISTS permissions;
+    DROP TABLE IF EXISTS roles;
+    DROP TABLE IF EXISTS users;

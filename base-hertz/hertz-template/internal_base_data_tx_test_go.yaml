@@ -1,0 +1,11 @@
+# Hertz custom template — internal/base/data/tx_test.go
+# Generates tests for internal/base/data/tx_test.go.
+path: internal/base/data/tx_test.go
+update_behavior:
+    type: cover
+body: |-
+    package data
+
+    import "testing"
+
+    func TestWithTxRejectsNilPool(t *testing.T) {}

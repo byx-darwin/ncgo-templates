@@ -1,4 +1,4 @@
 name: base-hertz
 kind: hertz
-description: Official base Hertz HTTP service template (standard layered layout + health check)
+description: Official base Hertz HTTP service template (JWT + signature + idempotency, without rate limiting)
 version: "1"

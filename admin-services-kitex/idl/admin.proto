@@ -1,0 +1,334 @@
+syntax = "proto3";
+
+package api.admin.v1;
+
+option go_package = "api/admin/v1;adminv1";
+
+// ──────────────────────────────────────────────
+// AuthService — JWT token lifecycle
+// ──────────────────────────────────────────────
+service AuthService {
+  rpc Login(LoginReq) returns (LoginResp);
+  rpc Refresh(RefreshReq) returns (LoginResp);
+  rpc Logout(LogoutReq) returns (LogoutResp);
+  rpc ValidateToken(ValidateTokenReq) returns (ValidateTokenResp);
+}
+
+// ──────────────────────────────────────────────
+// RBACService — users, roles, permissions, menus, enforcement
+// ──────────────────────────────────────────────
+service RBACService {
+  rpc CreateUser(CreateUserReq) returns (UserResp);
+  rpc UpdateUser(UpdateUserReq) returns (UserResp);
+  rpc DeleteUser(DeleteUserReq) returns (EmptyResp);
+  rpc GetUser(GetUserReq) returns (UserResp);
+  rpc ListUsers(ListUsersReq) returns (ListUsersResp);
+
+  rpc CreateRole(CreateRoleReq) returns (RoleResp);
+  rpc UpdateRole(UpdateRoleReq) returns (RoleResp);
+  rpc DeleteRole(DeleteRoleReq) returns (EmptyResp);
+  rpc ListRoles(ListRolesReq) returns (ListRolesResp);
+
+  rpc CreatePermission(CreatePermissionReq) returns (PermissionResp);
+  rpc UpdatePermission(UpdatePermissionReq) returns (PermissionResp);
+  rpc DeletePermission(DeletePermissionReq) returns (EmptyResp);
+  rpc GetPermission(GetPermissionReq) returns (PermissionResp);
+  rpc ListPermissions(ListPermissionsReq) returns (ListPermissionsResp);
+
+  rpc ListMenus(ListMenusReq) returns (ListMenusResp);
+
+  rpc AssignRolesToUser(AssignRolesToUserReq) returns (EmptyResp);
+  rpc GrantPermissionsToRole(GrantPermissionsToRoleReq) returns (EmptyResp);
+  rpc Enforce(EnforceReq) returns (EnforceResp);
+  rpc GetUserMenuTree(GetUserMenuTreeReq) returns (GetUserMenuTreeResp);
+  rpc GetUserPermCodes(GetUserPermCodesReq) returns (GetUserPermCodesResp);
+}
+
+// ──────────────────────────────────────────────
+// RuleService — rate-limit rule CRUD
+// ──────────────────────────────────────────────
+service RuleService {
+  rpc GetRule(GetRuleReq) returns (GetRuleResp);
+  rpc CreateRule(CreateRuleReq) returns (CreateRuleResp);
+  rpc UpdateRule(UpdateRuleReq) returns (UpdateRuleResp);
+  rpc DeleteRule(DeleteRuleReq) returns (DeleteRuleResp);
+  rpc ListRules(ListRulesReq) returns (ListRulesResp);
+}
+
+// ──────────────────────────────────────────────
+// Auth messages
+// ──────────────────────────────────────────────
+message LoginReq { string username = 1; string password = 2; }
+message LoginResp {
+  string access_token = 1;
+  string refresh_token = 2;
+  int32 expires_in = 3;           // access token TTL seconds
+}
+message RefreshReq { string refresh_token = 1; }
+message LogoutReq { string access_token = 1; }
+message LogoutResp {}
+message ValidateTokenReq { string access_token = 1; }
+message ValidateTokenResp {
+  int64 uid = 1;
+  repeated string roles = 2;
+  bool valid = 3;
+}
+
+// ──────────────────────────────────────────────
+// User messages
+// ──────────────────────────────────────────────
+message User {
+  int64 id = 1;
+  string username = 2;
+  int32 status = 3;                     // 1=enabled, 0=disabled
+  repeated string roles = 4;            // role codes (derived from user_roles)
+  string nickname = 5;
+  string avatar = 6;
+  string email = 7;
+  string phone = 8;
+}
+message CreateUserReq {
+  string username = 1;
+  string password = 2;
+  string nickname = 3;
+  string avatar = 4;
+  string email = 5;
+  string phone = 6;
+}
+message UpdateUserReq {
+  int64 id = 1;
+  optional string password = 2;
+  optional int32 status = 3;
+  optional string nickname = 4;
+  optional string avatar = 5;
+  optional string email = 6;
+  optional string phone = 7;
+}
+message DeleteUserReq { int64 id = 1; }
+message GetUserReq { int64 id = 1; }
+message ListUsersReq { int32 page = 1; int32 page_size = 2; }
+message UserResp { User user = 1; }
+message ListUsersResp { repeated User users = 1; int32 total = 2; }
+
+// ──────────────────────────────────────────────
+// Role messages
+// ──────────────────────────────────────────────
+message Role {
+  int64 id = 1;
+  string code = 2;
+  string name = 3;
+  int32 status = 4;                     // 1=enabled, 0=disabled
+  string remark = 5;
+  repeated string permissions = 6;      // permission codes (derived from role_permissions)
+}
+message CreateRoleReq { string code = 1; string name = 2; string remark = 3; }
+message UpdateRoleReq { int64 id = 1; string name = 2; optional int32 status = 3; optional string remark = 4; }
+message DeleteRoleReq { int64 id = 1; }
+message ListRolesReq { int32 page = 1; int32 page_size = 2; }
+message RoleResp { Role role = 1; }
+message ListRolesResp { repeated Role roles = 1; int32 total = 2; }
+
+// ──────────────────────────────────────────────
+// Permission messages
+// ──────────────────────────────────────────────
+message Permission {
+  int64 id = 1;
+  string code = 2;
+  string type = 3;    // catalog | menu | button | api
+  string name = 4;
+  int64 parent_id = 5;                  // tree parent (catalog/menu only)
+  string path = 6;                      // route path (catalog/menu)
+  string icon = 7;                      // icon (catalog/menu)
+  string route_name = 8;                // frontend route name (catalog/menu)
+  string redirect = 9;                  // redirect (catalog)
+  bool keep_alive = 10;                 // route cache (menu)
+  bool hide_in_menu = 11;               // hide from menu (menu)
+  bool is_external = 12;                // external link (catalog/menu)
+  string method = 13;                   // HTTP method (api only: GET/POST/PUT/DELETE)
+  int32 sort = 14;                      // sort order
+  int32 status = 15;                    // 1=enabled, 0=disabled
+  string description = 16;
+}
+message CreatePermissionReq {
+  string code = 1;
+  string type = 2;     // catalog | menu | button | api
+  string name = 3;
+  int64 parent_id = 4;                  // optional, 0 = root
+  string path = 5;
+  string icon = 6;
+  string route_name = 7;
+  string redirect = 8;
+  bool keep_alive = 9;
+  bool hide_in_menu = 10;
+  bool is_external = 11;
+  string method = 12;                   // required when type=api
+  int32 sort = 13;
+  int32 status = 14;                    // 1=enabled, 0=disabled
+  string description = 15;
+}
+message UpdatePermissionReq {
+  int64 id = 1;
+  optional string code = 2;
+  optional string type = 3;
+  optional string name = 4;
+  optional int64 parent_id = 5;
+  optional string path = 6;
+  optional string icon = 7;
+  optional string route_name = 8;
+  optional string redirect = 9;
+  optional bool keep_alive = 10;
+  optional bool hide_in_menu = 11;
+  optional bool is_external = 12;
+  optional string method = 13;
+  optional int32 sort = 14;
+  optional int32 status = 15;
+  optional string description = 16;
+}
+message GetPermissionReq { int64 id = 1; }
+message DeletePermissionReq { int64 id = 1; }
+message ListPermissionsReq {
+  int32 page = 1;
+  int32 page_size = 2;
+  optional string type = 3;             // filter by type
+  optional int64 parent_id = 4;         // filter by parent
+  optional int32 status = 5;            // filter by status
+}
+message PermissionResp { Permission permission = 1; }
+message ListPermissionsResp { repeated Permission permissions = 1; int32 total = 2; }
+
+// ──────────────────────────────────────────────
+// Menu messages
+// ──────────────────────────────────────────────
+message Menu {
+  int64 id = 1;
+  string code = 2;                      // permission code
+  string name = 3;
+  int64 parent_id = 4;
+  string type = 5;                      // catalog | menu
+  string path = 6;
+  string icon = 7;
+  string route_name = 8;
+  string redirect = 9;
+  bool keep_alive = 10;
+  bool hide_in_menu = 11;
+  bool is_external = 12;
+  int32 sort = 13;
+}
+message ListMenusReq {}
+message MenuResp { Menu menu = 1; }
+message ListMenusResp { repeated Menu menus = 1; }
+
+// ──────────────────────────────────────────────
+// RBAC assignment / enforcement messages
+// ──────────────────────────────────────────────
+message AssignRolesToUserReq { int64 user_id = 1; repeated int64 role_ids = 2; }
+message GrantPermissionsToRoleReq {
+  int64 role_id = 1;
+  repeated string permission_codes = 2;
+}
+message EnforceReq { int64 uid = 1; string obj = 2; string act = 3; }
+message EnforceResp { bool allowed = 1; }
+message GetUserMenuTreeReq { int64 uid = 1; }
+message MenuNode { Menu menu = 1; repeated MenuNode children = 2; }
+message GetUserMenuTreeResp { repeated MenuNode roots = 1; }
+message GetUserPermCodesReq { int64 uid = 1; }
+message GetUserPermCodesResp { repeated string codes = 1; }
+message EmptyResp {}
+
+// ──────────────────────────────────────────────
+// Rate-limit rule messages (RuleService)
+// ──────────────────────────────────────────────
+message GetRuleReq {
+  string service = 1;
+  string phase = 2;
+  string method = 3;
+  string path = 4;
+  optional string app_key = 5;
+}
+
+message GetRuleResp {
+  bool found = 1;
+  RateLimitRule rule = 2;
+}
+
+message CreateRuleReq {
+  string service = 1;
+  string phase = 2;
+  string method = 3;
+  string path = 4;
+  string match_kind = 5;
+  string path_pattern = 6;
+  optional string app_key = 7;
+  RateLimitConfig config = 8;
+}
+
+message RateLimitConfig {
+  int32 priority = 1;
+  bool enabled = 2;
+  repeated string key_by = 3;
+  string strategy = 4;
+  int32 window_seconds = 5;
+  int32 max_requests = 6;
+  double requests_per_second = 7;
+  int32 burst = 8;
+  int32 client_ttl_seconds = 9;
+}
+
+message CreateRuleResp {
+  int64 id = 1;
+}
+
+message UpdateRuleReq {
+  int64 id = 1;
+  optional bool enabled = 2;
+  optional int32 priority = 3;
+  repeated string key_by = 4;
+  optional string strategy = 5;
+  optional int32 window_seconds = 6;
+  optional int32 max_requests = 7;
+  optional double requests_per_second = 8;
+  optional int32 burst = 9;
+  optional int32 client_ttl_seconds = 10;
+}
+
+message UpdateRuleResp {}
+
+message DeleteRuleReq {
+  int64 id = 1;
+}
+
+message DeleteRuleResp {}
+
+message ListRulesReq {
+  optional string service = 1;
+  optional string phase = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListRulesResp {
+  repeated RateLimitRule rules = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message RateLimitRule {
+  int64 id = 1;
+  string service = 2;
+  string phase = 3;
+  string method = 4;
+  string match_kind = 5;
+  string path = 6;
+  string path_pattern = 7;
+  optional string app_key = 8;
+  int32 priority = 9;
+  bool enabled = 10;
+  repeated string key_by = 11;
+  string strategy = 12;
+  int32 window_seconds = 13;
+  int32 max_requests = 14;
+  double requests_per_second = 15;
+  int32 burst = 16;
+  int32 client_ttl_seconds = 17;
+}

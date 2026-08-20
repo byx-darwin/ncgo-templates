@@ -26,7 +26,7 @@ body: |
     	authsvc "{{.Module}}/internal/application/auth"
     	menusvc "{{.Module}}/internal/application/menu"
     	permsvc "{{.Module}}/internal/application/permission"
-    	rbacsvc "{{.Module}}/internal/application/rbac"
+    	rbacsvc "{{.Module}}/internal/application/{{ToLower .ServiceName}}"
     	rolesvc "{{.Module}}/internal/application/role"
     	usersvc "{{.Module}}/internal/application/user"
     	"{{.Module}}/internal/base/conf"
@@ -44,8 +44,8 @@ body: |
     	permissionrepo "{{.Module}}/internal/repository/permission"
     	rolerepo "{{.Module}}/internal/repository/role"
     	userrepo "{{.Module}}/internal/repository/user"
-    	"{{.Module}}/kitex_gen/api/rbac/v1/authservice"
-    	"{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
+    	"{{.Module}}/kitex_gen/api/{{ToLower .ServiceName}}/v1/authservice"
+    	"{{.Module}}/kitex_gen/api/{{ToLower .ServiceName}}/v1/rbacservice"
     )
 
     // Run wires the RBAC authority service and starts both RPC services
@@ -116,7 +116,7 @@ body: |
     	var tokenStore token.Store
     	switch cfg.Auth.TokenStore {{ "{" }}
     	case "redis":
-    		tokenStore = token.NewRedisStore(cfg.Auth.RedisAddr, "rbac")
+    		tokenStore = token.NewRedisStore(cfg.Auth.RedisAddr, "{{ToLower .ServiceName}}")
     	default:
     		tokenStore = token.NewMemoryStore()
     	{{ "}" }}

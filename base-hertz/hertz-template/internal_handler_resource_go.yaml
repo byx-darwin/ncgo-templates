@@ -1,0 +1,61 @@
+# ncgo exported template — internal/handler/resource.go
+path: internal/handler/resource.go
+update_behavior:
+    type: cover
+body: |-
+    package handler
+
+    import (
+        "context"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "{{.Module}}/internal/pkg/response"
+    )
+
+    // ResourceHandler handles resource CRUD operations
+    type ResourceHandler struct {
+        // Add dependencies here (e.g., usecase, repository)
+    }
+
+    // NewResourceHandler creates a new ResourceHandler
+    func NewResourceHandler() *ResourceHandler {
+        return &ResourceHandler{}
+    }
+
+    // Health returns service health status
+    func (h *ResourceHandler) Health(ctx context.Context, c *app.RequestContext) {
+        response.OK(c, map[string]string{"status": "ok"})
+    }
+
+    // List returns all resources
+    func (h *ResourceHandler) List(ctx context.Context, c *app.RequestContext) {
+        // TODO: Implement list logic
+        response.OK(c, []interface{}{})
+    }
+
+    // Get returns a specific resource
+    func (h *ResourceHandler) Get(ctx context.Context, c *app.RequestContext) {
+        // TODO: Implement get logic
+        id := c.Param("id")
+        response.OK(c, map[string]string{"id": id})
+    }
+
+    // Create creates a new resource
+    func (h *ResourceHandler) Create(ctx context.Context, c *app.RequestContext) {
+        // TODO: Implement create logic
+        response.OK(c, map[string]string{"status": "created"})
+    }
+
+    // Update updates an existing resource
+    func (h *ResourceHandler) Update(ctx context.Context, c *app.RequestContext) {
+        // TODO: Implement update logic
+        id := c.Param("id")
+        response.OK(c, map[string]string{"id": id, "status": "updated"})
+    }
+
+    // Delete deletes a resource
+    func (h *ResourceHandler) Delete(ctx context.Context, c *app.RequestContext) {
+        // TODO: Implement delete logic
+        id := c.Param("id")
+        response.OK(c, map[string]string{"id": id, "status": "deleted"})
+    }

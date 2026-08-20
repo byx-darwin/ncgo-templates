@@ -1,0 +1,9 @@
+# ncgo exported template — internal/application/menu/dto.go
+path: internal/application/menu/dto.go
+update_behavior:
+    type: skip
+body: |
+    package menusvc
+
+    // Menu query service has no write DTOs — writes go through permission.Service.
+    // This file is intentionally empty; kept for package documentation.

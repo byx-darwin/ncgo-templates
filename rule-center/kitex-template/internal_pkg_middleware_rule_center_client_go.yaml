@@ -1,0 +1,162 @@
+# ncgo exported template — internal/pkg/middleware/rule_center_client.go
+path: internal/pkg/middleware/rule_center_client.go
+update_behavior:
+    type: cover
+body: |
+    // Optional rule-center client for Kitex services.
+    //
+    // To enable: copy this file to internal/pkg/middleware/rule_center_client.go
+    // in your project, then wire it into the rate-limit resolver options:
+    //
+    //	rlOpts.{{.ServiceName}}Center = middleware.New{{.ServiceName}}CenterClient(cfg.RateLimit.{{.ServiceName}}Center.Address)
+    //
+    // Required dependency:
+    //
+    //	go get github.com/byx-darwin/go-tools/go-common
+    //
+    // This client uses the Kitex-generated ruleservice client
+    // (kitex_gen/api/ratelimit/v1/ruleservice), which includes retry,
+    // circuit-breaker, and caller-service metadata.
+
+    package middleware
+
+    import (
+    	"context"
+    	"fmt"
+    	"time"
+
+    	kitexclient "github.com/cloudwego/kitex/client"
+
+    	"github.com/byx-darwin/go-tools/go-framework/config"
+    	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/ratelimit"
+    	"{{.Module}}/kitex_gen/api/ratelimit/v1"
+    	"{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    )
+
+    // {{.ServiceName}}CenterConfig mirrors the timeout pattern of Kitex's generated
+    // client.Config (pkg/client/<service>/client.go). It controls per-call RPC
+    // timeout and connection verification for the rule-center client.
+    type {{.ServiceName}}CenterConfig struct {{ "{" }}
+    	Address                string
+    	RPCTimeoutMilliseconds int // per-call RPC timeout; default 200ms
+    	ConnectTimeoutMillis   int // initial connection timeout; default 100ms
+    {{ "}" }}
+
+    // Default{{.ServiceName}}CenterConfig returns a config with safe defaults, mirroring
+    // the Kitex client pattern (100ms connect, 200ms RPC).
+    func Default{{.ServiceName}}CenterConfig(address string) {{.ServiceName}}CenterConfig {{ "{" }}
+    	return {{.ServiceName}}CenterConfig{{ "{" }}
+    		Address:                address,
+    		RPCTimeoutMilliseconds: 200,
+    		ConnectTimeoutMillis:   100,
+    	{{ "}" }}
+    {{ "}" }}
+
+    // {{.ServiceName}}CenterClient implements ratelimit.GRPCClient by querying the
+    // rule-center Kitex service via the generated Kitex client.
+    type {{.ServiceName}}CenterClient struct {{ "{" }}
+    	cli ruleservice.Client
+    {{ "}" }}
+
+    // New{{.ServiceName}}CenterClient creates a Kitex client connected to the rule-center
+    // service at the given address (e.g. "rule-center.internal:8888").
+    // Uses Default{{.ServiceName}}CenterConfig for timeouts.
+    func New{{.ServiceName}}CenterClient(address string) (*{{.ServiceName}}CenterClient, error) {{ "{" }}
+    	if address == "" {{ "{" }}
+    		return nil, fmt.Errorf("rule_center: address is required")
+    	{{ "}" }}
+    	return New{{.ServiceName}}CenterClientWithConfig(Default{{.ServiceName}}CenterConfig(address))
+    {{ "}" }}
+
+    // New{{.ServiceName}}CenterClientWithTimeout creates a client with a custom per-call
+    // RPC timeout.
+    func New{{.ServiceName}}CenterClientWithTimeout(address string, timeout time.Duration) (*{{.ServiceName}}CenterClient, error) {{ "{" }}
+    	if address == "" {{ "{" }}
+    		return nil, fmt.Errorf("rule_center: address is required")
+    	{{ "}" }}
+    	cfg := Default{{.ServiceName}}CenterConfig(address)
+    	cfg.RPCTimeoutMilliseconds = int(timeout.Milliseconds())
+    	return New{{.ServiceName}}CenterClientWithConfig(cfg)
+    {{ "}" }}
+
+    // New{{.ServiceName}}CenterClientWithConfig creates a client with explicit timeout
+    // configuration. The timeouts map to kitexclient.WithRPCTimeout and
+    // kitexclient.WithConnectTimeout.
+    func New{{.ServiceName}}CenterClientWithConfig(cfg {{.ServiceName}}CenterConfig) (*{{.ServiceName}}CenterClient, error) {{ "{" }}
+    	rpcTimeout := time.Duration(cfg.RPCTimeoutMilliseconds) * time.Millisecond
+    	if rpcTimeout <= 0 {{ "{" }}
+    		rpcTimeout = 200 * time.Millisecond
+    	{{ "}" }}
+    	connectTimeout := time.Duration(cfg.ConnectTimeoutMillis) * time.Millisecond
+    	if connectTimeout <= 0 {{ "{" }}
+    		connectTimeout = 100 * time.Millisecond
+    	{{ "}" }}
+
+    	cli, err := ruleservice.NewClient("rulecenter",
+    		kitexclient.WithHostPorts(cfg.Address),
+    		kitexclient.WithConnectTimeout(connectTimeout),
+    		kitexclient.WithRPCTimeout(rpcTimeout),
+    	)
+    	if err != nil {{ "{" }}
+    		return nil, fmt.Errorf("rule_center: connect %s: %w", cfg.Address, err)
+    	{{ "}" }}
+
+    	return &{{.ServiceName}}CenterClient{{ "{" }}
+    		cli: cli,
+    	{{ "}" }}, nil
+    {{ "}" }}
+
+    func strPtrOrNil(s string) *string {{ "{" }}
+    	if s == "" {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	return &s
+    {{ "}" }}
+
+    // Close satisfies the server wiring contract. The Kitex client manages its
+    // own lifecycle, so no explicit close is required.
+    func (c *{{.ServiceName}}CenterClient) Close() error {{ "{" }}
+    	return nil
+    {{ "}" }}
+
+    // ResolveRateLimit{{.ServiceName}} implements ratelimit.GRPCClient.
+    // It calls the rule-center Get{{.ServiceName}} RPC and converts the proto response
+    // to *conf.RateLimit{{.ServiceName}}Config.
+    //
+    // Return contract:
+    //   - (*conf.RateLimit{{.ServiceName}}Config, true, nil): matched a remote {{ToLower .ServiceName}}
+    //   - (nil, false, nil): remote answered "not found"
+    //   - (nil, false, error): remote query failed
+    func (c *{{.ServiceName}}CenterClient) ResolveRateLimit{{.ServiceName}}(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimit{{.ServiceName}}Config, bool, error) {{ "{" }}
+    	resp, err := c.cli.Get{{.ServiceName}}(ctx, &ratelimitv1.Get{{.ServiceName}}Req{{ "{" }}
+    		Service: lookup.Service,
+    		Phase:   lookup.Phase,
+    		Method:  lookup.Method,
+    		Path:    lookup.Path,
+    		AppKey:  strPtrOrNil(lookup.AppKey),
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, false, fmt.Errorf("rule_center: Get{{.ServiceName}}(%s, %s, %s, %s): %w",
+    			lookup.Service, lookup.Phase, lookup.Method, lookup.Path, err)
+    	{{ "}" }}
+
+    	if !resp.GetFound() {{ "{" }}
+    		return nil, false, nil
+    	{{ "}" }}
+
+    	{{ToLower .ServiceName}} := resp.Get{{.ServiceName}}()
+    	if {{ToLower .ServiceName}} == nil {{ "{" }}
+    		return nil, false, nil
+    	{{ "}" }}
+
+    	cfg := &conf.RateLimit{{.ServiceName}}Config{{ "{" }}
+    		Enabled:          true,
+    		Strategy:         {{ToLower .ServiceName}}.GetStrategy(),
+    		WindowSeconds:    config.Duration{{ "{" }}Duration: time.Duration(rule.GetWindowSeconds()) * time.Second{{ "}" }},
+    		MaxRequests:      int(rule.GetMaxRequests()),
+    		KeyBy:            {{ToLower .ServiceName}}.GetKeyBy(),
+    		ClientTTLSeconds: config.Duration{{ "{" }}Duration: time.Duration(rule.GetClientTtlSeconds()) * time.Second{{ "}" }},
+    	{{ "}" }}
+    	return cfg, true, nil
+    {{ "}" }}

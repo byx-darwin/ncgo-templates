@@ -1,14 +1,30 @@
 # micro-admin
 
-Official **micro-admin workspace** composition template — wires `rbac-kitex` (authority) + `admin-bff-hertz` (admin BFF) + `rule-center` (rate-limit) into a runnable micro workspace for the micro-admin (运营中台) program.
+Official **micro-admin workspace** composition template — wires `admin-services-kitex` (authority) + `admin-bff-hertz` (admin BFF) into a runnable micro workspace for the admin backend (运营中台).
 
 ## Overview
 
-This template provides a **workspace shell** that orchestrates three service templates into a cohesive admin workspace:
+This template provides a **workspace shell** that orchestrates two service templates into a cohesive admin workspace:
 
-- **rbac-kitex** — RBAC + auth authority service (users, roles, permissions, menus, Casbin enforcement, JWT login)
-- **admin-bff-hertz** — Admin BFF (thin HTTP API gateway with JWT auth + RBAC authorization)
-- **rule-center** — Rate-limit rule-center service (dynamic rate-limit rules)
+- **admin-services-kitex** — Unified authority service (RBAC + Rule Center)
+  - Authentication (JWT login/token)
+  - RBAC (users, roles, permissions, menus, Casbin)
+  - Rule Center (rate limit rules management)
+
+- **admin-bff-hertz** — Admin BFF (HTTP API gateway)
+  - JWT authentication
+  - RBAC authorization
+  - API signature (optional)
+  - Idempotency (optional)
+
+**Architecture:**
+```
+Client → admin-bff-hertz (HTTP :8080)
+              ↓ gRPC
+         admin-services-kitex (RPC :8888)
+              ↓
+         PostgreSQL + Redis
+```
 
 ## Prerequisites
 
@@ -35,19 +51,17 @@ ncgo new --mode micro my-admin --module github.com/acme/my-admin --dir .
 # Copy infrastructure compose and Makefile from micro-admin template
 cp -r /path/to/micro-admin/workspace/compose.infra.yaml .
 cp -r /path/to/micro-admin/workspace/Makefile .
+cp -r /path/to/micro-admin/workspace/scripts .
 ```
 
 ### 3. Add Services
 
 ```bash
-# Add RBAC service (authority)
-ncgo add rpc rbac --template-dir /path/to/rbac-kitex
+# Add authority service (RBAC + Rule Center)
+ncgo add rpc authority --template-dir /path/to/admin-services-kitex
 
 # Add Admin BFF (HTTP gateway)
 ncgo add bff admin --template-dir /path/to/admin-bff-hertz
-
-# Add Rule Center service (rate-limit)
-ncgo add rpc rule --template-dir /path/to/rule-center
 ```
 
 ### 4. Start Infrastructure
@@ -60,18 +74,17 @@ make infra-up
 docker compose -f compose.infra.yaml up -d
 ```
 
-### 5. Initialize Databases
+### 5. Initialize Database
 
 ```bash
-# Run migrations for rbac
-cd services/rbac
+# Run migrations for authority service
+cd services/authority
 make sqlc
 DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
 
-# Run migrations for rule
-cd ../rule
-make sqlc
-DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
+# Seed initial data (admin user, roles, permissions)
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" \
+  psql -f scripts/seed.sql
 
 cd ../..
 ```
@@ -79,36 +92,242 @@ cd ../..
 ### 6. Build & Start Services
 
 ```bash
-# Build all services
-cd services/rbac && go mod tidy && go build . && cd ../..
-cd services/admin && go mod tidy && go build . && cd ../..
-cd services/rule && go mod tidy && go build . && cd ../..
-
-# Start all services
-cd services/rbac && ./rbac > /tmp/rbac.log 2>&1 &
-cd services/admin && ./admin > /tmp/admin.log 2>&1 &
-cd services/rule && ./rule > /tmp/rule.log 2>&1 &
+# Build authority service
+cd services/authority
+go mod tidy
+go build -o authority .
 cd ../..
+
+# Build admin BFF
+cd services/admin
+go mod tidy
+go build -o admin .
+cd ../..
+
+# Start services
+cd services/authority && GO_ENV=dev ./authority > /tmp/authority.log 2>&1 &
+cd ../admin && GO_ENV=dev ./admin > /tmp/admin.log 2>&1 &
+cd ../..
+
+sleep 3
 ```
 
 ### 7. Test
 
 ```bash
+# Run smoke test
+bash scripts/smoke-test.sh
+
+# Or manually:
+
 # Login
-curl -X POST http://localhost:8888/api/v1/auth/login \
+curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
+  -d '{"username":"admin","password":"Admin@123"}'
 
 # Get current user menus
-curl -H "Authorization: Bearer <token>" http://localhost:8888/api/v1/me/menus
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/me/menus
+
+# Create user (requires user:create permission)
+curl -X POST http://localhost:8080/api/v1/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser","password":"Test@123","email":"test@example.com"}'
+
+# Create rate-limit rule (requires rate_limit:create permission)
+curl -X POST http://localhost:8080/api/v1/rate-limit-rules \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"api-limit","limit":100,"window":"1m"}'
 ```
 
-## E2E Testing
+## Workspace Layout
 
-The workspace includes hybrid E2E tests:
+```
+my-admin/
+├── ncgo.workspace          # Micro workspace metadata
+├── compose.yaml            # Service containers (ncgo-generated)
+├── compose.infra.yaml      # PostgreSQL + Redis infrastructure
+├── Makefile                # Workspace commands
+├── .pre-commit-config.yaml # Git hooks
+├── scripts/
+│   ├── e2e-test.sh        # E2E test runner
+│   ├── smoke-test.sh      # Happy-path smoke test
+│   └── seed.sql           # Initial data (admin user, roles, permissions)
+└── services/
+    ├── authority/          # ← from admin-services-kitex (RBAC + Rule Center)
+    └── admin/              # ← from admin-bff-hertz (HTTP BFF)
+```
+
+## Configuration
+
+### Authority Service
+
+Edit `services/authority/conf/dev/conf.yaml`:
+
+```yaml
+server:
+  rpc:
+    port: ":8888"
+    network: "tcp"
+
+database:
+  enabled: true
+  dsn: "postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable"
+
+redis:
+  addrs:
+    - "127.0.0.1:6379"
+
+auth:
+  jwt_secret: "dev-secret-change-me"
+  access_ttl_seconds: 3600
+  refresh_ttl_seconds: 86400
+  token_store: "memory"  # or "redis"
+```
+
+### Admin BFF
+
+Edit `services/admin/conf/dev/conf.yaml`:
+
+```yaml
+server:
+  http:
+    port: "8080"
+
+database:
+  enabled: true
+  dsn: "postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable"
+
+redis:
+  addrs:
+    - "127.0.0.1:6379"
+
+jwt:
+  secret: "dev-secret-change-me"  # Must match authority service
+  access_token_ttl_seconds: 3600
+
+grpc:
+  authority:
+    service_name: "authority"
+    host_ports:
+      - "127.0.0.1:8888"
+
+# Optional: Enable API signature
+auth:
+  signature:
+    enabled: false
+    static_secret: "your-app-secret"
+
+# Optional: Enable idempotency
+idempotency:
+  enabled: false
+  backend: "memory"
+```
+
+## Database Schema
+
+The authority service creates the following tables:
+
+### Users & Auth
+- `users` - User accounts (username, password_hash, email, status)
+- `roles` - Role definitions (code, name, status)
+- `user_roles` - User-to-role assignments
+
+### Permissions
+- `permissions` - Permission definitions (code, type, name, path, method)
+- `role_permissions` - Role-to-permission assignments
+
+### Casbin Policy
+- `casbin_rule` - Casbin policies (ptype, v0, v1, v2)
+
+### Rate Limit Rules
+- `rate_limit_rules` - Rate limit rule definitions (name, path_pattern, limit, window, strategy)
+
+## API Endpoints
+
+### Public Routes
+
+- `POST /api/v1/auth/login` - Login
+- `POST /api/v1/auth/refresh` - Refresh token
+- `GET /healthz` - Liveness probe
+- `GET /readyz` - Readiness probe
+
+### Protected Routes (JWT + RBAC Required)
+
+#### Current User
+- `GET /api/v1/me/menus` - Get current user's menu tree
+- `GET /api/v1/me/perms` - Get current user's permissions
+
+#### User Management
+- `GET /api/v1/users` - List users (permission: `user:list`)
+- `GET /api/v1/users/:id` - Get user (permission: `user:read`)
+- `POST /api/v1/users` - Create user (permission: `user:create`)
+- `PUT /api/v1/users/:id` - Update user (permission: `user:update`)
+- `DELETE /api/v1/users/:id` - Delete user (permission: `user:delete`)
+
+#### Role Management
+- `GET /api/v1/roles` - List roles (permission: `role:list`)
+- `POST /api/v1/roles` - Create role (permission: `role:create`)
+- `PUT /api/v1/roles/:id` - Update role (permission: `role:update`)
+- `DELETE /api/v1/roles/:id` - Delete role (permission: `role:delete`)
+
+#### Permission Management
+- `GET /api/v1/permissions` - List permissions (permission: `permission:list`)
+- `POST /api/v1/permissions` - Create permission (permission: `permission:create`)
+- `PUT /api/v1/permissions/:id` - Update permission (permission: `permission:update`)
+- `DELETE /api/v1/permissions/:id` - Delete permission (permission: `permission:delete`)
+
+#### Menu Management
+- `GET /api/v1/menus` - List menus (permission: `menu:list`)
+
+#### Rate Limit Rules
+- `GET /api/v1/rate-limit-rules` - List rules (permission: `rate_limit:list`)
+- `POST /api/v1/rate-limit-rules` - Create rule (permission: `rate_limit:create`)
+- `PUT /api/v1/rate-limit-rules/:id` - Update rule (permission: `rate_limit:update`)
+- `DELETE /api/v1/rate-limit-rules/:id` - Delete rule (permission: `rate_limit:delete`)
+
+## Seed Data
+
+The `scripts/seed.sql` creates:
+
+- **Admin user**: username=`admin`, password=`Admin@123` (Argon2id hash)
+- **Super admin role**: code=`super_admin`
+- **All permissions**: user/role/permission/menu/rate_limit CRUD
+- **Casbin policies**: Admin user → super_admin role → all permissions
+
+## Security
+
+### Password Hashing
+Uses Argon2id (recommended by OWASP):
+- Memory: 64 MB
+- Iterations: 3
+- Parallelism: 4
+- Salt: 16 bytes
+- Key length: 32 bytes
+
+### JWT Tokens
+- Algorithm: HS256
+- Access token TTL: 3600s (1 hour)
+- Refresh token TTL: 86400s (24 hours)
+- Secret: Configurable (must match between BFF and authority)
+
+### Error Codes
+
+| Code | HTTP | Message | Description |
+|------|------|---------|-------------|
+| 10002 | 401 | auth_failed | Generic auth failure |
+| 10007 | 401 | signature_missing | Missing signature headers |
+| 10019 | 403 | signature_invalid | Invalid signature |
+| 10020 | 401 | token_missing | Missing JWT token |
+| 10021 | 401 | token_invalid | Invalid JWT token |
+| 10108 | 403 | permission_denied | Insufficient permissions |
+| 10203 | 400 | idempotency_key_missing | Missing Idempotency-Key |
+
+## Integration Testing
 
 ```bash
-# Run all tests (hermetic + integration if docker available)
+# Run E2E test (includes infra setup, migrations, smoke test)
 make test
 
 # Or run manually:
@@ -116,129 +335,56 @@ make test
 ```
 
 **Test Phases:**
-- **Phase 1 (Hermetic):** Always runs — build + unit tests
-- **Phase 2 (Integration):** Requires docker — starts services + runs smoke test
+1. **Hermetic** (always runs) - Build + unit tests
+2. **Integration** (requires docker) - Start services + smoke test
 
-## Workspace Layout
+### Smoke Test Steps
 
+1. Login (admin-bff → authority AuthService)
+2. Get menus (admin-bff → authority RBACService)
+3. Create user (admin-bff → authority RBACService with Authz)
+4. Create rate-limit rule (admin-bff → authority RuleService)
+
+## Troubleshooting
+
+### JWT Token Validation Failed
+
+Ensure `jwt.secret` matches in both services:
+```yaml
+# services/authority/conf/dev/conf.yaml
+auth:
+  jwt_secret: "dev-secret-change-me"
+
+# services/admin/conf/dev/conf.yaml
+jwt:
+  secret: "dev-secret-change-me"  # Must match!
 ```
-my-admin/
-├── ncgo.workspace          # micro workspace metadata
-├── compose.yaml            # service containers (ncgo-generated)
-├── compose.infra.yaml      # postgres + redis infrastructure
-├── Makefile                # workspace commands
-├── .pre-commit-config.yaml # git hooks
-├── scripts/
-│   ├── e2e-test.sh        # E2E test runner
-│   └── smoke-test.sh      # Happy-path smoke test
-└── services/
-    ├── rbac/               # Kitex RBAC service
-    ├── admin/              # Hertz Admin BFF
-    └── rule/               # Kitex Rule Center service
+
+### Permission Denied
+
+Check if user has the required permission:
+```sql
+SELECT p.code, p.name
+FROM permissions p
+JOIN role_permissions rp ON rp.permission_id = p.id
+JOIN user_roles ur ON ur.role_id = rp.role_id
+WHERE ur.user_id = (SELECT id FROM users WHERE username = 'admin');
 ```
 
-## Integration Testing
+### gRPC Connection Failed
 
-Complete integration test flow from workspace creation to service validation:
-
-### 1. Create Workspace
-
+Check authority service is running on correct port:
 ```bash
-mkdir -p /tmp/micro-admin-test && cd /tmp/micro-admin-test
-ncgo new --mode micro test-admin --module github.com/test/admin --dir .
+lsof -i :8888  # Should show authority service
 ```
 
-### 2. Add Services
+## Related Templates
 
-```bash
-# Copy workspace shell
-cp -r /path/to/micro-admin/workspace/* .
+- **admin-services-kitex** — Authority service (RBAC + Rule Center)
+- **admin-bff-hertz** — Admin BFF with RBAC authorization
+- **base-hertz** — Basic HTTP service (no RBAC)
+- **ratelimit-hertz** — HTTP service with rate limiting execution
 
-# Add services (triggers code generation)
-ncgo add rpc rbac --template-dir /path/to/rbac-kitex
-ncgo add bff admin --template-dir /path/to/admin-bff-hertz
-ncgo add rpc rule --template-dir /path/to/rule-center
-```
+## License
 
-### 3. Start Infrastructure
-
-```bash
-docker compose -f compose.infra.yaml up -d
-sleep 5
-```
-
-### 4. Run Database Migrations
-
-```bash
-cd services/rbac && make sqlc
-DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
-cd ../rule && make sqlc
-DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
-cd ../..
-```
-
-### 5. Start Services
-
-```bash
-cd services/rbac && go mod tidy && go build . && ./rbac &
-cd services/admin && go mod tidy && go build . && ./admin &
-cd services/rule && go mod tidy && go build . && ./rule &
-cd ../..
-
-sleep 10
-```
-
-### 6. Run Smoke Test
-
-```bash
-./scripts/smoke-test.sh
-```
-
-Expected output:
-```
-==> Smoke test: Service interactions
-  [1/4] Login (admin-bff → rbac-rpc)...
-  ✓ Login successful
-  [2/4] Get menus (admin-bff → rbac-rpc)...
-  ✓ Menus retrieved
-  [3/4] Create user (admin-bff → rbac-rpc with Authz)...
-  ✓ User created
-  [4/4] Create rate-limit rule (admin-bff → rule-rpc)...
-  ✓ Rate-limit rule created
-
-==> Smoke test: PASSED
-```
-
-### Service Interactions Verified
-
-- ✅ admin-bff → rbac-rpc: Login (AuthService)
-- ✅ admin-bff → rbac-rpc: GetMenus (RBACService)
-- ✅ admin-bff → rbac-rpc: CreateUser (RBACService with Authz)
-- ✅ admin-bff → rule-rpc: CreateRule (RuleService)
-- ✅ JWT token propagation across services
-- ✅ Database connections (postgres)
-- ✅ Service health (all listening on expected ports)
-
-## Graceful Degradation
-
-| Scenario | Behavior |
-|----------|----------|
-| **rule-center unavailable** | admin-bff still serves; rate-limit rule management returns errors, other functions unaffected |
-| **postgres unavailable** | All services fail to start (hard dependency) |
-| **redis unavailable** | rbac-rpc and rule-rpc degrade (cache misses, but still functional) |
-
-## Seams (Documented TODO, Not Built in v1)
-
-| Seam | Description | Code Marker |
-|------|-------------|-------------|
-| **OTel Observability** | Basic wiring, requires jaeger config | `// TODO(otel)` |
-| **SSO/OIDC** | Current JWT, extensible to SSO/OIDC | `// TODO(sso)` |
-| **Org-tree/Data-scope** | Organization tree + data permissions | `// TODO(org-tree)` |
-| **Production deployment** | k8s deployment configs | `// TODO(k8s)` |
-
-## Related
-
-- [rbac-kitex](../rbac-kitex/) — Authority service template
-- [admin-bff-hertz](../admin-bff-hertz/) — Admin BFF template
-- [rule-center](../rule-center/) — Rate-limit service template
-- [Issue #13](https://github.com/byx-darwin/ncgo-templates/issues/13) — micro-admin composition
+Part of the ncgo template registry.

@@ -8,14 +8,19 @@ body: |
     go 1.23
 
     require (
-    	github.com/byx-darwin/go-tools v0.0.0
+    	github.com/byx-darwin/go-tools/go-common v0.1.0
+    	github.com/byx-darwin/go-tools/go-framework v0.2.0
+    	github.com/byx-darwin/go-tools/go-middleware v0.1.0
     	github.com/cloudwego/hertz v0.9.0
-    	github.com/samber/do v1.49.1
-    	github.com/test/admin/services/rbac v0.0.0
-    	github.com/test/admin/services/rule v0.0.0
+    	github.com/golang-jwt/jwt/v5 v5.3.1
+    	github.com/jackc/pgx/v5 v5.10.0
+    	github.com/redis/go-redis/v9 v9.21.0
+    	github.com/samber/hot v0.7.0
+    	github.com/test/{{ToLower .ServiceName}}/services/authority v0.0.0
+    	google.golang.org/protobuf v1.36.11
+    	gopkg.in/yaml.v3 v3.0.1
     )
 
     replace (
-    	github.com/test/admin/services/rbac => ../../rbac
-    	github.com/test/admin/services/rule => ../../rule
+    	github.com/test/{{ToLower .ServiceName}}/services/authority => ../authority
     )

@@ -14,8 +14,8 @@ body: |
 
     	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1"
-    	"github.com/test/{{ToLower .ServiceName}}/services/rbac/kitex_gen/api/rbac/v1/authservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/authservice"
     )
 
     type AuthHandler struct {{ "{" }}

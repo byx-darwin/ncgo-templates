@@ -1,0 +1,78 @@
+# ncgo exported template — internal/infrastructure/casbin/adapter_test.go
+path: internal/infrastructure/casbin/adapter_test.go
+update_behavior:
+    type: cover
+body: |-
+    package casbin
+
+    import "testing"
+
+    func TestAdapterRoundTripWithMemoryStore(t *testing.T) {
+    	store := NewMemoryPolicyStore()
+    	e, err := NewEnforcer(store)
+    	if err != nil {
+    		t.Fatalf("NewEnforcer: %v", err)
+    	}
+
+    	if _, err := e.AddRoleForUser("1", "admin"); err != nil {
+    		t.Fatalf("AddRoleForUser: %v", err)
+    	}
+    	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {
+    		t.Fatalf("AddPolicy: %v", err)
+    	}
+    	if ok, _ := e.Enforce("1", "user:create", "POST"); !ok {
+    		t.Fatal("Enforce(1, user:create, POST) = false, want true")
+    	}
+    	if ok, _ := e.Enforce("1", "user:delete", "DELETE"); ok {
+    		t.Fatal("Enforce(1, user:delete, DELETE) = true, want false")
+    	}
+
+    	// SavePolicy then a fresh enforcer over the same store sees the policy.
+    	if err := e.SavePolicy(); err != nil {
+    		t.Fatalf("SavePolicy: %v", err)
+    	}
+    	e2, err := NewEnforcer(store)
+    	if err != nil {
+    		t.Fatalf("NewEnforcer(2): %v", err)
+    	}
+    	if err := e2.LoadPolicy(); err != nil {
+    		t.Fatalf("LoadPolicy: %v", err)
+    	}
+    	if ok, _ := e2.Enforce("1", "user:create", "POST"); !ok {
+    		t.Fatal("fresh enforcer: Enforce(1, user:create, POST) = false, want true")
+    	}
+
+    	// RemoveFilteredPolicy removes only the matching subset: the p policy for
+    	// admin goes away but the g role binding remains.
+    	if _, err := e2.RemoveFilteredPolicy(0, "admin"); err != nil {
+    		t.Fatalf("RemoveFilteredPolicy: %v", err)
+    	}
+    	if ok, _ := e2.Enforce("1", "user:create", "POST"); ok {
+    		t.Fatal("after RemoveFilteredPolicy: Enforce = true, want false")
+    	}
+    	if _, err := e2.AddPolicy("admin", "user:create", "POST"); err != nil {
+    		t.Fatalf("re-AddPolicy: %v", err)
+    	}
+    	if ok, _ := e2.Enforce("1", "user:create", "POST"); !ok {
+    		t.Fatal("re-add: Enforce = false, want true")
+    	}
+    }
+
+    func TestMemoryPolicyStoreDeleteFiltered(t *testing.T) {
+    	store := NewMemoryPolicyStore()
+    	_ = store.Insert(t.Context(), Policy{Ptype: "p", V: [6]string{"admin", "user:create", "POST"}})
+    	_ = store.Insert(t.Context(), Policy{Ptype: "p", V: [6]string{"admin", "user:delete", "DELETE"}})
+    	_ = store.Insert(t.Context(), Policy{Ptype: "g", V: [6]string{"1", "admin"}})
+
+    	if err := store.DeleteFiltered(t.Context(), "p", []string{"", "user:delete", ""}); err != nil {
+    		t.Fatalf("DeleteFiltered: %v", err)
+    	}
+    	policies, err := store.List(t.Context())
+    	if err != nil {
+    		t.Fatalf("List: %v", err)
+    	}
+    	if len(policies) != 2 {
+    		t.Fatalf("len(policies) = %d, want 2 (user:create p + g)", len(policies))
+    	}
+    }
+

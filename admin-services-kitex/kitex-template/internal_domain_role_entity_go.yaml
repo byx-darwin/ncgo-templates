@@ -1,0 +1,34 @@
+# ncgo exported template — internal/domain/role/entity.go
+path: internal/domain/role/entity.go
+update_behavior:
+    type: skip
+body: |
+    package role
+
+    import "strings"
+
+    const (
+    	// StatusEnabled is the default active state.
+    	StatusEnabled = 1
+    	// StatusDisabled disables a role.
+    	StatusDisabled = 0
+    )
+
+    // Role is the aggregate root for the role aggregate.
+    type Role struct {{ "{" }}
+    	ID     int64
+    	Code   string
+    	Name   string
+    	Status int // StatusEnabled (1) or StatusDisabled (0)
+    	Remark string
+    {{ "}" }}
+
+    // New creates a Role. The code must be non-empty and is the value referenced
+    // by Casbin policies (p.sub / g.v1).
+    func New(code, name string) (*Role, error) {{ "{" }}
+    	code = strings.TrimSpace(code)
+    	if code == "" {{ "{" }}
+    		return nil, ValidationError{{ "{" }}Field: "code", Msg: "must not be empty"{{ "}" }}
+    	{{ "}" }}
+    	return &Role{{ "{" }}Code: code, Name: name, Status: StatusEnabled{{ "}" }}, nil
+    {{ "}" }}

@@ -66,10 +66,10 @@ body: |
     {{ "}" }}
 
     type rateLimitRuleQuerier interface {{ "{" }}
-    	GetRateLimitExactRuleByAppKey(ctx context.Context, arg *gen.GetRateLimitExactRuleByAppKeyParams) (*gen.GetRateLimitExactRuleByAppKeyRow, error)
-    	GetRateLimitExactRuleFallback(ctx context.Context, arg *gen.GetRateLimitExactRuleFallbackParams) (*gen.GetRateLimitExactRuleFallbackRow, error)
-    	GetRateLimitPatternRuleByAppKey(ctx context.Context, arg *gen.GetRateLimitPatternRuleByAppKeyParams) (*gen.GetRateLimitPatternRuleByAppKeyRow, error)
-    	GetRateLimitPatternRuleFallback(ctx context.Context, arg *gen.GetRateLimitPatternRuleFallbackParams) (*gen.GetRateLimitPatternRuleFallbackRow, error)
+    	GetRateLimitExactRuleByAppKey(ctx context.Context, arg gen.GetRateLimitExactRuleByAppKeyParams) (gen.GetRateLimitExactRuleByAppKeyRow, error)
+    	GetRateLimitExactRuleFallback(ctx context.Context, arg gen.GetRateLimitExactRuleFallbackParams) (gen.GetRateLimitExactRuleFallbackRow, error)
+    	GetRateLimitPatternRuleByAppKey(ctx context.Context, arg gen.GetRateLimitPatternRuleByAppKeyParams) (gen.GetRateLimitPatternRuleByAppKeyRow, error)
+    	GetRateLimitPatternRuleFallback(ctx context.Context, arg gen.GetRateLimitPatternRuleFallbackParams) (gen.GetRateLimitPatternRuleFallbackRow, error)
     {{ "}" }}
 
     // RateLimitRuleRepository is the generated sqlc-backed repository for
@@ -126,7 +126,7 @@ body: |
     {{ "}" }}
 
     func (r *RateLimitRuleRepository) findExactRuleByAppKey(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {{ "{" }}
-    	row, err := r.q.GetRateLimitExactRuleByAppKey(ctx, &gen.GetRateLimitExactRuleByAppKeyParams{{ "{" }}
+    	row, err := r.q.GetRateLimitExactRuleByAppKey(ctx, gen.GetRateLimitExactRuleByAppKeyParams{{ "{" }}
     		Service: lookup.Service,
     		Phase:   lookup.Phase,
     		Method:  lookup.Method,
@@ -140,7 +140,7 @@ body: |
     {{ "}" }}
 
     func (r *RateLimitRuleRepository) findExactRuleFallback(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {{ "{" }}
-    	row, err := r.q.GetRateLimitExactRuleFallback(ctx, &gen.GetRateLimitExactRuleFallbackParams{{ "{" }}
+    	row, err := r.q.GetRateLimitExactRuleFallback(ctx, gen.GetRateLimitExactRuleFallbackParams{{ "{" }}
     		Service: lookup.Service,
     		Phase:   lookup.Phase,
     		Method:  lookup.Method,
@@ -153,7 +153,7 @@ body: |
     {{ "}" }}
 
     func (r *RateLimitRuleRepository) findPatternRuleByAppKey(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {{ "{" }}
-    	row, err := r.q.GetRateLimitPatternRuleByAppKey(ctx, &gen.GetRateLimitPatternRuleByAppKeyParams{{ "{" }}
+    	row, err := r.q.GetRateLimitPatternRuleByAppKey(ctx, gen.GetRateLimitPatternRuleByAppKeyParams{{ "{" }}
     		Service:     lookup.Service,
     		Phase:       lookup.Phase,
     		Method:      lookup.Method,
@@ -167,7 +167,7 @@ body: |
     {{ "}" }}
 
     func (r *RateLimitRuleRepository) findPatternRuleFallback(ctx context.Context, lookup normalizedRateLimitLookup) (*RateLimitRuleRecord, error) {{ "{" }}
-    	row, err := r.q.GetRateLimitPatternRuleFallback(ctx, &gen.GetRateLimitPatternRuleFallbackParams{{ "{" }}
+    	row, err := r.q.GetRateLimitPatternRuleFallback(ctx, gen.GetRateLimitPatternRuleFallbackParams{{ "{" }}
     		Service:     lookup.Service,
     		Phase:       lookup.Phase,
     		Method:      lookup.Method,
@@ -183,7 +183,7 @@ body: |
     	return &value
     {{ "}" }}
 
-    func rateLimitRuleRecordFromExactAppKeyRow(row *gen.GetRateLimitExactRuleByAppKeyRow) *RateLimitRuleRecord {{ "{" }}
+    func rateLimitRuleRecordFromExactAppKeyRow(row gen.GetRateLimitExactRuleByAppKeyRow) *RateLimitRuleRecord {{ "{" }}
     	return buildRateLimitRuleRecord(
     		row.Enabled,
     		row.KeyBy,
@@ -196,7 +196,7 @@ body: |
     	)
     {{ "}" }}
 
-    func rateLimitRuleRecordFromExactFallbackRow(row *gen.GetRateLimitExactRuleFallbackRow) *RateLimitRuleRecord {{ "{" }}
+    func rateLimitRuleRecordFromExactFallbackRow(row gen.GetRateLimitExactRuleFallbackRow) *RateLimitRuleRecord {{ "{" }}
     	return buildRateLimitRuleRecord(
     		row.Enabled,
     		row.KeyBy,
@@ -209,7 +209,7 @@ body: |
     	)
     {{ "}" }}
 
-    func rateLimitRuleRecordFromPatternAppKeyRow(row *gen.GetRateLimitPatternRuleByAppKeyRow) *RateLimitRuleRecord {{ "{" }}
+    func rateLimitRuleRecordFromPatternAppKeyRow(row gen.GetRateLimitPatternRuleByAppKeyRow) *RateLimitRuleRecord {{ "{" }}
     	return buildRateLimitRuleRecord(
     		row.Enabled,
     		row.KeyBy,
@@ -222,7 +222,7 @@ body: |
     	)
     {{ "}" }}
 
-    func rateLimitRuleRecordFromPatternFallbackRow(row *gen.GetRateLimitPatternRuleFallbackRow) *RateLimitRuleRecord {{ "{" }}
+    func rateLimitRuleRecordFromPatternFallbackRow(row gen.GetRateLimitPatternRuleFallbackRow) *RateLimitRuleRecord {{ "{" }}
     	return buildRateLimitRuleRecord(
     		row.Enabled,
     		row.KeyBy,

@@ -1,0 +1,51 @@
+# ncgo exported template — conf/dev/conf.yaml
+path: conf/dev/conf.yaml
+update_behavior:
+    type: skip
+body: |
+    env: dev
+    debug: true
+    server:
+      rpc:
+        port: ":8889"
+        network: "tcp"
+      registry:
+        name: rulecenter
+      timeout:
+        read_write_timeout: "30s"
+        exit_wait_timeout: "10s"
+    rpc:
+      request_timeout_seconds: "3s"
+    auth:
+      caller_allowlist:
+        enabled: false
+        header: x-caller-service
+        allowed_callers: []
+        allow_missing: false
+    database:
+      enabled: true
+      dsn: "postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable"
+      max_conns: 20
+      min_conns: 2
+      max_conn_lifetime_seconds: "1800s"
+      max_conn_idle_time_seconds: "300s"
+      health_check_period_seconds: "30s"
+    redis:
+      addrs:
+        - 127.0.0.1:6379
+      db: 0
+      pool_size: 10
+      min_idle_conns: 2
+      dial_timeout: "5s"
+      read_timeout: "3s"
+      write_timeout: "3s"
+      pool_timeout: "4s"
+    rate_limit:
+      enabled: false
+      backend: "memory"
+      source:
+        type: "database"
+    log:
+      level: "info"
+      format: "console"
+      mode: "console"

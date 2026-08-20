@@ -39,40 +39,32 @@ body: |
     	patternFallbackErr error
     {{ "}" }}
 
-    func (s *stubRateLimitRuleQuerier) GetRateLimitExactRuleByAppKey(ctx context.Context, arg *gen.GetRateLimitExactRuleByAppKeyParams) (*gen.GetRateLimitExactRuleByAppKeyRow, error) {{ "{" }}
+    func (s *stubRateLimitRuleQuerier) GetRateLimitExactRuleByAppKey(ctx context.Context, arg gen.GetRateLimitExactRuleByAppKeyParams) (gen.GetRateLimitExactRuleByAppKeyRow, error) {{ "{" }}
     	_ = ctx
-    	if arg != nil {{ "{" }}
-    		s.seenServices = append(s.seenServices, arg.Service)
-    	{{ "}" }}
+    	s.seenServices = append(s.seenServices, arg.Service)
     	s.calls = append(s.calls, "exact_app")
-    	return s.exactAppKeyRow, s.exactAppKeyErr
+    	return *s.exactAppKeyRow, s.exactAppKeyErr
     {{ "}" }}
 
-    func (s *stubRateLimitRuleQuerier) GetRateLimitExactRuleFallback(ctx context.Context, arg *gen.GetRateLimitExactRuleFallbackParams) (*gen.GetRateLimitExactRuleFallbackRow, error) {{ "{" }}
+    func (s *stubRateLimitRuleQuerier) GetRateLimitExactRuleFallback(ctx context.Context, arg gen.GetRateLimitExactRuleFallbackParams) (gen.GetRateLimitExactRuleFallbackRow, error) {{ "{" }}
     	_ = ctx
-    	if arg != nil {{ "{" }}
-    		s.seenServices = append(s.seenServices, arg.Service)
-    	{{ "}" }}
+    	s.seenServices = append(s.seenServices, arg.Service)
     	s.calls = append(s.calls, "exact_fallback")
-    	return s.exactFallbackRow, s.exactFallbackErr
+    	return *s.exactFallbackRow, s.exactFallbackErr
     {{ "}" }}
 
-    func (s *stubRateLimitRuleQuerier) GetRateLimitPatternRuleByAppKey(ctx context.Context, arg *gen.GetRateLimitPatternRuleByAppKeyParams) (*gen.GetRateLimitPatternRuleByAppKeyRow, error) {{ "{" }}
+    func (s *stubRateLimitRuleQuerier) GetRateLimitPatternRuleByAppKey(ctx context.Context, arg gen.GetRateLimitPatternRuleByAppKeyParams) (gen.GetRateLimitPatternRuleByAppKeyRow, error) {{ "{" }}
     	_ = ctx
-    	if arg != nil {{ "{" }}
-    		s.seenServices = append(s.seenServices, arg.Service)
-    	{{ "}" }}
+    	s.seenServices = append(s.seenServices, arg.Service)
     	s.calls = append(s.calls, "pattern_app")
-    	return s.patternAppKeyRow, s.patternAppKeyErr
+    	return *s.patternAppKeyRow, s.patternAppKeyErr
     {{ "}" }}
 
-    func (s *stubRateLimitRuleQuerier) GetRateLimitPatternRuleFallback(ctx context.Context, arg *gen.GetRateLimitPatternRuleFallbackParams) (*gen.GetRateLimitPatternRuleFallbackRow, error) {{ "{" }}
+    func (s *stubRateLimitRuleQuerier) GetRateLimitPatternRuleFallback(ctx context.Context, arg gen.GetRateLimitPatternRuleFallbackParams) (gen.GetRateLimitPatternRuleFallbackRow, error) {{ "{" }}
     	_ = ctx
-    	if arg != nil {{ "{" }}
-    		s.seenServices = append(s.seenServices, arg.Service)
-    	{{ "}" }}
+    	s.seenServices = append(s.seenServices, arg.Service)
     	s.calls = append(s.calls, "pattern_fallback")
-    	return s.patternFallbackRow, s.patternFallbackErr
+    	return *s.patternFallbackRow, s.patternFallbackErr
     {{ "}" }}
 
     func (s stubRateLimitRuleFinder) FindRule(ctx context.Context, service, phase, method, path, appKey string) (*RateLimitRuleRecord, error) {{ "{" }}

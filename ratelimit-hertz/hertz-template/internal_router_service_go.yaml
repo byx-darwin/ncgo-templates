@@ -1,0 +1,49 @@
+# ncgo exported template — internal/router/service.go
+path: internal/router/service.go
+update_behavior:
+    type: cover
+body: |-
+    package router
+
+    import (
+        "github.com/cloudwego/hertz/pkg/app/server"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/handler"
+        "{{.Module}}/internal/pkg/middleware"
+    )
+
+    // RegisterServiceRoutes registers service routes with rate limiting
+    func RegisterServiceRoutes(h *server.Hertz) {
+        cfg := conf.Get()
+
+        resourceHandler := handler.NewResourceHandler()
+
+        api := h.Group("/api/v1")
+
+        // ── Signature verification (optional, for open-api callers) ─────────
+        if cfg.Auth.Signature.Enabled {
+            resolver := middleware.StaticSecretResolver{SecretValue: cfg.Auth.Signature.StaticSecret}
+            api.Use(middleware.SignatureAuth(cfg.Auth.Signature, resolver))
+        }
+
+        // ── Idempotency (optional, for POST/PUT/DELETE) ─────────────────────
+        if cfg.Idempotency.Enabled {
+            api.Use(middleware.Idempotency(cfg.Idempotency))
+        }
+
+        // Public routes (no JWT)
+        api.GET("/health", resourceHandler.Health)
+
+        // Protected routes (JWT required, rate limited)
+        protected := api.Group("")
+        protected.Use(middleware.JWT(cfg.JWT.Secret))
+
+        // Example protected endpoints (all are rate limited by middleware)
+        resources := protected.Group("/resources")
+        resources.GET("", resourceHandler.List)
+        resources.GET("/:id", resourceHandler.Get)
+        resources.POST("", resourceHandler.Create)
+        resources.PUT("/:id", resourceHandler.Update)
+        resources.DELETE("/:id", resourceHandler.Delete)
+    }

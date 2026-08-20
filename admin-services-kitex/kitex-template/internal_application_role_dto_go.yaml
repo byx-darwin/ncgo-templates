@@ -1,0 +1,29 @@
+# ncgo exported template — internal/application/role/dto.go
+path: internal/application/role/dto.go
+update_behavior:
+    type: skip
+body: |
+    package rolesvc
+
+    import "{{.Module}}/internal/domain/role"
+
+    // CreateRoleInput is the command to create a role.
+    type CreateRoleInput struct {{ "{" }}
+    	Code   string
+    	Name   string
+    	Remark string
+    {{ "}" }}
+
+    // UpdateRoleInput is the command to update a role.
+    type UpdateRoleInput struct {{ "{" }}
+    	ID     int64
+    	Name   string
+    	Status *int
+    	Remark *string
+    {{ "}" }}
+
+    // ListRolesResult is a page of roles plus the total count.
+    type ListRolesResult struct {{ "{" }}
+    	Roles []*role.Role
+    	Total int32
+    {{ "}" }}

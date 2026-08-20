@@ -1,0 +1,53 @@
+# ncgo exported template — internal/infrastructure/auth/jwt_test.go
+path: internal/infrastructure/auth/jwt_test.go
+update_behavior:
+    type: cover
+body: |-
+    package auth
+
+    import (
+    	"testing"
+    	"time"
+    )
+
+    func TestJWTManagerRoundTrip(t *testing.T) {
+    	mgr := NewJWTManager("test-secret-change-me")
+    	token, err := mgr.Sign(42, []string{"admin"}, 5*time.Minute)
+    	if err != nil {
+    		t.Fatalf("Sign: %v", err)
+    	}
+    	claims, err := mgr.Parse(token)
+    	if err != nil {
+    		t.Fatalf("Parse: %v", err)
+    	}
+    	if claims.Uid != 42 {
+    		t.Fatalf("Uid = %d, want 42", claims.Uid)
+    	}
+    	if len(claims.Roles) != 1 || claims.Roles[0] != "admin" {
+    		t.Fatalf("Roles = %v, want [admin]", claims.Roles)
+    	}
+    }
+
+    func TestJWTExpiredRejected(t *testing.T) {
+    	mgr := NewJWTManager("test-secret-change-me")
+    	token, err := mgr.Sign(1, nil, -time.Minute)
+    	if err != nil {
+    		t.Fatalf("Sign: %v", err)
+    	}
+    	if _, err := mgr.Parse(token); err == nil {
+    		t.Fatal("Parse(expired) = nil, want error")
+    	}
+    }
+
+    func TestJWTWrongSecretRejected(t *testing.T) {
+    	mgr := NewJWTManager("test-secret-change-me")
+    	token, err := mgr.Sign(1, nil, 5*time.Minute)
+    	if err != nil {
+    		t.Fatalf("Sign: %v", err)
+    	}
+    	other := NewJWTManager("different-secret")
+    	if _, err := other.Parse(token); err == nil {
+    		t.Fatal("Parse with wrong secret = nil, want error")
+    	}
+    }
+

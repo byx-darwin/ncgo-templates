@@ -1,0 +1,15 @@
+# ncgo exported template — internal/domain/permission/valueobject.go
+path: internal/domain/permission/valueobject.go
+update_behavior:
+    type: skip
+body: |
+    package permission
+
+    // Code is a value object wrapping the unified permission code.
+    type Code string
+
+    // String returns the raw code.
+    func (c Code) String() string {{ "{" }} return string(c) {{ "}" }}
+
+    // Empty reports whether the code is unset.
+    func (c Code) Empty() bool {{ "{" }} return c == "" {{ "}" }}

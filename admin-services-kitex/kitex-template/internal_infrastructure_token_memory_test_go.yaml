@@ -1,0 +1,57 @@
+# ncgo exported template — internal/infrastructure/token/memory_test.go
+path: internal/infrastructure/token/memory_test.go
+update_behavior:
+    type: cover
+body: |-
+    package token
+
+    import (
+    	"testing"
+    	"time"
+    )
+
+    func TestMemoryStoreRoundTrip(t *testing.T) {
+    	ctx := t.Context()
+    	s := NewMemoryStore()
+
+    	if err := s.SetRefresh(ctx, 42, "refresh-token-1", time.Minute); err != nil {
+    		t.Fatalf("SetRefresh: %v", err)
+    	}
+    	uid, err := s.GetRefresh(ctx, "refresh-token-1")
+    	if err != nil {
+    		t.Fatalf("GetRefresh: %v", err)
+    	}
+    	if uid != 42 {
+    		t.Fatalf("uid = %d, want 42", uid)
+    	}
+
+    	if err := s.DeleteRefresh(ctx, "refresh-token-1"); err != nil {
+    		t.Fatalf("DeleteRefresh: %v", err)
+    	}
+    	if _, err := s.GetRefresh(ctx, "refresh-token-1"); err == nil {
+    		t.Fatal("GetRefresh after Delete = nil, want error")
+    	}
+
+    	if err := s.Blacklist(ctx, "access-token-1", time.Minute); err != nil {
+    		t.Fatalf("Blacklist: %v", err)
+    	}
+    	blacked, err := s.IsBlacklisted(ctx, "access-token-1")
+    	if err != nil {
+    		t.Fatalf("IsBlacklisted: %v", err)
+    	}
+    	if !blacked {
+    		t.Fatal("IsBlacklisted = false, want true")
+    	}
+    }
+
+    func TestMemoryStoreExpiry(t *testing.T) {
+    	ctx := t.Context()
+    	s := NewMemoryStore()
+    	_ = s.SetRefresh(ctx, 1, "refresh-expired", time.Nanosecond)
+    	// let it expire
+    	time.Sleep(time.Millisecond)
+    	if _, err := s.GetRefresh(ctx, "refresh-expired"); err == nil {
+    		t.Fatal("GetRefresh(expired) = nil, want error")
+    	}
+    }
+

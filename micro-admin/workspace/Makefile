@@ -50,9 +50,9 @@ test:
 	@./scripts/e2e-test.sh
 
 infra-up:
-	@docker compose up -d postgres redis
+	@docker compose -f compose.infra.yaml up -d
 	@echo "==> Infrastructure started (postgres:5432, redis:6379)"
 
 infra-down:
-	@docker compose down
+	@docker compose -f compose.infra.yaml down
 	@echo "==> Infrastructure stopped"

@@ -14,8 +14,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1"
-    	"github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
+    	api "github.com/test/{{ToLower .ServiceName}}/services/rule/kitex_gen/api/ratelimit/v1"
+    	"github.com/test/{{ToLower .ServiceName}}/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
     )
 
     type RateLimitHandler struct {{ "{" }}
@@ -27,7 +27,7 @@ body: |
     {{ "}" }}
 
     func (h *RateLimitHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rulecenterCli.ListRules(ctx, &api.ListRulesRequest{{ "{" }}{{ "}" }})
+    	resp, err := h.rulecenterCli.ListRules(ctx, &api.ListRulesReq{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -36,44 +36,44 @@ body: |
     {{ "}" }}
 
     func (h *RateLimitHandler) Create(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req api.CreateRuleRequest
+    	var req api.CreateRuleReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
 
-    	resp, err := h.rulecenterCli.CreateRule(ctx, &req)
+    	_, err := h.rulecenterCli.CreateRule(ctx, &req)
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
-    	response.OK(c, resp.Rule)
+    	response.OK(c, nil)
     {{ "}" }}
 
     func (h *RateLimitHandler) Update(ctx context.Context, c *app.RequestContext) {{ "{" }}
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	var req api.UpdateRuleRequest
+    	var req api.UpdateRuleReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
     	req.Id = id
 
-    	resp, err := h.rulecenterCli.UpdateRule(ctx, &req)
+    	_, err := h.rulecenterCli.UpdateRule(ctx, &req)
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
-    	response.OK(c, resp.Rule)
+    	response.OK(c, nil)
     {{ "}" }}
 
     func (h *RateLimitHandler) Delete(ctx context.Context, c *app.RequestContext) {{ "{" }}
     	idStr := c.Param("id")
     	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	_, err := h.rulecenterCli.DeleteRule(ctx, &api.DeleteRuleRequest{{ "{" }}Id: id{{ "}" }})
+    	_, err := h.rulecenterCli.DeleteRule(ctx, &api.DeleteRuleReq{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

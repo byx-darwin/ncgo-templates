@@ -20,7 +20,7 @@ body: |
     	secret := "test-secret"
     	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
     		"uuid":  "user-123",
-    		"roles": []interface{{ "{" }}{{ "}" }}{{ "{" }}"admin"{{ "}" }},
+    		"roles": []interface{{ "{" }}{{ "}" }}{{ "{" }}"{{ToLower .ServiceName}}"{{ "}" }},
     		"exp":   time.Now().Add(time.Hour).Unix(),
     	{{ "}" }})
     	tokenStr, _ := token.SignedString([]byte(secret))

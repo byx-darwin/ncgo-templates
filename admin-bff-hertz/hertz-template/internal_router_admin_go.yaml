@@ -12,7 +12,7 @@ body: |
     	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/handler"
     	"{{.Module}}/internal/pkg/middleware"
-    	"github.com/test/admin/services/rbac/kitex_gen/api/auth/v1/authservice"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/authservice"
     	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     	"github.com/test/admin/services/rule/kitex_gen/api/ratelimit/v1/ruleservice"
     )

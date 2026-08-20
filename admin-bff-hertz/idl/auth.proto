@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.auth.v1;
 
-option go_package = "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/kitex_gen/api/auth/v1;authv1";
+option go_package = "{{.Module}}/kitex_gen/api/auth/v1;authv1";
 
 import "api.proto";
 

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.ratelimit.v1;
 
-option go_package = "github.com/byx-darwin/ncgo-templates/admin-bff-hertz/kitex_gen/api/ratelimit/v1;ratelimitv1";
+option go_package = "{{.Module}}/kitex_gen/api/ratelimit/v1;ratelimitv1";
 
 import "api.proto";
 

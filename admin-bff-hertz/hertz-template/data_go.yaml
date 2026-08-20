@@ -1,0 +1,113 @@
+# Hertz custom template — base/data.go
+# Generates core infrastructure layer.
+# Database (pgxpool/sqlc) code is conditional on WithDatabase;
+# shared helpers (Redis) are always present.
+# Wire up via samber/do in internal/base/server/server.go.
+path: internal/base/data/data.go
+update_behavior:
+  type: cover
+body: |-
+  package data
+
+  import (
+  {{if .WithDatabase}}
+      "context"
+
+      goerror "github.com/byx-darwin/go-tools/go-common/error"
+      frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+      "github.com/jackc/pgx/v5/pgxpool"
+
+      "{{.Module}}/internal/base/conf"
+      "{{.Module}}/internal/db/gen"
+  {{end}}
+  )
+  {{if .WithDatabase}}
+
+  // Data holds shared infrastructure clients.
+  // Add optional clients (Redis / Kafka / ES / ClickHouse) by copying files
+  // from this skill's assets/optional/ directory into this package.
+  type Data struct {
+      Pool    *pgxpool.Pool // native pgx pool — supports Batch, CopyFrom, LISTEN/NOTIFY
+      Queries *gen.Queries  // sqlc-generated query methods
+  }
+
+  // New initialises core infrastructure connections.
+  func New(pool *pgxpool.Pool) (*Data, func(), error) {
+      queries := gen.New(pool)
+      cleanup := func() {
+          pool.Close()
+      }
+      return &Data{Pool: pool, Queries: queries}, cleanup, nil
+  }
+
+  // NewPostgres opens and validates a PostgreSQL connection pool via native pgx/v5.
+  func NewPostgres(ctx context.Context, cfg *pgxpool.Config) (*pgxpool.Pool, error) {
+      if cfg == nil {
+          return nil, goerror.
+              In("postgres").
+              Tags("database", "postgres", "connection").
+              Code(frameworkerror.CodeConfigInvalid).
+              Public("config_invalid").
+              New("pgxpool.Config is nil")
+      }
+      pool, err := pgxpool.NewWithConfig(ctx, cfg)
+      if err != nil {
+          return nil, goerror.
+              In("postgres").
+              Tags("database", "postgres", "connection").
+              Code(frameworkerror.CodeRPCUnavailable).
+              Public("database_unavailable").
+              With("max_conns", cfg.MaxConns).
+              With("min_conns", cfg.MinConns).
+              Wrapf(err, "pgxpool.NewWithConfig")
+      }
+      if err := pool.Ping(ctx); err != nil {
+          pool.Close()
+          return nil, goerror.
+              In("postgres").
+              Tags("database", "postgres", "connection").
+              Code(frameworkerror.CodeRPCUnavailable).
+              Public("database_unavailable").
+              With("max_conns", cfg.MaxConns).
+              With("min_conns", cfg.MinConns).
+              Wrapf(err, "pool.Ping")
+      }
+      return pool, nil
+  }
+
+  // NewPostgresConfig parses a DSN into pgxpool.Config.
+  func NewPostgresConfig(dsn string) (*pgxpool.Config, error) {
+      if dsn == "" {
+          return nil, goerror.
+              In("postgres").
+              Tags("database", "postgres", "configuration").
+              Code(frameworkerror.CodeConfigInvalid).
+              Public("config_invalid").
+              New("postgres DSN is empty")
+      }
+      cfg, err := pgxpool.ParseConfig(dsn)
+      if err != nil {
+          return nil, goerror.
+              In("postgres").
+              Tags("database", "postgres", "configuration").
+              Code(frameworkerror.CodeConfigInvalid).
+              Public("config_invalid").
+              Wrapf(err, "pgxpool.ParseConfig")
+      }
+      return cfg, nil
+  }
+
+  // NewPostgresConfigFromDatabase converts conf.DatabaseConfig into pgxpool.Config.
+  func NewPostgresConfigFromDatabase(cfg conf.DatabaseConfig) (*pgxpool.Config, error) {
+      pgCfg, err := NewPostgresConfig(cfg.DSN)
+      if err != nil {
+          return nil, err
+      }
+      pgCfg.MaxConns = cfg.MaxConns
+      pgCfg.MinConns = cfg.MinConns
+      pgCfg.MaxConnLifetime = cfg.MaxConnLifetimeSeconds.Duration
+      pgCfg.MaxConnIdleTime = cfg.MaxConnIdleTimeSeconds.Duration
+      pgCfg.HealthCheckPeriod = cfg.HealthCheckPeriodSeconds.Duration
+      return pgCfg, nil
+  }
+  {{end}}

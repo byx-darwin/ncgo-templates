@@ -14,15 +14,15 @@ body: |
 
     	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
-    	rbacclient "{{.Module}}/pkg/client/rbac"
-    	api "{{.Module}}/kitex_gen/api/auth/v1"
+    	api "github.com/test/admin/services/rbac/kitex_gen/api/auth/v1"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/auth/v1/authservice"
     )
 
     type AuthHandler struct {{ "{" }}
-    	rbacCli *rbacclient.Client
+    	rbacCli authservice.Client
     {{ "}" }}
 
-    func NewAuthHandler(rbacCli *rbacclient.Client) *AuthHandler {{ "{" }}
+    func NewAuthHandler(rbacCli authservice.Client) *AuthHandler {{ "{" }}
     	return &AuthHandler{{ "{" }}rbacCli: rbacCli{{ "}" }}
     {{ "}" }}
 
@@ -38,7 +38,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.AuthService().Login(ctx, &api.LoginRequest{{ "{" }}
+    	resp, err := h.rbacCli.Login(ctx, &api.LoginRequest{{ "{" }}
     		Username: req.Username,
     		Password: req.Password,
     	{{ "}" }})
@@ -63,7 +63,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.AuthService().Refresh(ctx, &api.RefreshRequest{{ "{" }}
+    	resp, err := h.rbacCli.Refresh(ctx, &api.RefreshRequest{{ "{" }}
     		RefreshToken: req.RefreshToken,
     	{{ "}" }})
     	if err != nil {{ "{" }}
@@ -85,7 +85,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	_, err := h.rbacCli.AuthService().Logout(ctx, &api.LogoutRequest{{ "{" }}
+    	_, err := h.rbacCli.Logout(ctx, &api.LogoutRequest{{ "{" }}
     		UserId: claims.UUID,
     	{{ "}" }})
     	if err != nil {{ "{" }}

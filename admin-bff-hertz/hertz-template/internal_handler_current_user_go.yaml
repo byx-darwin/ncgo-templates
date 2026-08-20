@@ -13,15 +13,15 @@ body: |
 
     	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
-    	rbacclient "{{.Module}}/pkg/client/rbac"
-    	api "{{.Module}}/kitex_gen/api/rbac/v1"
+    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type CurrentUserHandler struct {{ "{" }}
-    	rbacCli *rbacclient.Client
+    	rbacCli rbacservice.Client
     {{ "}" }}
 
-    func NewCurrentUserHandler(rbacCli *rbacclient.Client) *CurrentUserHandler {{ "{" }}
+    func NewCurrentUserHandler(rbacCli rbacservice.Client) *CurrentUserHandler {{ "{" }}
     	return &CurrentUserHandler{{ "{" }}rbacCli: rbacCli{{ "}" }}
     {{ "}" }}
 
@@ -32,7 +32,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.RBACService().GetUserMenuTree(ctx, &api.GetUserMenuTreeRequest{{ "{" }}
+    	resp, err := h.rbacCli.GetUserMenuTree(ctx, &api.GetUserMenuTreeRequest{{ "{" }}
     		UserId: claims.UUID,
     	{{ "}" }})
     	if err != nil {{ "{" }}
@@ -50,7 +50,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	resp, err := h.rbacCli.RBACService().GetUserPermCodes(ctx, &api.GetUserPermCodesRequest{{ "{" }}
+    	resp, err := h.rbacCli.GetUserPermCodes(ctx, &api.GetUserPermCodesRequest{{ "{" }}
     		UserId: claims.UUID,
     	{{ "}" }})
     	if err != nil {{ "{" }}

@@ -11,8 +11,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	rbacclient "{{.Module}}/pkg/client/rbac"
-    	api "{{.Module}}/kitex_gen/api/rbac/v1"
+    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type permissionKey struct{{ "{" }}{{ "}" }}
@@ -41,7 +41,7 @@ body: |
     {{ "}" }}
 
     // Authz returns an authorization middleware that checks permissions via RBAC service
-    func Authz(rbacCli *rbacclient.Client) app.HandlerFunc {{ "{" }}
+    func Authz(rbacCli rbacservice.Client) app.HandlerFunc {{ "{" }}
     	return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
     		perm := GetPermission(c)
     		if perm == "" {{ "{" }}
@@ -56,7 +56,7 @@ body: |
     			return
     		{{ "}" }}
 
-    		resp, err := rbacCli.RBACService().Enforce(ctx, &api.EnforceRequest{{ "{" }}
+    		resp, err := rbacCli.Enforce(ctx, &api.EnforceRequest{{ "{" }}
     			Sub: claims.UUID,
     			Obj: perm,
     			Act: "execute",

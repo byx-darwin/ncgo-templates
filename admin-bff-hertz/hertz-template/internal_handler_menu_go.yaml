@@ -12,20 +12,20 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	rbacclient "{{.Module}}/pkg/client/rbac"
-    	api "{{.Module}}/kitex_gen/api/rbac/v1"
+    	api "github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1"
+    	"github.com/test/admin/services/rbac/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type MenuHandler struct {{ "{" }}
-    	rbacCli *rbacclient.Client
+    	rbacCli rbacservice.Client
     {{ "}" }}
 
-    func NewMenuHandler(rbacCli *rbacclient.Client) *MenuHandler {{ "{" }}
+    func NewMenuHandler(rbacCli rbacservice.Client) *MenuHandler {{ "{" }}
     	return &MenuHandler{{ "{" }}rbacCli: rbacCli{{ "}" }}
     {{ "}" }}
 
     func (h *MenuHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rbacCli.RBACService().ListMenus(ctx, &api.ListMenusRequest{{ "{" }}{{ "}" }})
+    	resp, err := h.rbacCli.ListMenus(ctx, &api.ListMenusRequest{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

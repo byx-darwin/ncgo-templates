@@ -25,60 +25,73 @@ This template provides a **workspace shell** that orchestrates three service tem
 ### 1. Create Workspace
 
 ```bash
-ncgo new --mode micro my-admin --module github.com/acme/my-admin --template micro-admin
-cd my-admin
+mkdir my-admin && cd my-admin
+ncgo new --mode micro my-admin --module github.com/acme/my-admin --dir .
 ```
 
-### 2. Add Services
+### 2. Copy Workspace Shell
 
 ```bash
-# Add RBAC service
-ncgo add rpc rbac --template rbac-kitex
-
-# Add Admin BFF
-ncgo add bff admin --template admin-bff-hertz
-
-# Add Rule Center service
-ncgo add rpc rule --template rule-center
+# Copy infrastructure compose and Makefile from micro-admin template
+cp -r /path/to/micro-admin/workspace/compose.infra.yaml .
+cp -r /path/to/micro-admin/workspace/Makefile .
 ```
 
-### 3. Start Infrastructure
+### 3. Add Services
+
+```bash
+# Add RBAC service (authority)
+ncgo add rpc rbac --template-dir /path/to/rbac-kitex
+
+# Add Admin BFF (HTTP gateway)
+ncgo add bff admin --template-dir /path/to/admin-bff-hertz
+
+# Add Rule Center service (rate-limit)
+ncgo add rpc rule --template-dir /path/to/rule-center
+```
+
+### 4. Start Infrastructure
 
 ```bash
 # Start postgres + redis
 make infra-up
 
 # Or manually:
-docker compose up -d postgres redis
+docker compose -f compose.infra.yaml up -d
 ```
 
-### 4. Initialize Databases
+### 5. Initialize Databases
 
 ```bash
-# Run migrations for rbac-rpc
-cd services/rbac-rpc
-make migrate
+# Run migrations for rbac
+cd services/rbac
+make sqlc
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
 
-# Run migrations for rule-rpc
-cd ../rule-rpc
-make migrate
+# Run migrations for rule
+cd ../rule
+make sqlc
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
 
 cd ../..
 ```
 
-### 5. Start Services
+### 6. Build & Start Services
 
 ```bash
-# Start all services
-make dev
+# Build all services
+cd services/rbac && go mod tidy && go build . && cd ../..
+cd services/admin && go mod tidy && go build . && cd ../..
+cd services/rule && go mod tidy && go build . && cd ../..
 
-# Or start individually:
-cd services/rbac-rpc && go run . &
-cd services/admin-bff && go run . &
-cd services/rule-rpc && go run . &
+# Start all services
+cd services/rbac && ./rbac > /tmp/rbac.log 2>&1 &
+cd services/admin && ./admin > /tmp/admin.log 2>&1 &
+cd services/rule && ./rule > /tmp/rule.log 2>&1 &
+cd ../..
 ```
 
-### 6. Test
+### 7. Test
 
 ```bash
 # Login
@@ -111,17 +124,100 @@ make test
 ```
 my-admin/
 ├── ncgo.workspace          # micro workspace metadata
-├── compose.yaml            # postgres + redis
+├── compose.yaml            # service containers (ncgo-generated)
+├── compose.infra.yaml      # postgres + redis infrastructure
 ├── Makefile                # workspace commands
 ├── .pre-commit-config.yaml # git hooks
 ├── scripts/
 │   ├── e2e-test.sh        # E2E test runner
 │   └── smoke-test.sh      # Happy-path smoke test
 └── services/
-    ├── rbac-rpc/           # Kitex RBAC service
-    ├── admin-bff/          # Hertz Admin BFF
-    └── rule-rpc/           # Kitex Rule Center service
+    ├── rbac/               # Kitex RBAC service
+    ├── admin/              # Hertz Admin BFF
+    └── rule/               # Kitex Rule Center service
 ```
+
+## Integration Testing
+
+Complete integration test flow from workspace creation to service validation:
+
+### 1. Create Workspace
+
+```bash
+mkdir -p /tmp/micro-admin-test && cd /tmp/micro-admin-test
+ncgo new --mode micro test-admin --module github.com/test/admin --dir .
+```
+
+### 2. Add Services
+
+```bash
+# Copy workspace shell
+cp -r /path/to/micro-admin/workspace/* .
+
+# Add services (triggers code generation)
+ncgo add rpc rbac --template-dir /path/to/rbac-kitex
+ncgo add bff admin --template-dir /path/to/admin-bff-hertz
+ncgo add rpc rule --template-dir /path/to/rule-center
+```
+
+### 3. Start Infrastructure
+
+```bash
+docker compose -f compose.infra.yaml up -d
+sleep 5
+```
+
+### 4. Run Database Migrations
+
+```bash
+cd services/rbac && make sqlc
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
+cd ../rule && make sqlc
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
+cd ../..
+```
+
+### 5. Start Services
+
+```bash
+cd services/rbac && go mod tidy && go build . && ./rbac &
+cd services/admin && go mod tidy && go build . && ./admin &
+cd services/rule && go mod tidy && go build . && ./rule &
+cd ../..
+
+sleep 10
+```
+
+### 6. Run Smoke Test
+
+```bash
+./scripts/smoke-test.sh
+```
+
+Expected output:
+```
+==> Smoke test: Service interactions
+  [1/4] Login (admin-bff → rbac-rpc)...
+  ✓ Login successful
+  [2/4] Get menus (admin-bff → rbac-rpc)...
+  ✓ Menus retrieved
+  [3/4] Create user (admin-bff → rbac-rpc with Authz)...
+  ✓ User created
+  [4/4] Create rate-limit rule (admin-bff → rule-rpc)...
+  ✓ Rate-limit rule created
+
+==> Smoke test: PASSED
+```
+
+### Service Interactions Verified
+
+- ✅ admin-bff → rbac-rpc: Login (AuthService)
+- ✅ admin-bff → rbac-rpc: GetMenus (RBACService)
+- ✅ admin-bff → rbac-rpc: CreateUser (RBACService with Authz)
+- ✅ admin-bff → rule-rpc: CreateRule (RuleService)
+- ✅ JWT token propagation across services
+- ✅ Database connections (postgres)
+- ✅ Service health (all listening on expected ports)
 
 ## Graceful Degradation
 

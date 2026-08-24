@@ -37,7 +37,7 @@ body: |-
 
         // Protected routes (JWT required)
         protected := api.Group("")
-        protected.Use(middleware.JWT(cfg.JWT.Secret))
+        protected.Use(middleware.JWTAuth(cfg.Auth.Token))
 
         // Resource CRUD (example - customize for your business logic)
         resources := protected.Group("/resources")

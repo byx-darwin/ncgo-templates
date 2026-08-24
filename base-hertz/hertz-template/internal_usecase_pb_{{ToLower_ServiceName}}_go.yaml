@@ -1,0 +1,42 @@
+# Hertz custom template — internal/usecase/pb/{{ToLower .ServiceName}}_usecase.go
+# Generates the per-service usecase scaffold implementing the handler's useCase interface.
+path: internal/usecase/pb/{{ToLower .ServiceName}}_usecase.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |-
+    package pb
+
+    import (
+    	"context"
+
+    	goerror "github.com/byx-darwin/go-tools/go-common/error"
+
+    	pb "{{.Module}}/internal/handler/pb"
+    	"{{.Module}}/internal/pkg/response"
+    )
+
+    // UseCase implements the handler's UseCaseSetter interface.
+    // Fill in business logic — scaffold methods return CodeNotImplemented.
+    type UseCase struct{}
+
+    // NewUseCase creates a UseCase instance.
+    // Wire it to the handler in server.go:
+    //   pbhandler.SetDefaultUseCase(usecasepb.NewUseCase())
+    func NewUseCase() *UseCase {
+    	return &UseCase{}
+    }
+
+    // Ping .
+    func (uc *UseCase) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error) {
+    	_ = ctx
+    	_ = req
+    	return nil, goerror.
+    		In("pb.usecase").
+    		Code(response.CodeNotImplemented).
+    		Public("not_implemented").
+    		Errorf("Ping: not implemented")
+    }
+
+    // Compile-time check: UseCase satisfies UseCaseSetter interface.
+    var _ pb.UseCaseSetter = (*UseCase)(nil)

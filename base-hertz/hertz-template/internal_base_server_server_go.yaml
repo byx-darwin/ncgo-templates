@@ -26,9 +26,11 @@ body: |-
         "{{.Module}}/internal/repository"
     {{end}}
         "{{.Module}}/internal/handler/health"
+        pbhandler "{{.Module}}/internal/handler/pb"
         "{{.Module}}/internal/pkg/middleware"
         "{{.Module}}/internal/pkg/response"
         "{{.Module}}/internal/router"
+        usecasepb "{{.Module}}/internal/usecase/pb"
     )
 
     func Run() {
@@ -115,6 +117,9 @@ body: |-
 
         // Register health check routes
         health.Register(h)
+
+        // Wire DDD: usecase → handler
+        pbhandler.SetDefaultUseCase(usecasepb.NewUseCase())
 
         // Register auto-generated routes
         router.GeneratedRegister(h)

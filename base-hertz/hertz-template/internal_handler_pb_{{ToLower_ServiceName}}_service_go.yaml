@@ -30,6 +30,18 @@ body: |-
     	Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error)
     }
 
+    // UseCaseSetter is the exported interface for DI wiring from server.go.
+    // It mirrors the unexported useCase interface.
+    type UseCaseSetter interface {
+    	Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error)
+    }
+
+    // SetDefaultUseCase replaces the default (not-implemented) use case
+    // with a real implementation. Call from server.go during startup.
+    func SetDefaultUseCase(uc UseCaseSetter) {
+    	DefaultHandler = NewPbHandler(uc)
+    }
+
     type notImplementedUseCase struct{}
 
     func (notImplementedUseCase) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error) {

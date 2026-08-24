@@ -14,14 +14,47 @@ The registry URL defaults to this repository; override with `--registry <url>` o
 
 ## Templates
 
-| Package | Kind | Description | Consumable |
-|---|---|---|---|
-| `base-kitex` | kitex | Standard Kitex RPC service (layered layout + health check) | ✅ `ncgo new --kind kitex --template base-kitex` |
-| `base-hertz` | hertz | Standard Hertz HTTP service (layered layout + health check) | ✅ `ncgo new --kind hertz --template base-hertz` |
-| `rbac-kitex` | kitex | RBAC + auth authority service (DDD, Casbin sqlc adapter, JWT login, audit) | ✅ `ncgo new --kind kitex --template rbac-kitex` |
-| `rule-center` | kitex | Rate-limit rule-center service (Kitex gRPC + rate-limit store/resolver/middleware) | ⚠️ asset-ready; full preset consumption lands with ncgo rule-center template support |
-| `micro` | micro | Micro workspace reference (multi-service layout + shared compose/pre-commit) | ⚠️ reference; workspace template consumption lands with ncgo add rpc/bff template support |
-| `micro-admin` | micro | Micro-admin workspace composition (rbac-kitex + admin-bff-hertz + rule-center) | ⚠️ composition package; consumption lands with ncgo micro workspace template support |
+### HTTP Services (Hertz)
+
+| Package | Description | Consumable |
+|---|---|---|
+| `base-hertz` | Standard Hertz HTTP service (DDD layered layout + JWT + signature + idempotency) | ✅ `ncgo new --kind hertz --template base-hertz` |
+| `ratelimit-hertz` | Hertz HTTP service with rate limiting execution (two-phase: pre-auth + post-auth) | ✅ `ncgo new --kind hertz --template ratelimit-hertz` |
+| `admin-bff-hertz` | Admin BFF with RBAC authorization (JWT + Casbin + gRPC to authority) | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
+
+### RPC Services (Kitex)
+
+| Package | Description | Consumable |
+|---|---|---|
+| `base-kitex` | Standard Kitex RPC service (layered layout + health check) | ✅ `ncgo new --kind kitex --template base-kitex` |
+| `rbac-kitex` | RBAC + auth authority service (DDD, Casbin sqlc adapter, JWT login, audit) | ✅ `ncgo new --kind kitex --template rbac-kitex` |
+| `admin-services-kitex` | Merged admin authority (RBAC + Rule Center in one service) | ✅ `ncgo new --kind kitex --template admin-services-kitex` |
+| `rule-center` | Rate-limit rule-center service (standalone) | ⚠️ asset-ready; use `admin-services-kitex` for merged version |
+
+### Workspaces (Micro)
+
+| Package | Description | Consumable |
+|---|---|---|
+| `micro` | Micro workspace reference (multi-service layout + shared compose/pre-commit) | ⚠️ reference; use `ncgo add rpc/bff` to add services |
+| `micro-admin` | Admin workspace composition (admin-services-kitex + admin-bff-hertz) | ⚠️ composition package; see README for setup guide |
+
+### DDD Pattern
+
+All service templates follow DDD layered architecture:
+
+```
+internal/
+├── handler/          # HTTP/gRPC handlers — bind, delegate, respond
+├── usecase/          # Business logic — implement handler interfaces
+├── repository/       # Data access — database queries
+├── model/            # Domain types — for non-protobuf scenarios
+└── pkg/response/     # Response helpers with RPCErrorRouter
+```
+
+**Key features:**
+- `NewResponder()` enables `RPCErrorRouter` by default (maps `go-common/error` to HTTP status)
+- JWT `Claims` includes `Roles []string` field for permission-based access control
+- Unified `auth.token` configuration (replaces legacy `jwt` config)
 
 ## Package Layout
 

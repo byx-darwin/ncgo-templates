@@ -34,13 +34,17 @@ ncgo add rpc authority --template admin-services-kitex
 
 ### JWT Configuration
 
-Must match the authority service's JWT secret:
+JWT authentication uses the unified `auth.token` configuration:
 
 ```yaml
-jwt:
-  secret: "dev-secret-change-me"  # Must match authority service
-  access_token_ttl_seconds: 3600
-  refresh_token_ttl_seconds: 86400
+auth:
+  token:
+    enabled: true
+    header: "X-Authorization"
+    signing_key: "dev-secret-change-me"  # Must match authority service
+    issuer: ""
+    buffer_seconds: 300
+    expires_seconds: 3600
 ```
 
 ### gRPC Connection
@@ -231,6 +235,9 @@ admin-api/
 │   │   ├── rate_limit.go          # Rate limit rules
 │   │   ├── current_user.go        # Current user info
 │   │   └── pb/                    # Proto handlers
+│   ├── usecase/                   # Business logic
+│   │   └── pb/                    # Proto use cases
+│   ├── model/                     # Domain types (non-protobuf)
 │   ├── pkg/
 │   │   ├── middleware/
 │   │   │   ├── jwt.go             # JWT validation
@@ -238,12 +245,52 @@ admin-api/
 │   │   │   ├── signature.go       # API signature
 │   │   │   └── idempotency.go     # Idempotency
 │   │   └── response/              # Error codes
+│   ├── repository/                # Data access
 │   └── router/
 │       └── adminbffservice.go     # Route registration
 ├── conf/
 │   └── dev/conf.yaml              # Configuration
 └── idl/
     └── *.proto                    # Proto definitions
+```
+
+## DDD Scaffolding
+
+The template generates the following DDD layers:
+
+| Layer | Path | Description |
+|-------|------|-------------|
+| Handler | `internal/handler/pb/` | HTTP handlers — bind, delegate, respond |
+| UseCase | `internal/usecase/pb/` | Business logic — implement handler's `useCase` interface |
+| Repository | `internal/repository/` | Data access — database queries |
+| Model | `internal/model/` | Domain types — for non-protobuf scenarios |
+| Response | `internal/pkg/response/` | HTTP response helpers (wraps go-framework/hertz) |
+
+### Wiring
+
+The template wires layers in `internal/base/server/server.go`:
+
+```go
+// Wire DDD: usecase → handler
+pbhandler.SetDefaultUseCase(usecasepb.NewUseCase())
+```
+
+### Error Routing
+
+`NewResponder()` enables `RPCErrorRouter` by default, mapping `go-common/error` oops errors to HTTP status codes. This is essential for BFF services calling RPC backends.
+
+### JWT Claims
+
+The `Claims` struct includes a `Roles` field for permission-based access control:
+
+```go
+type Claims struct {
+    UserID string   `json:"user_id"`
+    UUID   string   `json:"uuid"`
+    AK     string   `json:"ak"`
+    Roles  []string `json:"roles,omitempty"`
+    jwt.RegisteredClaims
+}
 ```
 
 ## Login Flow

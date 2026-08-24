@@ -1,5 +1,7 @@
 # Official ncgo Template Registry
 
+[中文文档](README.zh-CN.md)
+
 Official template registry for [ncgo](https://github.com/byx-darwin/ncgo) — the AI-friendly scaffold CLI for Go microservices.
 
 Browse and consume these templates with the ncgo registry client:

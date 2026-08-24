@@ -1,0 +1,28 @@
+# ncgo exported template — internal/model/example.go
+# Generates an example domain model package for non-protobuf scenarios.
+# Developers replace example types with their own domain models.
+path: internal/model/example.go
+update_behavior:
+    type: skip
+body: |-
+    package model
+
+    // This file provides example domain model types.
+    // Replace these with your actual domain models.
+    //
+    // Models represent business entities and are independent of
+    // transport-layer types (protobuf, JSON). Use models when:
+    //   - Your service uses REST/JSON without protobuf IDL
+    //   - You need internal types that differ from API request/response types
+    //   - You want clean separation between API contracts and domain logic
+
+    // ExampleRequest is an example request body.
+    type ExampleRequest struct {
+        Name string `json:"name"`
+    }
+
+    // ExampleResponse is an example response body.
+    type ExampleResponse struct {
+        ID   string `json:"id"`
+        Name string `json:"name"`
+    }

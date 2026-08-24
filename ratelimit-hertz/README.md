@@ -224,14 +224,56 @@ my-api/
 │   │   ├── health/                # Health checks
 │   │   ├── resource.go            # Resource handler
 │   │   └── pb/                    # Proto handlers
+│   ├── model/                     # Domain types (non-protobuf)
 │   ├── pkg/
 │   │   ├── middleware/            # JWT, signature, idempotency, rate_limit
 │   │   ├── ratelimit/             # Rate limit resolver & store
 │   │   └── response/              # Error codes
-│   └── router/
-│       └── service.go             # Route registration
+│   ├── repository/                # Data access
+│   ├── router/
+│   │   └── service.go             # Route registration
+│   └── usecase/                   # Business logic
 └── conf/
     └── dev/conf.yaml              # Configuration with rate_limit
+```
+
+## DDD Scaffolding
+
+The template generates the following DDD layers:
+
+| Layer | Path | Description |
+|-------|------|-------------|
+| Handler | `internal/handler/pb/` | HTTP handlers — bind, delegate, respond |
+| UseCase | `internal/usecase/pb/` | Business logic — implement handler's `useCase` interface |
+| Repository | `internal/repository/` | Data access — database queries |
+| Model | `internal/model/` | Domain types — for non-protobuf scenarios |
+| Response | `internal/pkg/response/` | HTTP response helpers (wraps go-framework/hertz) |
+
+### Wiring
+
+The template wires layers in `internal/base/server/server.go`:
+
+```go
+// Wire DDD: usecase → handler
+pbhandler.SetDefaultUseCase(usecasepb.NewUseCase())
+```
+
+### Error Routing
+
+`NewResponder()` enables `RPCErrorRouter` by default, mapping `go-common/error` oops errors to HTTP status codes.
+
+### JWT Claims
+
+The `Claims` struct includes a `Roles` field for permission-based access control:
+
+```go
+type Claims struct {
+    UserID string   `json:"user_id"`
+    UUID   string   `json:"uuid"`
+    AK     string   `json:"ak"`
+    Roles  []string `json:"roles,omitempty"`
+    jwt.RegisteredClaims
+}
 ```
 
 ## Integration with Rule Center

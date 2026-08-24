@@ -133,9 +133,10 @@ my-api/
 │   │   ├── health/                # Health checks
 │   │   ├── resource.go            # Resource handler
 │   │   └── pb/                    # Proto handlers
+│   ├── model/                     # Domain types (non-protobuf)
 │   ├── pkg/
 │   │   ├── middleware/            # JWT, signature, idempotency
-│   │   └── response/              # Error codes & responses
+│   │   └── response/              # HTTP response helpers
 │   ├── repository/                # Data access
 │   ├── router/
 │   │   └── service.go             # Route registration
@@ -145,6 +146,31 @@ my-api/
 └── idl/
     └── *.proto                    # Proto definitions
 ```
+
+## DDD Scaffolding
+
+The template generates the following DDD layers:
+
+| Layer | Path | Description |
+|-------|------|-------------|
+| Handler | `internal/handler/pb/` | HTTP handlers — bind, delegate, respond |
+| UseCase | `internal/usecase/pb/` | Business logic — implement handler's `useCase` interface |
+| Repository | `internal/repository/` | Data access — database queries |
+| Model | `internal/model/` | Domain types — for non-protobuf scenarios |
+| Response | `internal/pkg/response/` | HTTP response helpers (wraps go-framework/hertz) |
+
+### Wiring
+
+The template wires layers in `internal/base/server/server.go`:
+
+```go
+// Wire DDD: usecase → handler
+pbhandler.SetDefaultUseCase(usecasepb.NewUseCase())
+```
+
+### Error Routing
+
+`NewResponder()` enables `RPCErrorRouter` by default, mapping `go-common/error` oops errors to HTTP status codes. This is essential for BFF services calling RPC backends.
 
 ## Adding Infrastructure
 

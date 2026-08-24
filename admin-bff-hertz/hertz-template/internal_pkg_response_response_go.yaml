@@ -89,7 +89,9 @@ body: |-
 
     // NewResponder creates a Responder instance (called by server.Run).
     func NewResponder() *hertzframework.Responder {{ "{" }}
-        return hertzframework.NewResponder()
+        return hertzframework.NewResponder(
+            hertzframework.WithErrorRouter(&hertzframework.RPCErrorRouter{{ "{" }}{{ "}" }}),
+        )
     {{ "}" }}
 
     // OK writes a success response using package-level convenience function.

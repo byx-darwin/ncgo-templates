@@ -37,7 +37,7 @@ body: |-
 
         // Protected routes (JWT required, rate limited)
         protected := api.Group("")
-        protected.Use(middleware.JWT(cfg.JWT.Secret))
+        protected.Use(middleware.JWTAuth(cfg.Auth.Token))
 
         // Example protected endpoints (all are rate limited by middleware)
         resources := protected.Group("/resources")

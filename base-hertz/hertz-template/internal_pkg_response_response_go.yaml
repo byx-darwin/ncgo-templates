@@ -88,9 +88,13 @@ body: |-
         Data any    `json:"data,omitempty"`
     }
     
-    // NewResponder creates a Responder instance (called by server.Run).
+    // NewResponder creates a Responder instance with RPC error routing.
+    // RPCErrorRouter maps go-common/error oops errors to HTTP status codes,
+    // enabling automatic error→HTTP mapping for BFF services.
     func NewResponder() *hertzframework.Responder {
-        return hertzframework.NewResponder()
+        return hertzframework.NewResponder(
+            hertzframework.WithErrorRouter(&hertzframework.RPCErrorRouter{}),
+        )
     }
     
     // OK writes a success response using package-level convenience function.

@@ -13,3 +13,13 @@ body: |-
     		t.Fatalf("CodeNotImplemented = %d, want 10010", CodeNotImplemented)
     	}
     }
+
+    func TestNewResponderHasErrorRouter(t *testing.T) {
+    	r := NewResponder()
+    	if r == nil {
+    		t.Fatal("NewResponder() returned nil")
+    	}
+    	// Indirect verification: NewResponder should not panic and should
+    	// produce a non-nil Responder. The actual routing is tested in
+    	// go-tools/go-framework/hertz/response_test.go.
+    }

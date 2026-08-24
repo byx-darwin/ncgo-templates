@@ -49,7 +49,7 @@ body: |
 
     	// Protected routes (JWT required)
     	protected := api.Group("")
-    	protected.Use(middleware.JWT(cfg.JWT.Secret))
+    	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
 
     	// Authz middleware
     	protected.Use(middleware.Authz(rbacCli))

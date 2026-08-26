@@ -49,13 +49,13 @@ message LogoutReq { string access_token = 1; }
 message LogoutResp {}
 message ValidateTokenReq { string access_token = 1; }
 message ValidateTokenResp {
-  int64 uid = 1;
-  repeated string roles = 2;
+  string uid = 1;
+  repeated string role_codes = 2;
   bool valid = 3;
 }
 
 message User {
-  int64 id = 1;
+  string id = 1;
   string username = 2;
   int32 status = 3;                     // 1=enabled, 0=disabled (was string)
   repeated string roles = 4;            // role codes (derived from user_roles)
@@ -73,7 +73,7 @@ message CreateUserReq {
   string phone = 6;
 }
 message UpdateUserReq {
-  int64 id = 1;
+  string id = 1;
   optional string password = 2;
   optional int32 status = 3;
   optional string nickname = 4;
@@ -81,14 +81,14 @@ message UpdateUserReq {
   optional string email = 6;
   optional string phone = 7;
 }
-message DeleteUserReq { int64 id = 1; }
-message GetUserReq { int64 id = 1; }
+message DeleteUserReq { string id = 1; }
+message GetUserReq { string id = 1; }
 message ListUsersReq { int32 page = 1; int32 page_size = 2; }
 message UserResp { User user = 1; }
 message ListUsersResp { repeated User users = 1; int32 total = 2; }
 
 message Role {
-  int64 id = 1;
+  string id = 1;
   string code = 2;
   string name = 3;
   int32 status = 4;                     // 1=enabled, 0=disabled (new)
@@ -96,18 +96,18 @@ message Role {
   repeated string permissions = 6;      // permission codes (derived from role_permissions)
 }
 message CreateRoleReq { string code = 1; string name = 2; string remark = 3; }
-message UpdateRoleReq { int64 id = 1; string name = 2; optional int32 status = 3; optional string remark = 4; }
-message DeleteRoleReq { int64 id = 1; }
+message UpdateRoleReq { string id = 1; string name = 2; optional int32 status = 3; optional string remark = 4; }
+message DeleteRoleReq { string id = 1; }
 message ListRolesReq { int32 page = 1; int32 page_size = 2; }
 message RoleResp { Role role = 1; }
 message ListRolesResp { repeated Role roles = 1; int32 total = 2; }
 
 message Permission {
-  int64 id = 1;
+  string id = 1;
   string code = 2;
   string type = 3;    // catalog | menu | button | api
   string name = 4;
-  int64 parent_id = 5;                  // tree parent (catalog/menu only)
+  string parent_id = 5;                  // tree parent (catalog/menu only)
   string path = 6;                      // route path (catalog/menu)
   string icon = 7;                      // icon (catalog/menu)
   string route_name = 8;                // frontend route name (catalog/menu)
@@ -124,7 +124,7 @@ message CreatePermissionReq {
   string code = 1;
   string type = 2;     // catalog | menu | button | api
   string name = 3;
-  int64 parent_id = 4;                  // optional, 0 = root
+  string parent_id = 4;                  // optional, empty = root
   string path = 5;
   string icon = 6;
   string route_name = 7;
@@ -138,11 +138,11 @@ message CreatePermissionReq {
   string description = 15;
 }
 message UpdatePermissionReq {
-  int64 id = 1;
+  string id = 1;
   optional string code = 2;
   optional string type = 3;
   optional string name = 4;
-  optional int64 parent_id = 5;
+  optional string parent_id = 5;
   optional string path = 6;
   optional string icon = 7;
   optional string route_name = 8;
@@ -155,23 +155,23 @@ message UpdatePermissionReq {
   optional int32 status = 15;
   optional string description = 16;
 }
-message GetPermissionReq { int64 id = 1; }
-message DeletePermissionReq { int64 id = 1; }
+message GetPermissionReq { string id = 1; }
+message DeletePermissionReq { string id = 1; }
 message ListPermissionsReq {
   int32 page = 1;
   int32 page_size = 2;
   optional string type = 3;             // filter by type
-  optional int64 parent_id = 4;         // filter by parent
+  optional string parent_id = 4;        // filter by parent
   optional int32 status = 5;            // filter by status
 }
 message PermissionResp { Permission permission = 1; }
 message ListPermissionsResp { repeated Permission permissions = 1; int32 total = 2; }
 
 message Menu {
-  int64 id = 1;
+  string id = 1;
   string code = 2;                      // permission code (new)
   string name = 3;
-  int64 parent_id = 4;
+  string parent_id = 4;
   string type = 5;                      // catalog | menu (was: dir | menu | button)
   string path = 6;
   string icon = 7;
@@ -186,16 +186,16 @@ message ListMenusReq {}
 message MenuResp { Menu menu = 1; }
 message ListMenusResp { repeated Menu menus = 1; }
 
-message AssignRolesToUserReq { int64 user_id = 1; repeated int64 role_ids = 2; }
+message AssignRolesToUserReq { string user_id = 1; repeated string role_ids = 2; }
 message GrantPermissionsToRoleReq {
-  int64 role_id = 1;
+  string role_id = 1;
   repeated string permission_codes = 2;
 }
-message EnforceReq { int64 uid = 1; string obj = 2; string act = 3; }
+message EnforceReq { string uid = 1; string obj = 2; string act = 3; }
 message EnforceResp { bool allowed = 1; }
-message GetUserMenuTreeReq { int64 uid = 1; }
+message GetUserMenuTreeReq { string uid = 1; }
 message MenuNode { Menu menu = 1; repeated MenuNode children = 2; }
 message GetUserMenuTreeResp { repeated MenuNode roots = 1; }
-message GetUserPermCodesReq { int64 uid = 1; }
+message GetUserPermCodesReq { string uid = 1; }
 message GetUserPermCodesResp { repeated string codes = 1; }
 message EmptyResp {}

@@ -53,6 +53,6 @@ body: |
 
     // ValidateToken implements the AuthService RPC method.
     func (s *AuthServiceImpl) ValidateToken(ctx context.Context, req *v1.ValidateTokenReq) (resp *v1.ValidateTokenResp, err error) {{ "{" }}
-    	uid, roles, valid := s.auth.ValidateToken(ctx, req.AccessToken)
-    	return &v1.ValidateTokenResp{{ "{" }}Uid: uid, Roles: roles, Valid: valid{{ "}" }}, nil
+    	uid, roleCodes, valid := s.auth.ValidateToken(ctx, req.AccessToken)
+    	return &v1.ValidateTokenResp{{ "{" }}Uid: uid, RoleCodes: roleCodes, Valid: valid{{ "}" }}, nil
     {{ "}" }}

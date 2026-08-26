@@ -14,15 +14,15 @@ body: |-
     	ctx := t.Context()
     	s := NewMemoryStore()
 
-    	if err := s.SetRefresh(ctx, 42, "refresh-token-1", time.Minute); err != nil {
+    	if err := s.SetRefresh(ctx, "42", "refresh-token-1", time.Minute); err != nil {
     		t.Fatalf("SetRefresh: %v", err)
     	}
     	uid, err := s.GetRefresh(ctx, "refresh-token-1")
     	if err != nil {
     		t.Fatalf("GetRefresh: %v", err)
     	}
-    	if uid != 42 {
-    		t.Fatalf("uid = %d, want 42", uid)
+    	if uid != "42" {
+    		t.Fatalf("uid = %s, want 42", uid)
     	}
 
     	if err := s.DeleteRefresh(ctx, "refresh-token-1"); err != nil {
@@ -47,7 +47,7 @@ body: |-
     func TestMemoryStoreExpiry(t *testing.T) {
     	ctx := t.Context()
     	s := NewMemoryStore()
-    	_ = s.SetRefresh(ctx, 1, "refresh-expired", time.Nanosecond)
+    	_ = s.SetRefresh(ctx, "1", "refresh-expired", time.Nanosecond)
     	// let it expire
     	time.Sleep(time.Millisecond)
     	if _, err := s.GetRefresh(ctx, "refresh-expired"); err == nil {

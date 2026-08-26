@@ -33,14 +33,14 @@ body: |
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
 
-    	allowed, err := svc.Enforce(ctx, 1, "user:create", "POST")
+    	allowed, err := svc.Enforce(ctx, "1", "user:create", "POST")
     	if err != nil {{ "{" }}
     		t.Fatalf("Enforce: %v", err)
     	{{ "}" }}
     	if !allowed {{ "{" }}
     		t.Fatal("Enforce(1, user:create, POST) = false, want true")
     	{{ "}" }}
-    	allowed, err = svc.Enforce(ctx, 1, "user:delete", "DELETE")
+    	allowed, err = svc.Enforce(ctx, "1", "user:delete", "DELETE")
     	if err != nil {{ "{" }}
     		t.Fatalf("Enforce: %v", err)
     	{{ "}" }}

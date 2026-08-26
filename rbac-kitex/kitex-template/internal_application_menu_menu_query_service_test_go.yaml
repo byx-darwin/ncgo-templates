@@ -26,7 +26,7 @@ body: |
     	roles []*role.Role
     {{ "}" }}
 
-    func (f *fakeUserRoleReader) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    func (f *fakeUserRoleReader) ListRoles(ctx context.Context, uid string) ([]*role.Role, error) {{ "{" }}
     	return f.roles, nil
     {{ "}" }}
 
@@ -35,7 +35,7 @@ body: |
     	rolePerms []*permission.Permission
     {{ "}" }}
 
-    func (f *fakePermReader) ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
+    func (f *fakePermReader) ListByRoleIDs(ctx context.Context, roleIDs []string) ([]*permission.Permission, error) {{ "{" }}
     	return f.rolePerms, nil
     {{ "}" }}
 
@@ -46,8 +46,8 @@ body: |
     func TestListMenus(t *testing.T) {{ "{" }}
     	ctx := context.Background()
     	repo := &fakeMenuRepo{{ "{" }}menus: []*menu.Menu{{ "{" }}
-    		{{ "{" }}ID: 1, Code: "system", Name: "System", Type: menu.TypeCatalog, Sort: 1{{ "}" }},
-    		{{ "{" }}ID: 2, Code: "system:user", Name: "Users", ParentID: 1, Type: menu.TypeMenu, Sort: 1{{ "}" }},
+    		{{ "{" }}ID: "1", Code: "system", Name: "System", Type: menu.TypeCatalog, Sort: 1{{ "}" }},
+    		{{ "{" }}ID: "2", Code: "system:user", Name: "Users", ParentID: "1", Type: menu.TypeMenu, Sort: 1{{ "}" }},
     	{{ "}}" }}
     	qs := New(repo, &fakeUserRoleReader{{ "{" }}{{ "}" }}, &fakePermReader{{ "{" }}{{ "}" }})
     	menus, err := qs.ListMenus(ctx)
@@ -61,11 +61,11 @@ body: |
 
     func TestUserPermCodesAdmin(t *testing.T) {{ "{" }}
     	ctx := context.Background()
-    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: 1, Code: "admin"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}allPerms: []*permission.Permission{{ "{" }}
+    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: "1", Code: "admin"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}allPerms: []*permission.Permission{{ "{" }}
     		{{ "{" }}Code: "user:create"{{ "}" }},
     		{{ "{" }}Code: "user:delete"{{ "}" }},
     	{{ "}}" }})
-    	codes, err := qs.UserPermCodes(ctx, 1)
+    	codes, err := qs.UserPermCodes(ctx, "1")
     	if err != nil {{ "{" }}
     		t.Fatalf("UserPermCodes: %v", err)
     	{{ "}" }}
@@ -76,10 +76,10 @@ body: |
 
     func TestUserPermCodesNormal(t *testing.T) {{ "{" }}
     	ctx := context.Background()
-    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: 1, Code: "editor"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}rolePerms: []*permission.Permission{{ "{" }}
+    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: "1", Code: "editor"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}rolePerms: []*permission.Permission{{ "{" }}
     		{{ "{" }}Code: "user:create"{{ "}" }},
     	{{ "}}" }})
-    	codes, err := qs.UserPermCodes(ctx, 1)
+    	codes, err := qs.UserPermCodes(ctx, "1")
     	if err != nil {{ "{" }}
     		t.Fatalf("UserPermCodes: %v", err)
     	{{ "}" }}

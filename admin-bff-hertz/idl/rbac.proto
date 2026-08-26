@@ -22,6 +22,7 @@ service RBACService {
   rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
   rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse);
   rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
+  rpc AssignRolesToUser(AssignRolesToUserRequest) returns (AssignRolesToUserResponse);
 
   // Permission management
   rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
@@ -29,6 +30,7 @@ service RBACService {
   rpc CreatePermission(CreatePermissionRequest) returns (CreatePermissionResponse);
   rpc UpdatePermission(UpdatePermissionRequest) returns (UpdatePermissionResponse);
   rpc DeletePermission(DeletePermissionRequest) returns (DeletePermissionResponse);
+  rpc GrantPermissionsToRole(GrantPermissionsToRoleRequest) returns (GrantPermissionsToRoleResponse);
 
   // Menu management
   rpc ListMenus(ListMenusRequest) returns (ListMenusResponse);
@@ -39,7 +41,7 @@ service RBACService {
 }
 
 message EnforceRequest {
-  string sub = 1;
+  string uid = 1;
   string obj = 2;
   string act = 3;
 }
@@ -50,7 +52,7 @@ message EnforceResponse {
 
 // User messages
 message User {
-  int64 id = 1;
+  string id = 1;
   string username = 2;
   string email = 3;
   bool active = 4;
@@ -68,7 +70,7 @@ message ListUsersResponse {
 }
 
 message GetUserRequest {
-  int64 id = 1;
+  string id = 1;
 }
 
 message GetUserResponse {
@@ -87,7 +89,7 @@ message CreateUserResponse {
 }
 
 message UpdateUserRequest {
-  int64 id = 1;
+  string id = 1;
   string username = 2;
   string email = 3;
   bool active = 4;
@@ -99,7 +101,7 @@ message UpdateUserResponse {
 }
 
 message DeleteUserRequest {
-  int64 id = 1;
+  string id = 1;
 }
 
 message DeleteUserResponse {
@@ -108,7 +110,7 @@ message DeleteUserResponse {
 
 // Role messages
 message Role {
-  int64 id = 1;
+  string id = 1;
   string name = 2;
   string description = 3;
   repeated string permissions = 4;
@@ -135,7 +137,7 @@ message CreateRoleResponse {
 }
 
 message UpdateRoleRequest {
-  int64 id = 1;
+  string id = 1;
   string name = 2;
   string description = 3;
   repeated string permissions = 4;
@@ -146,16 +148,23 @@ message UpdateRoleResponse {
 }
 
 message DeleteRoleRequest {
-  int64 id = 1;
+  string id = 1;
 }
 
 message DeleteRoleResponse {
   bool success = 1;
 }
 
+message AssignRolesToUserRequest {
+  string user_id = 1;
+  repeated string role_ids = 2;
+}
+
+message AssignRolesToUserResponse {}
+
 // Permission messages
 message Permission {
-  int64 id = 1;
+  string id = 1;
   string code = 2;
   string name = 3;
   string description = 4;
@@ -172,7 +181,7 @@ message ListPermissionsResponse {
 }
 
 message GetPermissionRequest {
-  int64 id = 1;
+  string id = 1;
 }
 
 message GetPermissionResponse {
@@ -190,7 +199,7 @@ message CreatePermissionResponse {
 }
 
 message UpdatePermissionRequest {
-  int64 id = 1;
+  string id = 1;
   string code = 2;
   string name = 3;
   string description = 4;
@@ -201,20 +210,27 @@ message UpdatePermissionResponse {
 }
 
 message DeletePermissionRequest {
-  int64 id = 1;
+  string id = 1;
 }
 
 message DeletePermissionResponse {
   bool success = 1;
 }
 
+message GrantPermissionsToRoleRequest {
+  string role_id = 1;
+  repeated string permission_codes = 2;
+}
+
+message GrantPermissionsToRoleResponse {}
+
 // Menu messages
 message Menu {
-  int64 id = 1;
+  string id = 1;
   string name = 2;
   string path = 3;
   string icon = 4;
-  int64 parent_id = 5;
+  string parent_id = 5;
   int32 order = 6;
 }
 

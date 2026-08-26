@@ -54,7 +54,7 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Save(create): %v", err)
     	{{ "}" }}
-    	if created.ID == 0 {{ "{" }}
+    	if created.ID == "" {{ "{" }}
     		t.Fatal("created user has id 0")
     	{{ "}" }}
 

@@ -18,13 +18,13 @@ body: |
     )
 
     type fakeUserRepo struct {{ "{" }}
-    	users     map[int64]*user.User
+    	users     map[string]*user.User
     	nextID    int64
-    	roleDefs  map[int64]*role.Role
-    	rolesByID map[int64][]*role.Role
+    	roleDefs  map[string]*role.Role
+    	rolesByID map[string][]*role.Role
     {{ "}" }}
 
-    func (f *fakeUserRepo) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    func (f *fakeUserRepo) GetByID(ctx context.Context, id string) (*user.User, error) {{ "{" }}
     	u, ok := f.users[id]
     	if !ok {{ "{" }}
     		return nil, user.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
@@ -52,9 +52,9 @@ body: |
     func (f *fakeUserRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.users)), nil {{ "}" }}
 
     func (f *fakeUserRepo) Save(ctx context.Context, u *user.User) (*user.User, error) {{ "{" }}
-    	if u.ID == 0 {{ "{" }}
+    	if u.ID == "" {{ "{" }}
     		f.nextID++
-    		u.ID = f.nextID
+    		u.ID = fmt.Sprint(f.nextID)
     	{{ "}" }}
     	f.users[u.ID] = u
     	return u, nil
@@ -65,7 +65,7 @@ body: |
     	return u, nil
     {{ "}" }}
 
-    func (f *fakeUserRepo) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {{ "{" }}
+    func (f *fakeUserRepo) UpdatePassword(ctx context.Context, id string, passwordHash string) error {{ "{" }}
     	if u, ok := f.users[id]; ok {{ "{" }}
     		u.PasswordHash = passwordHash
     		return nil
@@ -73,12 +73,12 @@ body: |
     	return user.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
     {{ "}" }}
 
-    func (f *fakeUserRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    func (f *fakeUserRepo) Delete(ctx context.Context, id string) error {{ "{" }}
     	delete(f.users, id)
     	return nil
     {{ "}" }}
 
-    func (f *fakeUserRepo) SetStatus(ctx context.Context, id int64, status int) error {{ "{" }}
+    func (f *fakeUserRepo) SetStatus(ctx context.Context, id string, status int) error {{ "{" }}
     	if u, ok := f.users[id]; ok {{ "{" }}
     		u.Status = status
     		return nil
@@ -86,7 +86,7 @@ body: |
     	return user.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
     {{ "}" }}
 
-    func (f *fakeUserRepo) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    func (f *fakeUserRepo) AssignRoles(ctx context.Context, uid string, roleIDs []string) error {{ "{" }}
     	roles := make([]*role.Role, 0, len(roleIDs))
     	for _, rid := range roleIDs {{ "{" }}
     		if r, ok := f.roleDefs[rid]; ok {{ "{" }}
@@ -97,13 +97,13 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (f *fakeUserRepo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    func (f *fakeUserRepo) ListRoles(ctx context.Context, uid string) ([]*role.Role, error) {{ "{" }}
     	return f.rolesByID[uid], nil
     {{ "}" }}
 
-    func (f *fakeUserRepo) ListRoleIDs(ctx context.Context, uid int64) ([]int64, error) {{ "{" }}
+    func (f *fakeUserRepo) ListRoleIDs(ctx context.Context, uid string) ([]string, error) {{ "{" }}
     	roles := f.rolesByID[uid]
-    	ids := make([]int64, 0, len(roles))
+    	ids := make([]string, 0, len(roles))
     	for _, r := range roles {{ "{" }}
     		ids = append(ids, r.ID)
     	{{ "}" }}
@@ -118,9 +118,9 @@ body: |
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
     	repo := &fakeUserRepo{{ "{" }}
-    		users:     map[int64]*user.User{{ "{" }}{{ "}" }},
-    		roleDefs:  map[int64]*role.Role{{ "{" }}{{ "}" }},
-    		rolesByID: map[int64][]*role.Role{{ "{" }}{{ "}" }},
+    		users:     map[string]*user.User{{ "{" }}{{ "}" }},
+    		roleDefs:  map[string]*role.Role{{ "{" }}{{ "}" }},
+    		rolesByID: map[string][]*role.Role{{ "{" }}{{ "}" }},
     	{{ "}" }}
     	aud := audit.NewMemoryWriter()
     	svc := New(repo, e, aud)
@@ -135,8 +135,8 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
-    	if created.ID == 0 {{ "{" }}
-    		t.Fatal("created user has id 0")
+    	if created.ID == "" {{ "{" }}
+    		t.Fatal("created user has empty id")
     	{{ "}" }}
     	if created.PasswordHash == "Passw0rd!" {{ "{" }}
     		t.Fatal("password was stored in plaintext")
@@ -182,13 +182,13 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
-    	repo.roleDefs[1] = &role.Role{{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}" }}
+    	repo.roleDefs["1"] = &role.Role{{ "{" }}ID: "1", Code: "admin", Name: "Admin"{{ "}" }}
     	repo.rolesByID[created.ID] = nil
     	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
 
-    	if err := svc.AssignRoles(ctx, created.ID, []int64{{ "{" }}1{{ "}" }}); err != nil {{ "{" }}
+    	if err := svc.AssignRoles(ctx, created.ID, []string{{ "{" }}"1"{{ "}" }}); err != nil {{ "{" }}
     		t.Fatalf("AssignRoles: %v", err)
     	{{ "}" }}
     	roles, err := repo.ListRoles(ctx, created.ID)

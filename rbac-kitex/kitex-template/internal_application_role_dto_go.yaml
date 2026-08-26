@@ -16,7 +16,7 @@ body: |
 
     // UpdateRoleInput is the command to update a role.
     type UpdateRoleInput struct {{ "{" }}
-    	ID     int64
+    	ID     string
     	Name   string
     	Status *int
     	Remark *string

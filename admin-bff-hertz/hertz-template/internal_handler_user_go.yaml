@@ -9,13 +9,12 @@ body: |
     import (
     	"context"
     	"encoding/json"
-    	"strconv"
 
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1"
-    	"github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/rbacservice"
+    	api "{{.Module}}/kitex_gen/api/rbac/v1"
+    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type UserHandler struct {{ "{" }}
@@ -37,9 +36,8 @@ body: |
 
     func (h *UserHandler) Get(ctx context.Context, c *app.RequestContext) {{ "{" }}
     	idStr := c.Param("id")
-    	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	resp, err := h.rbacCli.GetUser(ctx, &api.GetUserReq{{ "{" }}Id: id{{ "}" }})
+    	resp, err := h.rbacCli.GetUser(ctx, &api.GetUserReq{{ "{" }}Id: idStr{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
@@ -64,14 +62,13 @@ body: |
 
     func (h *UserHandler) Update(ctx context.Context, c *app.RequestContext) {{ "{" }}
     	idStr := c.Param("id")
-    	id, _ := strconv.ParseInt(idStr, 10, 64)
 
     	var req api.UpdateUserReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	req.Id = id
+    	req.Id = idStr
 
     	resp, err := h.rbacCli.UpdateUser(ctx, &req)
     	if err != nil {{ "{" }}
@@ -83,9 +80,8 @@ body: |
 
     func (h *UserHandler) Delete(ctx context.Context, c *app.RequestContext) {{ "{" }}
     	idStr := c.Param("id")
-    	id, _ := strconv.ParseInt(idStr, 10, 64)
 
-    	_, err := h.rbacCli.DeleteUser(ctx, &api.DeleteUserReq{{ "{" }}Id: id{{ "}" }})
+    	_, err := h.rbacCli.DeleteUser(ctx, &api.DeleteUserReq{{ "{" }}Id: idStr{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

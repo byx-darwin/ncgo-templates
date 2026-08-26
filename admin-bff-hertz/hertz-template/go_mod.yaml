@@ -16,11 +16,6 @@ body: |
     	github.com/jackc/pgx/v5 v5.10.0
     	github.com/redis/go-redis/v9 v9.21.0
     	github.com/samber/hot v0.7.0
-    	github.com/test/{{ToLower .ServiceName}}/services/authority v0.0.0
     	google.golang.org/protobuf v1.36.11
     	gopkg.in/yaml.v3 v3.0.1
-    )
-
-    replace (
-    	github.com/test/{{ToLower .ServiceName}}/services/authority => ../authority
     )

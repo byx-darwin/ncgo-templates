@@ -16,8 +16,8 @@ body: |-
 
     // Store manages refresh tokens and the access-token blacklist.
     type Store interface {
-    	SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error
-    	GetRefresh(ctx context.Context, refreshToken string) (uid int64, err error)
+    	SetRefresh(ctx context.Context, uid string, refreshToken string, ttl time.Duration) error
+    	GetRefresh(ctx context.Context, refreshToken string) (uid string, err error)
     	DeleteRefresh(ctx context.Context, refreshToken string) error
     	Blacklist(ctx context.Context, accessToken string, ttl time.Duration) error
     	IsBlacklisted(ctx context.Context, accessToken string) (bool, error)

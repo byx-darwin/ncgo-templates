@@ -55,7 +55,7 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (r *Repo) GetByID(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    func (r *Repo) GetByID(ctx context.Context, id string) (*user.User, error) {{ "{" }}
     	row, err := r.q.GetUserByID(ctx, id)
     	if err != nil {{ "{" }}
     		return nil, mapErr(err, id)
@@ -91,7 +91,7 @@ body: |
     	if u == nil {{ "{" }}
     		return nil, errors.New("user repository: nil user")
     	{{ "}" }}
-    	if u.ID != 0 {{ "{" }}
+    	if u.ID != "" {{ "{" }}
     		return nil, errors.New("user repository: use Update for existing users")
     	{{ "}" }}
     	var nickname, avatar, email, phone *string
@@ -153,7 +153,7 @@ body: |
     	return toDomainUser(row), nil
     {{ "}" }}
 
-    func (r *Repo) UpdatePassword(ctx context.Context, id int64, passwordHash string) error {{ "{" }}
+    func (r *Repo) UpdatePassword(ctx context.Context, id string, passwordHash string) error {{ "{" }}
     	_, err := r.q.UpdateUserPassword(ctx, gen.UpdateUserPasswordParams{{ "{" }}
     		PasswordHash: passwordHash,
     		ID:           id,
@@ -161,11 +161,11 @@ body: |
     	return err
     {{ "}" }}
 
-    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    func (r *Repo) Delete(ctx context.Context, id string) error {{ "{" }}
     	return r.q.DeleteUser(ctx, id)
     {{ "}" }}
 
-    func (r *Repo) SetStatus(ctx context.Context, id int64, status int) error {{ "{" }}
+    func (r *Repo) SetStatus(ctx context.Context, id string, status int) error {{ "{" }}
     	u := &user.User{{ "{" }}ID: id, Status: status{{ "}" }}
     	_, err := r.q.UpdateUser(ctx, gen.UpdateUserParams{{ "{" }}
     		ID:     id,
@@ -176,7 +176,7 @@ body: |
     {{ "}" }}
 
     // AssignRoles replaces the user's role set with the given role IDs.
-    func (r *Repo) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    func (r *Repo) AssignRoles(ctx context.Context, uid string, roleIDs []string) error {{ "{" }}
     	if err := r.q.ClearUserRoles(ctx, uid); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -189,12 +189,12 @@ body: |
     {{ "}" }}
 
     // ClearRoles removes every role from the user.
-    func (r *Repo) ClearRoles(ctx context.Context, uid int64) error {{ "{" }}
+    func (r *Repo) ClearRoles(ctx context.Context, uid string) error {{ "{" }}
     	return r.q.ClearUserRoles(ctx, uid)
     {{ "}" }}
 
     // ListRoles returns the roles assigned to the user.
-    func (r *Repo) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
+    func (r *Repo) ListRoles(ctx context.Context, uid string) ([]*role.Role, error) {{ "{" }}
     	rows, err := r.q.ListRolesByUserID(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err
@@ -207,7 +207,7 @@ body: |
     {{ "}" }}
 
     // ListRoleIDs returns the role IDs assigned to the user.
-    func (r *Repo) ListRoleIDs(ctx context.Context, uid int64) ([]int64, error) {{ "{" }}
+    func (r *Repo) ListRoleIDs(ctx context.Context, uid string) ([]string, error) {{ "{" }}
     	return r.q.ListRoleIDsByUserID(ctx, uid)
     {{ "}" }}
 

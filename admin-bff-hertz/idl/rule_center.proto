@@ -15,7 +15,7 @@ service RuleService {
 }
 
 message RateLimitRule {
-  int64 id = 1;
+  string id = 1;
   string name = 2;
   string path_pattern = 3;
   string method = 4;
@@ -50,7 +50,7 @@ message CreateRuleResponse {
 }
 
 message UpdateRuleRequest {
-  int64 id = 1;
+  string id = 1;
   string name = 2;
   string path_pattern = 3;
   string method = 4;
@@ -65,7 +65,7 @@ message UpdateRuleResponse {
 }
 
 message DeleteRuleRequest {
-  int64 id = 1;
+  string id = 1;
 }
 
 message DeleteRuleResponse {

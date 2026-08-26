@@ -15,14 +15,14 @@ body: |
 
     // PermRepo is the permission persistence port consumed by the service.
     type PermRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*permission.Permission, error)
+    	GetByID(ctx context.Context, id string) (*permission.Permission, error)
     	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
-    	ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error)
-    	ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error)
+    	ListFiltered(ctx context.Context, typ string, parentID string, status int, limit, offset int32) ([]*permission.Permission, error)
+    	ListChildren(ctx context.Context, parentID string) ([]*permission.Permission, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error)
     	Update(ctx context.Context, p *permission.Permission) (*permission.Permission, error)
-    	Delete(ctx context.Context, id int64) error
+    	Delete(ctx context.Context, id string) error
     {{ "}" }}
 
     // Enforcer removes stale Casbin policies when a permission is deleted.
@@ -116,13 +116,13 @@ body: |
     {{ "}" }}
 
     // Get returns a single permission by ID.
-    func (s *Service) Get(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    func (s *Service) Get(ctx context.Context, id string) (*permission.Permission, error) {{ "{" }}
     	return s.perms.GetByID(ctx, id)
     {{ "}" }}
 
     // Delete removes a permission and cascades to children (tree semantics).
     // Also removes stale Casbin policies.
-    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
     	p, err := s.perms.GetByID(ctx, id)
     	if err != nil {{ "{" }}
     		return err
@@ -136,7 +136,7 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (s *Service) cascadeDelete(ctx context.Context, parentID int64) error {{ "{" }}
+    func (s *Service) cascadeDelete(ctx context.Context, parentID string) error {{ "{" }}
     	children, err := s.perms.ListChildren(ctx, parentID)
     	if err != nil {{ "{" }}
     		return err
@@ -157,16 +157,12 @@ body: |
     	{{ "}" }}
     	var perms []*permission.Permission
     	var err error
-    	if filter.Type != "" || filter.ParentID >= 0 || filter.Status >= 0 {{ "{" }}
+    	if filter.Type != "" || filter.ParentID != "" || filter.Status >= 0 {{ "{" }}
     		status := filter.Status
     		if status == 0 {{ "{" }}
     			status = -1 // no filter
     		{{ "}" }}
-    		parentID := filter.ParentID
-    		if parentID == 0 {{ "{" }}
-    			parentID = -1 // no filter
-    		{{ "}" }}
-    		perms, err = s.perms.ListFiltered(ctx, filter.Type, parentID, status, filter.PageSize, offset)
+    		perms, err = s.perms.ListFiltered(ctx, filter.Type, filter.ParentID, status, filter.PageSize, offset)
     	{{ "}" }} else {{ "{" }}
     		perms, err = s.perms.List(ctx, filter.PageSize, offset)
     	{{ "}" }}

@@ -7,7 +7,7 @@ body: |
 
     // EnforceInput is the command to check a permission.
     type EnforceInput struct {{ "{" }}
-    	Uid int64
+    	Uid string
     	Obj string
     	Act string
     {{ "}" }}

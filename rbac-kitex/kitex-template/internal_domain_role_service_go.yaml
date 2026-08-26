@@ -14,9 +14,9 @@ body: |
     // The code-non-empty invariant is enforced here so callers cannot grant
     // permissions to an un-coded role (which would be unreachable in Casbin).
     // Accepts permission codes (not IDs) — the unified identifier end-to-end.
-    func Assign(ctx context.Context, roleID int64, permissionCodes []string) error {{ "{" }}
-    	if roleID <= 0 {{ "{" }}
-    		return ValidationError{{ "{" }}Field: "role_id", Msg: "must be positive"{{ "}" }}
+    func Assign(ctx context.Context, roleID string, permissionCodes []string) error {{ "{" }}
+    	if roleID == "" {{ "{" }}
+    		return ValidationError{{ "{" }}Field: "role_id", Msg: "must not be empty"{{ "}" }}
     	{{ "}" }}
     	for _, c := range permissionCodes {{ "{" }}
     		if strings.TrimSpace(c) == "" {{ "{" }}

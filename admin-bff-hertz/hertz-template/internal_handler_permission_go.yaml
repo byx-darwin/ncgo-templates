@@ -9,13 +9,12 @@ body: |
     import (
     	"context"
     	"encoding/json"
-    	"strconv"
 
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/pkg/response"
-    	api "github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1"
-    	"github.com/test/{{ToLower .ServiceName}}/services/authority/kitex_gen/api/admin/v1/rbacservice"
+    	api "{{.Module}}/kitex_gen/api/rbac/v1"
+    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     )
 
     type PermissionHandler struct {{ "{" }}
@@ -36,8 +35,7 @@ body: |
     {{ "}" }}
 
     func (h *PermissionHandler) Get(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	idStr := c.Param("id")
-    	id, _ := strconv.ParseInt(idStr, 10, 64)
+    	id := c.Param("id")
 
     	resp, err := h.rbacCli.GetPermission(ctx, &api.GetPermissionReq{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
@@ -63,8 +61,7 @@ body: |
     {{ "}" }}
 
     func (h *PermissionHandler) Update(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	idStr := c.Param("id")
-    	id, _ := strconv.ParseInt(idStr, 10, 64)
+    	id := c.Param("id")
 
     	var req api.UpdatePermissionReq
     	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
@@ -82,8 +79,7 @@ body: |
     {{ "}" }}
 
     func (h *PermissionHandler) Delete(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	idStr := c.Param("id")
-    	id, _ := strconv.ParseInt(idStr, 10, 64)
+    	id := c.Param("id")
 
     	_, err := h.rbacCli.DeletePermission(ctx, &api.DeletePermissionReq{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}

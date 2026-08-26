@@ -72,7 +72,7 @@ body: |-
     -- name: ListPermissionIDsByCodes :many
     SELECT id, code FROM permissions WHERE code = ANY($1::text[]);
     -- name: ListPermissionsByRoleIDs :many
-    SELECT DISTINCT p.* FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ANY($1::bigint[]) ORDER BY p.id;
+    SELECT DISTINCT p.* FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ANY($1::text[]) ORDER BY p.id;
 
     -- Permission queries (revised for single tree)
 
@@ -97,7 +97,7 @@ body: |-
     -- name: ListPermissionsFiltered :many
     SELECT * FROM permissions
     WHERE ($1 = '' OR type = $1)
-      AND ($2 < 0 OR parent_id = $2)
+      AND ($2 = '' OR parent_id = $2)
       AND ($3 < 0 OR status = $3)
     ORDER BY sort NULLS LAST, id
     LIMIT $4 OFFSET $5;

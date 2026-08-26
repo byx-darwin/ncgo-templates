@@ -217,7 +217,7 @@ body: |
 
     // ListPermissions implements the RBACService RPC method.
     func (s *RBACServiceImpl) ListPermissions(ctx context.Context, req *v1.ListPermissionsReq) (resp *v1.ListPermissionsResp, err error) {{ "{" }}
-    	filter := permsvc.ListPermissionsFilter{{ "{" }}Page: req.Page, PageSize: req.PageSize, Status: -1, ParentID: -1{{ "}" }}
+    	filter := permsvc.ListPermissionsFilter{{ "{" }}Page: req.Page, PageSize: req.PageSize, Status: -1, ParentID: ""{{ "}" }}
     	if req.Type != nil {{ "{" }}
     		filter.Type = *req.Type
     	{{ "}" }}

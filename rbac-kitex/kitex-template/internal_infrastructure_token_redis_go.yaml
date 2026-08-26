@@ -31,11 +31,11 @@ body: |-
     func (s *RedisStore) refreshKey(tok string) string { return s.keyPrefix + ":refresh:" + tok }
     func (s *RedisStore) blackKey(tok string) string   { return s.keyPrefix + ":blacklist:" + tok }
 
-    func (s *RedisStore) SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error {
+    func (s *RedisStore) SetRefresh(ctx context.Context, uid string, refreshToken string, ttl time.Duration) error {
     	return errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
     }
 
-    func (s *RedisStore) GetRefresh(ctx context.Context, refreshToken string) (int64, error) {
+    func (s *RedisStore) GetRefresh(ctx context.Context, refreshToken string) (string, error) {
     	return 0, errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
     }
 

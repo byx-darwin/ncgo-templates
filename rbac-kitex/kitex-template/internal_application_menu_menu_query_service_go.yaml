@@ -24,12 +24,12 @@ body: |
 
     // UserRoleReader resolves a user's roles for menu/permission visibility.
     type UserRoleReader interface {{ "{" }}
-    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    	ListRoles(ctx context.Context, uid string) ([]*role.Role, error)
     {{ "}" }}
 
     // PermReader resolves a user's granted permissions.
     type PermReader interface {{ "{" }}
-    	ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error)
+    	ListByRoleIDs(ctx context.Context, roleIDs []string) ([]*permission.Permission, error)
     	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
     {{ "}" }}
 
@@ -52,7 +52,7 @@ body: |
 
     // UserPermCodes returns the unified permission codes visible to a user. The
     // admin role sees every permission.
-    func (s *QueryService) UserPermCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    func (s *QueryService) UserPermCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
     	roles, err := s.users.ListRoles(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err
@@ -68,7 +68,7 @@ body: |
     		{{ "}" }}
     		return codes, nil
     	{{ "}" }}
-    	roleIDs := make([]int64, 0, len(roles))
+    	roleIDs := make([]string, 0, len(roles))
     	for _, r := range roles {{ "{" }}
     		roleIDs = append(roleIDs, r.ID)
     	{{ "}" }}
@@ -90,7 +90,7 @@ body: |
 
     // UserMenuTree returns the menu forest visible to a user. The admin role sees
     // the full menu tree; other users only see menus whose code they hold.
-    func (s *QueryService) UserMenuTree(ctx context.Context, uid int64) ([]*menu.Node, error) {{ "{" }}
+    func (s *QueryService) UserMenuTree(ctx context.Context, uid string) ([]*menu.Node, error) {{ "{" }}
     	roles, err := s.users.ListRoles(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err

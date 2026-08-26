@@ -17,15 +17,15 @@ body: |
 
     // RoleRepo is the role persistence + permission-assignment port.
     type RoleRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*role.Role, error)
+    	GetByID(ctx context.Context, id string) (*role.Role, error)
     	GetByCode(ctx context.Context, code string) (*role.Role, error)
     	List(ctx context.Context, limit, offset int32) ([]*role.Role, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, r *role.Role) (*role.Role, error)
     	Update(ctx context.Context, r *role.Role) (*role.Role, error)
-    	Delete(ctx context.Context, id int64) error
-    	AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error
-    	ListPermissionCodes(ctx context.Context, roleID int64) ([]string, error)
+    	Delete(ctx context.Context, id string) error
+    	AssignPermissions(ctx context.Context, roleID string, permissionIDs []string) error
+    	ListPermissionCodes(ctx context.Context, roleID string) ([]string, error)
     	ListPermissionIDsByCodes(ctx context.Context, codes []string) ([]gen.ListPermissionIDsByCodesRow, error)
     {{ "}" }}
 
@@ -92,7 +92,7 @@ body: |
     {{ "}" }}
 
     // Delete removes a role.
-    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
     	if err := s.roles.Delete(ctx, id); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -119,7 +119,7 @@ body: |
 
     // GrantPermissions assigns permissions to a role using permission codes (not IDs).
     // Unknown codes produce a domain error.
-    func (s *Service) GrantPermissions(ctx context.Context, roleID int64, permissionCodes []string) error {{ "{" }}
+    func (s *Service) GrantPermissions(ctx context.Context, roleID string, permissionCodes []string) error {{ "{" }}
     	if err := role.Assign(ctx, roleID, permissionCodes); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -147,7 +147,7 @@ body: |
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	ids := make([]int64, 0, len(rows))
+    	ids := make([]string, 0, len(rows))
     	for _, row := range rows {{ "{" }}
     		ids = append(ids, row.ID)
     	{{ "}" }}

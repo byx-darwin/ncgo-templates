@@ -22,17 +22,17 @@ body: |
     // UserRepo is the user lookup port consumed by the auth service.
     type UserRepo interface {{ "{" }}
     	GetByUsername(ctx context.Context, username string) (*user.User, error)
-    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    	GetByID(ctx context.Context, id string) (*user.User, error)
     {{ "}" }}
 
     // RoleReader provides the role codes for a user's JWT claims.
     type RoleReader interface {{ "{" }}
-    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    	ListRoles(ctx context.Context, uid string) ([]*role.Role, error)
     {{ "}" }}
 
     // JWTManager signs and parses HS256 access tokens.
     type JWTManager interface {{ "{" }}
-    	Sign(uid int64, roles []string, ttl time.Duration) (string, error)
+    	Sign(uid string, roles []string, ttl time.Duration) (string, error)
     	Parse(tokenString string) (*authinfra.Claims, error)
     {{ "}" }}
 
@@ -140,7 +140,7 @@ body: |
 
     // Logout blacklists the access token for the remainder of its TTL.
     func (s *Service) Logout(ctx context.Context, accessToken string) error {{ "{" }}
-    	var uid int64
+    	var uid string
     	if claims, err := s.jwt.Parse(accessToken); err == nil {{ "{" }}
     		uid = claims.Uid
     	{{ "}" }}
@@ -152,7 +152,7 @@ body: |
     {{ "}" }}
 
     // ValidateToken reports whether the access token is valid and returns its claims.
-    func (s *Service) ValidateToken(ctx context.Context, accessToken string) (uid int64, roles []string, valid bool) {{ "{" }}
+    func (s *Service) ValidateToken(ctx context.Context, accessToken string) (uid string, roles []string, valid bool) {{ "{" }}
     	blacked, err := s.tokens.IsBlacklisted(ctx, accessToken)
     	if err != nil || blacked {{ "{" }}
     		return 0, nil, false
@@ -164,7 +164,7 @@ body: |
     	return claims.Uid, claims.Roles, true
     {{ "}" }}
 
-    func (s *Service) roleCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    func (s *Service) roleCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
     	roles, err := s.roles.ListRoles(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err

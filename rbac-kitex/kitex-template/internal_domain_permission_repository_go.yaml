@@ -12,17 +12,17 @@ body: |
 
     // Repository is the persistence port for the permission aggregate.
     type Repository interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*Permission, error)
+    	GetByID(ctx context.Context, id string) (*Permission, error)
     	GetByCode(ctx context.Context, code string) ([]*Permission, error)
     	GetByCodeAndType(ctx context.Context, code, typ string) (*Permission, error)
     	List(ctx context.Context, limit, offset int32) ([]*Permission, error)
-    	ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*Permission, error)
+    	ListFiltered(ctx context.Context, typ string, parentID string, status int, limit, offset int32) ([]*Permission, error)
     	ListByCodes(ctx context.Context, codes []string) ([]*Permission, error)
-    	ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*Permission, error)
-    	ListChildren(ctx context.Context, parentID int64) ([]*Permission, error)
+    	ListByRoleIDs(ctx context.Context, roleIDs []string) ([]*Permission, error)
+    	ListChildren(ctx context.Context, parentID string) ([]*Permission, error)
     	Save(ctx context.Context, p *Permission) (*Permission, error)
     	Update(ctx context.Context, p *Permission) (*Permission, error)
-    	Delete(ctx context.Context, id int64) error
+    	Delete(ctx context.Context, id string) error
     {{ "}" }}
 
     // NotFoundError is returned when a permission does not exist.

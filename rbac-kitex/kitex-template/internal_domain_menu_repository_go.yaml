@@ -14,7 +14,7 @@ body: |
     // It queries the permissions table filtered by type ∈ {{ "{" }}catalog, menu{{ "}" }}.
     type Repository interface {{ "{" }}
     	ListMenusAsTree(ctx context.Context) ([]*Menu, error)
-    	ListMenusByParentID(ctx context.Context, parentID int64) ([]*Menu, error)
+    	ListMenusByParentID(ctx context.Context, parentID string) ([]*Menu, error)
     {{ "}" }}
 
     // NotFoundError is returned when a menu does not exist.

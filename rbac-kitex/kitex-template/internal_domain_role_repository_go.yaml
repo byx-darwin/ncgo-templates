@@ -12,12 +12,12 @@ body: |
 
     // Repository is the persistence port for the role aggregate.
     type Repository interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*Role, error)
+    	GetByID(ctx context.Context, id string) (*Role, error)
     	GetByCode(ctx context.Context, code string) (*Role, error)
     	List(ctx context.Context, limit, offset int32) ([]*Role, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, r *Role) (*Role, error)
-    	Delete(ctx context.Context, id int64) error
+    	Delete(ctx context.Context, id string) error
     {{ "}" }}
 
     // NotFoundError is returned when a role does not exist.

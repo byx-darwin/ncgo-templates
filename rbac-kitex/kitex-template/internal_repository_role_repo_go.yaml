@@ -55,7 +55,7 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (r *Repo) GetByID(ctx context.Context, id string) (*role.Role, error) {{ "{" }}
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*role.Role, error) {{ "{" }}
     	row, err := r.q.GetRoleByID(ctx, id)
     	if err != nil {{ "{" }}
     		return nil, mapErr(err, id)
@@ -91,7 +91,7 @@ body: |
     	if rl == nil {{ "{" }}
     		return nil, errors.New("role repository: nil role")
     	{{ "}" }}
-    	if rl.ID != "" {{ "{" }}
+    	if rl.ID != 0 {{ "{" }}
     		return nil, errors.New("role repository: use Update for existing roles")
     	{{ "}" }}
     	var remark *string
@@ -125,12 +125,12 @@ body: |
     	return toDomainRole(row), nil
     {{ "}" }}
 
-    func (r *Repo) Delete(ctx context.Context, id string) error {{ "{" }}
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
     	return r.q.DeleteRole(ctx, id)
     {{ "}" }}
 
     // AssignPermissions replaces the role's permission set with the given IDs.
-    func (r *Repo) AssignPermissions(ctx context.Context, roleID string, permissionIDs []string) error {{ "{" }}
+    func (r *Repo) AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
     	if err := r.q.ClearRolePermissions(ctx, roleID); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -143,12 +143,12 @@ body: |
     {{ "}" }}
 
     // ClearPermissions removes every permission from the role.
-    func (r *Repo) ClearPermissions(ctx context.Context, roleID string) error {{ "{" }}
+    func (r *Repo) ClearPermissions(ctx context.Context, roleID int64) error {{ "{" }}
     	return r.q.ClearRolePermissions(ctx, roleID)
     {{ "}" }}
 
     // ListPermissions returns the permissions granted to the given role IDs.
-    func (r *Repo) ListPermissions(ctx context.Context, roleIDs []string) ([]*permission.Permission, error) {{ "{" }}
+    func (r *Repo) ListPermissions(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
     	rows, err := r.q.ListPermissionsByRoleIDs(ctx, roleIDs)
     	if err != nil {{ "{" }}
     		return nil, err
@@ -161,7 +161,7 @@ body: |
     {{ "}" }}
 
     // ListPermissionCodes returns the permission codes granted to the role.
-    func (r *Repo) ListPermissionCodes(ctx context.Context, roleID string) ([]string, error) {{ "{" }}
+    func (r *Repo) ListPermissionCodes(ctx context.Context, roleID int64) ([]string, error) {{ "{" }}
     	return r.q.ListPermissionCodesByRoleID(ctx, roleID)
     {{ "}" }}
 

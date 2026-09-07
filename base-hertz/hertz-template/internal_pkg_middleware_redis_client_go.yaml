@@ -1,7 +1,8 @@
 # Hertz custom template — internal/pkg/middleware/redis_client.go
-# Resolves the process-wide shared Redis client used by the rate-limit store.
-# Delegates to internal/base/data.SharedRedisClient so the rate-limit middleware
-# and the DDD data layer share one connection pool (keyed by redis config).
+# Resolves the process-wide shared Redis client used by the idempotency and
+# signature-nonce stores. Delegates to internal/base/data.SharedRedisClient so
+# those middlewares and the DDD data layer share one connection pool (keyed by
+# redis config).
 path: internal/pkg/middleware/redis_client.go
 update_behavior:
     type: cover

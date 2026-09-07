@@ -7,7 +7,7 @@ body: |
 
     import (
     	"context"
-    	"fmt"
+    	"strconv"
 
     	"{{.Module}}/internal/db/gen"
     	"{{.Module}}/internal/domain/permission"
@@ -17,15 +17,15 @@ body: |
 
     // RoleRepo is the role persistence + permission-assignment port.
     type RoleRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id string) (*role.Role, error)
+    	GetByID(ctx context.Context, id int64) (*role.Role, error)
     	GetByCode(ctx context.Context, code string) (*role.Role, error)
     	List(ctx context.Context, limit, offset int32) ([]*role.Role, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, r *role.Role) (*role.Role, error)
     	Update(ctx context.Context, r *role.Role) (*role.Role, error)
-    	Delete(ctx context.Context, id string) error
-    	AssignPermissions(ctx context.Context, roleID string, permissionIDs []string) error
-    	ListPermissionCodes(ctx context.Context, roleID string) ([]string, error)
+    	Delete(ctx context.Context, id int64) error
+    	AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error
+    	ListPermissionCodes(ctx context.Context, roleID int64) ([]string, error)
     	ListPermissionIDsByCodes(ctx context.Context, codes []string) ([]gen.ListPermissionIDsByCodesRow, error)
     {{ "}" }}
 
@@ -40,7 +40,9 @@ body: |
     	RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error)
     {{ "}" }}
 
-    // Service implements the role management use cases.
+    // Service implements the role management use cases. Public methods take the
+    // external decimal-string role id and resolve it to the internal int64
+    // primary key via strconv before calling RoleRepo.
     type Service struct {{ "{" }}
     	roles    RoleRepo
     	perms    PermReader
@@ -70,9 +72,14 @@ body: |
     	return saved, nil
     {{ "}" }}
 
-    // Update renames a role and optionally changes status/remark.
+    // Update renames a role and optionally changes status/remark. in.ID is the
+    // decimal-string form of the internal int64 primary key.
     func (s *Service) Update(ctx context.Context, in UpdateRoleInput) (*role.Role, error) {{ "{" }}
-    	r, err := s.roles.GetByID(ctx, in.ID)
+    	id, err := strconv.ParseInt(in.ID, 10, 64)
+    	if err != nil {{ "{" }}
+    		return nil, role.ValidationError{{ "{" }}Field: "id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	r, err := s.roles.GetByID(ctx, id)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -87,16 +94,20 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, "", "role.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "role.update", in.ID, "{{ "{" }}{{ "}" }}")
     	return saved, nil
     {{ "}" }}
 
-    // Delete removes a role.
+    // Delete removes a role identified by its decimal-string id.
     func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
-    	if err := s.roles.Delete(ctx, id); err != nil {{ "{" }}
+    	rid, err := strconv.ParseInt(id, 10, 64)
+    	if err != nil {{ "{" }}
+    		return role.ValidationError{{ "{" }}Field: "id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	if err := s.roles.Delete(ctx, rid); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, "", "role.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "role.delete", id, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
@@ -118,12 +129,17 @@ body: |
     {{ "}" }}
 
     // GrantPermissions assigns permissions to a role using permission codes (not IDs).
+    // roleID is the decimal-string form of the internal int64 primary key.
     // Unknown codes produce a domain error.
     func (s *Service) GrantPermissions(ctx context.Context, roleID string, permissionCodes []string) error {{ "{" }}
     	if err := role.Assign(ctx, roleID, permissionCodes); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	r, err := s.roles.GetByID(ctx, roleID)
+    	rid, err := strconv.ParseInt(roleID, 10, 64)
+    	if err != nil {{ "{" }}
+    		return role.ValidationError{{ "{" }}Field: "role_id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	r, err := s.roles.GetByID(ctx, rid)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -147,11 +163,11 @@ body: |
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	ids := make([]string, 0, len(rows))
+    	ids := make([]int64, 0, len(rows))
     	for _, row := range rows {{ "{" }}
     		ids = append(ids, row.ID)
     	{{ "}" }}
-    	if err := s.roles.AssignPermissions(ctx, roleID, ids); err != nil {{ "{" }}
+    	if err := s.roles.AssignPermissions(ctx, rid, ids); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	// Sync Casbin policies: clear existing then add new.
@@ -161,6 +177,6 @@ body: |
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, "", "role.grant_permissions", fmt.Sprint(roleID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "role.grant_permissions", roleID, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}

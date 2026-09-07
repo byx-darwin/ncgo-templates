@@ -12,15 +12,16 @@ body: |
 
     // Repository is the persistence port for the user aggregate.
     type Repository interface {{ "{" }}
-    	GetByID(ctx context.Context, id string) (*User, error)
+    	GetByID(ctx context.Context, id int64) (*User, error)
+    	GetByUUID(ctx context.Context, uuid string) (*User, error)
     	GetByUsername(ctx context.Context, username string) (*User, error)
     	List(ctx context.Context, limit, offset int32) ([]*User, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, u *User) (*User, error)
     	Update(ctx context.Context, u *User) (*User, error)
-    	UpdatePassword(ctx context.Context, id string, passwordHash string) error
-    	Delete(ctx context.Context, id string) error
-    	SetStatus(ctx context.Context, id string, status int) error
+    	UpdatePassword(ctx context.Context, id int64, passwordHash string) error
+    	Delete(ctx context.Context, id int64) error
+    	SetStatus(ctx context.Context, id int64, status int) error
     {{ "}" }}
 
     // NotFoundError is returned when a user does not exist.

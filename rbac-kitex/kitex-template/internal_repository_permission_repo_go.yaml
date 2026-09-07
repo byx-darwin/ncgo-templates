@@ -54,7 +54,7 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (r *Repo) GetByID(ctx context.Context, id string) (*permission.Permission, error) {{ "{" }}
+    func (r *Repo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
     	row, err := r.q.GetPermissionByID(ctx, id)
     	if err != nil {{ "{" }}
     		return nil, mapErr(err, id)
@@ -94,7 +94,7 @@ body: |
     	return r.q.CountPermissions(ctx)
     {{ "}" }}
 
-    func (r *Repo) ListFiltered(ctx context.Context, typ string, parentID string, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    func (r *Repo) ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
     	rows, err := r.q.ListPermissionsFiltered(ctx, gen.ListPermissionsFilteredParams{{ "{" }}
     		Column1: typ,
     		Column2: parentID,
@@ -116,7 +116,7 @@ body: |
     	return toDomainSlice(rows), nil
     {{ "}" }}
 
-    func (r *Repo) ListByRoleIDs(ctx context.Context, roleIDs []string) ([]*permission.Permission, error) {{ "{" }}
+    func (r *Repo) ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error) {{ "{" }}
     	rows, err := r.q.ListPermissionsByRoleIDs(ctx, roleIDs)
     	if err != nil {{ "{" }}
     		return nil, err
@@ -124,7 +124,7 @@ body: |
     	return toDomainSlice(rows), nil
     {{ "}" }}
 
-    func (r *Repo) ListChildren(ctx context.Context, parentID string) ([]*permission.Permission, error) {{ "{" }}
+    func (r *Repo) ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error) {{ "{" }}
     	pid := parentID
     	rows, err := r.q.ListChildPermissionIDs(ctx, &pid)
     	if err != nil {{ "{" }}
@@ -145,8 +145,8 @@ body: |
     	if p == nil {{ "{" }}
     		return nil, errors.New("permission repository: nil permission")
     	{{ "}" }}
-    	var parentID *string
-    	if p.ParentID != "" {{ "{" }}
+    	var parentID *int64
+    	if p.ParentID != 0 {{ "{" }}
     		parentID = &p.ParentID
     	{{ "}" }}
     	var path, icon, routeName, redirect, method, description *string
@@ -199,8 +199,8 @@ body: |
     	if p == nil {{ "{" }}
     		return nil, errors.New("permission repository: nil permission")
     	{{ "}" }}
-    	var parentID *string
-    	if p.ParentID != "" {{ "{" }}
+    	var parentID *int64
+    	if p.ParentID != 0 {{ "{" }}
     		parentID = &p.ParentID
     	{{ "}" }}
     	var path, icon, routeName, redirect, method, description *string
@@ -250,7 +250,7 @@ body: |
     	return toDomain(row), nil
     {{ "}" }}
 
-    func (r *Repo) Delete(ctx context.Context, id string) error {{ "{" }}
+    func (r *Repo) Delete(ctx context.Context, id int64) error {{ "{" }}
     	return r.q.DeletePermission(ctx, id)
     {{ "}" }}
 

@@ -4,10 +4,12 @@ update_behavior:
     type: cover
 body: |-
     -- name: CreateUser :one
-    INSERT INTO users (username, password_hash, nickname, avatar, email, phone, status)
-    VALUES ($1, $2, $3, $4, $5, $6, 1) RETURNING *;
+    INSERT INTO users (uuid, username, password_hash, nickname, avatar, email, phone, status)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, 1) RETURNING *;
     -- name: GetUserByID :one
     SELECT * FROM users WHERE id = $1;
+    -- name: GetUserByUUID :one
+    SELECT * FROM users WHERE uuid = $1;
     -- name: GetUserByUsername :one
     SELECT * FROM users WHERE username = $1;
     -- name: ListUsers :many
@@ -72,7 +74,7 @@ body: |-
     -- name: ListPermissionIDsByCodes :many
     SELECT id, code FROM permissions WHERE code = ANY($1::text[]);
     -- name: ListPermissionsByRoleIDs :many
-    SELECT DISTINCT p.* FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ANY($1::text[]) ORDER BY p.id;
+    SELECT DISTINCT p.* FROM permissions p JOIN role_permissions rp ON rp.permission_id = p.id WHERE rp.role_id = ANY($1::bigint[]) ORDER BY p.id;
 
     -- Permission queries (revised for single tree)
 
@@ -97,7 +99,7 @@ body: |-
     -- name: ListPermissionsFiltered :many
     SELECT * FROM permissions
     WHERE ($1 = '' OR type = $1)
-      AND ($2 = '' OR parent_id = $2)
+      AND ($2::bigint = 0 OR parent_id = $2::bigint)
       AND ($3 < 0 OR status = $3)
     ORDER BY sort NULLS LAST, id
     LIMIT $4 OFFSET $5;
@@ -162,4 +164,3 @@ body: |-
 
     -- name: InsertAuditLog :one
     INSERT INTO audit_log (actor_uid, action, target, detail_json) VALUES ($1, $2, $3, $4) RETURNING id;
-

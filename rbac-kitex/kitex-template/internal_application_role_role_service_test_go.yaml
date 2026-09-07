@@ -18,11 +18,11 @@ body: |
     )
 
     type fakeRoleRepo struct {{ "{" }}
-    	roles map[string]*role.Role
+    	roles map[int64]*role.Role
     	next  int64
     {{ "}" }}
 
-    func (f *fakeRoleRepo) GetByID(ctx context.Context, id string) (*role.Role, error) {{ "{" }}
+    func (f *fakeRoleRepo) GetByID(ctx context.Context, id int64) (*role.Role, error) {{ "{" }}
     	r, ok := f.roles[id]
     	if !ok {{ "{" }}
     		return nil, role.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
@@ -50,9 +50,9 @@ body: |
     func (f *fakeRoleRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.roles)), nil {{ "}" }}
 
     func (f *fakeRoleRepo) Save(ctx context.Context, r *role.Role) (*role.Role, error) {{ "{" }}
-    	if r.ID == "" {{ "{" }}
+    	if r.ID == 0 {{ "{" }}
     		f.next++
-    		r.ID = fmt.Sprint(f.next)
+    		r.ID = f.next
     	{{ "}" }}
     	f.roles[r.ID] = r
     	return r, nil
@@ -63,23 +63,23 @@ body: |
     	return r, nil
     {{ "}" }}
 
-    func (f *fakeRoleRepo) Delete(ctx context.Context, id string) error {{ "{" }}
+    func (f *fakeRoleRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
     	delete(f.roles, id)
     	return nil
     {{ "}" }}
 
-    func (f *fakeRoleRepo) AssignPermissions(ctx context.Context, roleID string, permissionIDs []string) error {{ "{" }}
+    func (f *fakeRoleRepo) AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
     	return nil
     {{ "}" }}
 
-    func (f *fakeRoleRepo) ListPermissionCodes(ctx context.Context, roleID string) ([]string, error) {{ "{" }}
+    func (f *fakeRoleRepo) ListPermissionCodes(ctx context.Context, roleID int64) ([]string, error) {{ "{" }}
     	return nil, nil
     {{ "}" }}
 
     func (f *fakeRoleRepo) ListPermissionIDsByCodes(ctx context.Context, codes []string) ([]gen.ListPermissionIDsByCodesRow, error) {{ "{" }}
     	out := make([]gen.ListPermissionIDsByCodesRow, 0, len(codes))
     	for i, c := range codes {{ "{" }}
-    		out = append(out, gen.ListPermissionIDsByCodesRow{{ "{" }}ID: fmt.Sprint(i + 1), Code: c{{ "}" }})
+    		out = append(out, gen.ListPermissionIDsByCodesRow{{ "{" }}ID: int64(i + 1), Code: c{{ "}" }})
     	{{ "}" }}
     	return out, nil
     {{ "}" }}
@@ -105,9 +105,9 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	roles := &fakeRoleRepo{{ "{" }}roles: map[string]*role.Role{{ "{" }}"1": {{ "{" }}ID: "1", Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }}
+    	roles := &fakeRoleRepo{{ "{" }}roles: map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }}
     	perms := &fakePermReader{{ "{" }}perms: map[string]*permission.Permission{{ "{" }}
-    		"user:create": {{ "{" }}ID: "1", Code: "user:create", Type: permission.TypeAPI, Name: "Create User", Method: "POST"{{ "}" }},
+    		"user:create": {{ "{" }}ID: 1, Code: "user:create", Type: permission.TypeAPI, Name: "Create User", Method: "POST"{{ "}" }},
     	{{ "}}" }}
     	aud := audit.NewMemoryWriter()
     	return New(roles, perms, e, aud), store, aud
@@ -150,5 +150,13 @@ body: |
     	svc, _, _ := newRoleService(t)
     	if _, err := svc.Create(ctx, CreateRoleInput{{ "{" }}Code: "", Name: "Bad"{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("Create(empty code) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUpdateRejectsNonIntegerID(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newRoleService(t)
+    	if _, err := svc.Update(ctx, UpdateRoleInput{{ "{" }}ID: "not-a-number", Name: "X"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Update(non-integer id) = nil, want error")
     	{{ "}" }}
     {{ "}" }}

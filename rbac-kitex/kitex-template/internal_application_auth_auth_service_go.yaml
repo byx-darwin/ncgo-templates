@@ -22,12 +22,12 @@ body: |
     // UserRepo is the user lookup port consumed by the auth service.
     type UserRepo interface {{ "{" }}
     	GetByUsername(ctx context.Context, username string) (*user.User, error)
-    	GetByID(ctx context.Context, id string) (*user.User, error)
+    	GetByUUID(ctx context.Context, uuid string) (*user.User, error)
     {{ "}" }}
 
     // RoleReader provides the role codes for a user's JWT claims.
     type RoleReader interface {{ "{" }}
-    	ListRoles(ctx context.Context, uid string) ([]*role.Role, error)
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
     {{ "}" }}
 
     // JWTManager signs and parses HS256 access tokens.
@@ -90,7 +90,7 @@ body: |
     	if err != nil {{ "{" }}
     		return "", "", 0, err
     	{{ "}" }}
-    	access, err = s.jwt.Sign(u.ID, roles, s.accessTTL)
+    	access, err = s.jwt.Sign(u.UUID, roles, s.accessTTL)
     	if err != nil {{ "{" }}
     		return "", "", 0, err
     	{{ "}" }}
@@ -98,10 +98,10 @@ body: |
     	if err != nil {{ "{" }}
     		return "", "", 0, err
     	{{ "}" }}
-    	if err := s.tokens.SetRefresh(ctx, u.ID, refresh, s.refreshTTL); err != nil {{ "{" }}
+    	if err := s.tokens.SetRefresh(ctx, u.UUID, refresh, s.refreshTTL); err != nil {{ "{" }}
     		return "", "", 0, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, u.ID, "auth.login", username, "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, u.UUID, "auth.login", username, "{{ "{" }}{{ "}" }}")
     	return access, refresh, int32(s.accessTTL.Seconds()), nil
     {{ "}" }}
 
@@ -111,14 +111,14 @@ body: |
     	if err != nil {{ "{" }}
     		return "", "", err
     	{{ "}" }}
-    	u, err := s.users.GetByID(ctx, uid)
+    	u, err := s.users.GetByUUID(ctx, uid)
     	if err != nil {{ "{" }}
     		return "", "", err
     	{{ "}" }}
     	if u.Status == user.StatusDisabled {{ "{" }}
     		return "", "", ErrInvalidCredentials
     	{{ "}" }}
-    	roles, err := s.roleCodes(ctx, uid)
+    	roles, err := s.roleCodes(ctx, u.ID)
     	if err != nil {{ "{" }}
     		return "", "", err
     	{{ "}" }}
@@ -164,7 +164,7 @@ body: |
     	return claims.Uid, claims.Roles, true
     {{ "}" }}
 
-    func (s *Service) roleCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
+    func (s *Service) roleCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
     	roles, err := s.roles.ListRoles(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err

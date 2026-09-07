@@ -12,6 +12,7 @@ body: |
     	"{{.Module}}/internal/domain/menu"
     	"{{.Module}}/internal/domain/permission"
     	"{{.Module}}/internal/domain/role"
+    	"{{.Module}}/internal/domain/user"
     )
 
     // AdminRoleCode grants full menu/permission visibility.
@@ -22,14 +23,16 @@ body: |
     	ListMenusAsTree(ctx context.Context) ([]*menu.Menu, error)
     {{ "}" }}
 
-    // UserRoleReader resolves a user's roles for menu/permission visibility.
+    // UserRoleReader resolves a user's external UUID to its internal int64 ID
+    // and lists its roles for menu/permission visibility.
     type UserRoleReader interface {{ "{" }}
-    	ListRoles(ctx context.Context, uid string) ([]*role.Role, error)
+    	GetByUUID(ctx context.Context, uuid string) (*user.User, error)
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
     {{ "}" }}
 
     // PermReader resolves a user's granted permissions.
     type PermReader interface {{ "{" }}
-    	ListByRoleIDs(ctx context.Context, roleIDs []string) ([]*permission.Permission, error)
+    	ListByRoleIDs(ctx context.Context, roleIDs []int64) ([]*permission.Permission, error)
     	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
     {{ "}" }}
 
@@ -50,10 +53,14 @@ body: |
     	return s.menus.ListMenusAsTree(ctx)
     {{ "}" }}
 
-    // UserPermCodes returns the unified permission codes visible to a user. The
-    // admin role sees every permission.
+    // UserPermCodes returns the unified permission codes visible to a user. uid
+    // is the external UUID. The admin role sees every permission.
     func (s *QueryService) UserPermCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
-    	roles, err := s.users.ListRoles(ctx, uid)
+    	u, err := s.users.GetByUUID(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	roles, err := s.users.ListRoles(ctx, u.ID)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -68,7 +75,7 @@ body: |
     		{{ "}" }}
     		return codes, nil
     	{{ "}" }}
-    	roleIDs := make([]string, 0, len(roles))
+    	roleIDs := make([]int64, 0, len(roles))
     	for _, r := range roles {{ "{" }}
     		roleIDs = append(roleIDs, r.ID)
     	{{ "}" }}
@@ -88,10 +95,15 @@ body: |
     	return codes, nil
     {{ "}" }}
 
-    // UserMenuTree returns the menu forest visible to a user. The admin role sees
-    // the full menu tree; other users only see menus whose code they hold.
+    // UserMenuTree returns the menu forest visible to a user. uid is the
+    // external UUID. The admin role sees the full menu tree; other users only
+    // see menus whose code they hold.
     func (s *QueryService) UserMenuTree(ctx context.Context, uid string) ([]*menu.Node, error) {{ "{" }}
-    	roles, err := s.users.ListRoles(ctx, uid)
+    	u, err := s.users.GetByUUID(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	roles, err := s.users.ListRoles(ctx, u.ID)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}

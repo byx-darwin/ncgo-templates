@@ -9,6 +9,7 @@ body: |
 
     import (
     	"context"
+    	"strconv"
 
     	menusvc "{{.Module}}/internal/application/menu"
     	permsvc "{{.Module}}/internal/application/permission"
@@ -59,7 +60,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, rpcerror.ToBizError(err)
     	{{ "}" }}
-    	roles, err := s.user.GetRoleCodes(ctx, u.ID)
+    	roles, err := s.user.GetRoleCodes(ctx, u.UUID)
     	if err != nil {{ "{" }}
     		return nil, rpcerror.ToBizError(err)
     	{{ "}" }}
@@ -85,7 +86,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, rpcerror.ToBizError(err)
     	{{ "}" }}
-    	roles, err := s.user.GetRoleCodes(ctx, u.ID)
+    	roles, err := s.user.GetRoleCodes(ctx, u.UUID)
     	if err != nil {{ "{" }}
     		return nil, rpcerror.ToBizError(err)
     	{{ "}" }}
@@ -106,7 +107,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, rpcerror.ToBizError(err)
     	{{ "}" }}
-    	roles, err := s.user.GetRoleCodes(ctx, u.ID)
+    	roles, err := s.user.GetRoleCodes(ctx, u.UUID)
     	if err != nil {{ "{" }}
     		return nil, rpcerror.ToBizError(err)
     	{{ "}" }}
@@ -121,7 +122,7 @@ body: |
     	{{ "}" }}
     	out := make([]*v1.User, 0, len(users))
     	for _, u := range users {{ "{" }}
-    		roles, err := s.user.GetRoleCodes(ctx, u.ID)
+    		roles, err := s.user.GetRoleCodes(ctx, u.UUID)
     		if err != nil {{ "{" }}
     			return nil, rpcerror.ToBizError(err)
     		{{ "}" }}
@@ -296,25 +297,25 @@ body: |
 
     func toV1User(u *user.User, roles []string) *v1.User {{ "{" }}
     	return &v1.User{{ "{" }}
-    		Id: u.ID, Username: u.Username, Status: int32(u.Status), Roles: roles,
+    		Id: u.UUID, Username: u.Username, Status: int32(u.Status), Roles: roles,
     		Nickname: u.Nickname, Avatar: u.Avatar, Email: u.Email, Phone: u.Phone,
     	{{ "}" }}
     {{ "}" }}
 
     func toV1Role(r *role.Role, permCodes []string) *v1.Role {{ "{" }}
     	return &v1.Role{{ "{" }}
-    		Id: r.ID, Code: r.Code, Name: r.Name,
+    		Id: strconv.FormatInt(r.ID, 10), Code: r.Code, Name: r.Name,
     		Status: int32(r.Status), Remark: r.Remark, Permissions: permCodes,
     	{{ "}" }}
     {{ "}" }}
 
     func toV1Permission(p *permission.Permission) *v1.Permission {{ "{" }}
     	vp := &v1.Permission{{ "{" }}
-    		Id:          p.ID,
+    		Id:          strconv.FormatInt(p.ID, 10),
     		Code:        p.Code,
     		Type:        p.Type,
     		Name:        p.Name,
-    		ParentId:    p.ParentID,
+    		ParentId:    formatParentID(p.ParentID),
     		Path:        p.Path,
     		Icon:        p.Icon,
     		RouteName:   p.RouteName,
@@ -338,7 +339,7 @@ body: |
 
     func toV1Menu(m *menu.Menu) *v1.Menu {{ "{" }}
     	vm := &v1.Menu{{ "{" }}
-    		Id: m.ID, Code: m.Code, Name: m.Name, ParentId: m.ParentID, Type: m.Type,
+    		Id: strconv.FormatInt(m.ID, 10), Code: m.Code, Name: m.Name, ParentId: formatParentID(m.ParentID), Type: m.Type,
     		Path: m.Path, Icon: m.Icon, RouteName: m.RouteName, Redirect: m.Redirect,
     		Sort: m.Sort,
     	{{ "}" }}
@@ -363,6 +364,15 @@ body: |
     		{{ "}" }})
     	{{ "}" }}
     	return out
+    {{ "}" }}
+
+    // formatParentID renders an internal parent id as its external decimal
+    // string, with 0 (root) rendered as the empty string.
+    func formatParentID(id int64) string {{ "{" }}
+    	if id == 0 {{ "{" }}
+    		return ""
+    	{{ "}" }}
+    	return strconv.FormatInt(id, 10)
     {{ "}" }}
 
     func int32PtrToInt(v *int32) *int {{ "{" }}

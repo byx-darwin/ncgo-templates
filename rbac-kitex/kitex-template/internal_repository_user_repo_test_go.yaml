@@ -45,7 +45,7 @@ body: |
     	q := gen.New(pool)
     	repo := New(q, pool)
 
-    	// Create → GetByUsername → SetStatus → Delete round-trip.
+    	// Create → GetByUUID → GetByUsername → SetStatus → Delete round-trip.
     	created, err := repo.Save(ctx, &user.User{{ "{" }}
     		Username:     "integration-user",
     		PasswordHash: "argon2hash-placeholder",
@@ -54,8 +54,19 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Save(create): %v", err)
     	{{ "}" }}
-    	if created.ID == "" {{ "{" }}
+    	if created.ID == 0 {{ "{" }}
     		t.Fatal("created user has id 0")
+    	{{ "}" }}
+    	if created.UUID == "" {{ "{" }}
+    		t.Fatal("created user has empty uuid")
+    	{{ "}" }}
+
+    	byUUID, err := repo.GetByUUID(ctx, created.UUID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByUUID: %v", err)
+    	{{ "}" }}
+    	if byUUID.ID != created.ID {{ "{" }}
+    		t.Fatalf("GetByUUID.ID = %d, want %d", byUUID.ID, created.ID)
     	{{ "}" }}
 
     	got, err := repo.GetByUsername(ctx, created.Username)

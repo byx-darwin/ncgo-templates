@@ -18,10 +18,12 @@ body: |
     	"{{.Module}}/internal/infrastructure/token"
     )
 
+    const testUserUUID = "018f2c00-0000-7000-8000-000000000001"
+
     type fakeUsers struct {{ "{" }}
     	byUsername map[string]*user.User
-    	byID       map[string]*user.User
-    	rolesByUID map[string][]*role.Role
+    	byUUID     map[string]*user.User
+    	rolesByUID map[int64][]*role.Role
     {{ "}" }}
 
     func (f *fakeUsers) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
@@ -32,26 +34,27 @@ body: |
     	return u, nil
     {{ "}" }}
 
-    func (f *fakeUsers) GetByID(ctx context.Context, id string) (*user.User, error) {{ "{" }}
-    	u, ok := f.byID[id]
+    func (f *fakeUsers) GetByUUID(ctx context.Context, uuid string) (*user.User, error) {{ "{" }}
+    	u, ok := f.byUUID[uuid]
     	if !ok {{ "{" }}
-    		return nil, user.NotFoundError{{ "{" }}Key: ""{{ "}" }}
+    		return nil, user.NotFoundError{{ "{" }}Key: uuid{{ "}" }}
     	{{ "}" }}
     	return u, nil
     {{ "}" }}
 
-    func (f *fakeUsers) ListRoles(ctx context.Context, uid string) ([]*role.Role, error) {{ "{" }}
+    func (f *fakeUsers) ListRoles(ctx context.Context, uid int64) ([]*role.Role, error) {{ "{" }}
     	return f.rolesByUID[uid], nil
     {{ "}" }}
 
     func newTestService() (*Service, *fakeUsers, *audit.MemoryWriter, *token.MemoryStore) {{ "{" }}
     	hash, _ := authinfra.HashPassword("Passw0rd!")
     	u, _ := user.New("alice", hash)
-    	u.ID = "1"
+    	u.ID = 1
+    	u.UUID = testUserUUID
     	users := &fakeUsers{{ "{" }}
     		byUsername: map[string]*user.User{{ "{" }}"alice": u{{ "}" }},
-    		byID:       map[string]*user.User{{ "{" }}"1": u{{ "}" }},
-    		rolesByUID: map[string][]*role.Role{{ "{" }}"1": {{ "{{" }}ID: "1", Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }},
+    		byUUID:     map[string]*user.User{{ "{" }}testUserUUID: u{{ "}" }},
+    		rolesByUID: map[int64][]*role.Role{{ "{" }}1: {{ "{{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }},
     	{{ "}" }}
     	aud := audit.NewMemoryWriter()
     	tokens := token.NewMemoryStore()
@@ -105,8 +108,8 @@ body: |
     		t.Fatalf("Login: %v", err)
     	{{ "}" }}
     	uid, roles, valid := svc.ValidateToken(ctx, access)
-    	if !valid || uid != "1" || len(roles) != 1 || roles[0] != "admin" {{ "{" }}
-    		t.Fatalf("ValidateToken = (%s, %v, %v), want (1, [admin], true)", uid, roles, valid)
+    	if !valid || uid != testUserUUID || len(roles) != 1 || roles[0] != "admin" {{ "{" }}
+    		t.Fatalf("ValidateToken = (%s, %v, %v), want (%s, [admin], true)", uid, roles, valid, testUserUUID)
     	{{ "}" }}
 
     	uid, roles, valid = svc.ValidateToken(ctx, "bogus-token")
@@ -119,7 +122,7 @@ body: |
     	ctx := context.Background()
     	svc, _, _, tokens := newTestService()
 
-    	_ = tokens.SetRefresh(ctx, "1", "refresh-old", time.Hour)
+    	_ = tokens.SetRefresh(ctx, testUserUUID, "refresh-old", time.Hour)
     	access, refresh, err := svc.Refresh(ctx, "refresh-old")
     	if err != nil {{ "{" }}
     		t.Fatalf("Refresh: %v", err)

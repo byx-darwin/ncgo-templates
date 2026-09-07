@@ -9,11 +9,11 @@ body: |
 
     func TestBuildTree(t *testing.T) {{ "{" }}
     	items := []*Menu{{ "{" }}
-    		{{ "{" }}ID: "1", ParentID: "", Type: TypeCatalog, Name: "System", Sort: 2{{ "}" }},
-    		{{ "{" }}ID: "2", ParentID: "1", Type: TypeMenu, Name: "Users", Sort: 1{{ "}" }},
-    		{{ "{" }}ID: "3", ParentID: "1", Type: TypeMenu, Name: "Roles", Sort: 2{{ "}" }},
-    		{{ "{" }}ID: "4", ParentID: "", Type: TypeCatalog, Name: "Dashboard", Sort: 1{{ "}" }},
-    		{{ "{" }}ID: "5", ParentID: "999", Type: TypeMenu, Name: "Orphan", Sort: 10{{ "}" }},
+    		{{ "{" }}ID: 1, ParentID: 0, Type: TypeCatalog, Name: "System", Sort: 2{{ "}" }},
+    		{{ "{" }}ID: 2, ParentID: 1, Type: TypeMenu, Name: "Users", Sort: 1{{ "}" }},
+    		{{ "{" }}ID: 3, ParentID: 1, Type: TypeMenu, Name: "Roles", Sort: 2{{ "}" }},
+    		{{ "{" }}ID: 4, ParentID: 0, Type: TypeCatalog, Name: "Dashboard", Sort: 1{{ "}" }},
+    		{{ "{" }}ID: 5, ParentID: 999, Type: TypeMenu, Name: "Orphan", Sort: 10{{ "}" }},
     	{{ "}" }}
 
     	roots := BuildTree(items)

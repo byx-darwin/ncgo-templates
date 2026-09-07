@@ -7,7 +7,7 @@ body: |
 
     import (
     	"context"
-    	"fmt"
+    	"strconv"
 
     	"{{.Module}}/internal/domain/role"
     	"{{.Module}}/internal/domain/user"
@@ -17,18 +17,19 @@ body: |
 
     // UserRepo is the user persistence + role-assignment port consumed by the service.
     type UserRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id string) (*user.User, error)
+    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    	GetByUUID(ctx context.Context, uuid string) (*user.User, error)
     	GetByUsername(ctx context.Context, username string) (*user.User, error)
     	List(ctx context.Context, limit, offset int32) ([]*user.User, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, u *user.User) (*user.User, error)
     	Update(ctx context.Context, u *user.User) (*user.User, error)
-    	UpdatePassword(ctx context.Context, id string, passwordHash string) error
-    	Delete(ctx context.Context, id string) error
-    	SetStatus(ctx context.Context, id string, status int) error
-    	AssignRoles(ctx context.Context, uid string, roleIDs []string) error
-    	ListRoles(ctx context.Context, uid string) ([]*role.Role, error)
-    	ListRoleIDs(ctx context.Context, uid string) ([]string, error)
+    	UpdatePassword(ctx context.Context, id int64, passwordHash string) error
+    	Delete(ctx context.Context, id int64) error
+    	SetStatus(ctx context.Context, id int64, status int) error
+    	AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error
+    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
+    	ListRoleIDs(ctx context.Context, uid int64) ([]int64, error)
     {{ "}" }}
 
     // Enforcer syncs role bindings into Casbin (g links).
@@ -37,7 +38,11 @@ body: |
     	AddRoleForUser(user string, role string, domain ...string) (bool, error)
     {{ "}" }}
 
-    // Service implements the user management use cases.
+    // Service implements the user management use cases. Public methods that
+    // take an "id"/"uid" string treat it as the external UUID and resolve it to
+    // the internal int64 primary key via UserRepo.GetByUUID before touching
+    // user_roles or other int64-keyed foreign keys. Casbin always sees the
+    // original UUID string, never the internal ID.
     type Service struct {{ "{" }}
     	users    UserRepo
     	enforcer Enforcer
@@ -74,9 +79,9 @@ body: |
     	return saved, nil
     {{ "}" }}
 
-    // Update applies optional field changes.
+    // Update applies optional field changes. in.ID is the external UUID.
     func (s *Service) Update(ctx context.Context, in UpdateUserInput) (*user.User, error) {{ "{" }}
-    	u, err := s.users.GetByID(ctx, in.ID)
+    	u, err := s.users.GetByUUID(ctx, in.ID)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -113,28 +118,37 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, "", "user.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.update", in.ID, "{{ "{" }}{{ "}" }}")
     	return updated, nil
     {{ "}" }}
 
-    // Delete removes a user.
+    // Delete removes a user identified by external UUID.
     func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
-    	if err := s.users.Delete(ctx, id); err != nil {{ "{" }}
+    	u, err := s.users.GetByUUID(ctx, id)
+    	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_, _ = s.enforcer.DeleteRolesForUser(fmt.Sprint(id))
-    	_ = s.audit.Write(ctx, "", "user.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
+    	if err := s.users.Delete(ctx, u.ID); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_, _ = s.enforcer.DeleteRolesForUser(id)
+    	_ = s.audit.Write(ctx, "", "user.delete", id, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
-    // Get returns a single user.
+    // Get returns a single user identified by external UUID.
     func (s *Service) Get(ctx context.Context, id string) (*user.User, error) {{ "{" }}
-    	return s.users.GetByID(ctx, id)
+    	return s.users.GetByUUID(ctx, id)
     {{ "}" }}
 
     // GetRoleCodes returns the role codes assigned to a user (for RPC responses).
+    // uid is the external UUID.
     func (s *Service) GetRoleCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
-    	roles, err := s.users.ListRoles(ctx, uid)
+    	u, err := s.users.GetByUUID(ctx, uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	roles, err := s.users.ListRoles(ctx, u.ID)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -163,20 +177,33 @@ body: |
     {{ "}" }}
 
     // AssignRoles replaces the user's role set and syncs the Casbin g links.
+    // uid is the external UUID; roleIDs are decimal-string role primary keys.
     func (s *Service) AssignRoles(ctx context.Context, uid string, roleIDs []string) error {{ "{" }}
-    	if err := s.users.AssignRoles(ctx, uid, roleIDs); err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	roles, err := s.users.ListRoles(ctx, uid)
+    	u, err := s.users.GetByUUID(ctx, uid)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_, _ = s.enforcer.DeleteRolesForUser(fmt.Sprint(uid))
+    	ids := make([]int64, 0, len(roleIDs))
+    	for _, rid := range roleIDs {{ "{" }}
+    		id, err := strconv.ParseInt(rid, 10, 64)
+    		if err != nil {{ "{" }}
+    			return role.ValidationError{{ "{" }}Field: "role_id", Msg: "must be a valid integer id: " + rid{{ "}" }}
+    		{{ "}" }}
+    		ids = append(ids, id)
+    	{{ "}" }}
+    	if err := s.users.AssignRoles(ctx, u.ID, ids); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	roles, err := s.users.ListRoles(ctx, u.ID)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_, _ = s.enforcer.DeleteRolesForUser(uid)
     	for _, r := range roles {{ "{" }}
-    		if _, err := s.enforcer.AddRoleForUser(fmt.Sprint(uid), r.Code); err != nil {{ "{" }}
+    		if _, err := s.enforcer.AddRoleForUser(uid, r.Code); err != nil {{ "{" }}
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, "", "user.assign_roles", fmt.Sprint(uid), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.assign_roles", uid, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}

@@ -42,11 +42,11 @@ body: |
     // Permission is the aggregate root for the permission aggregate.
     // It represents a single tree node with type ∈ {{ "{" }}catalog, menu, button, api{{ "}" }}.
     type Permission struct {{ "{" }}
-    	ID          string
+    	ID          int64
     	Code        string
     	Type        string
     	Name        string
-    	ParentID    string // empty = root
+    	ParentID    int64 // 0 = root
     	Path        string
     	Icon        string
     	RouteName   string
@@ -65,7 +65,8 @@ body: |
     //   - when type = api, method is required and ∈ {{ "{" }}GET, POST, PUT, DELETE{{ "}" }}
     //   - when type ∈ {{ "{" }}catalog, menu{{ "}" }}, tree fields may be filled
     //   - when type = button, tree fields should be empty (not enforced, just allowed)
-    func New(code, typ, name string, parentID string, path, icon, routeName, redirect string, keepAlive, hideInMenu, isExternal *bool, method string, sort int32, status int, description string) (*Permission, error) {{ "{" }}
+    //   - parentID = 0 means root (no parent)
+    func New(code, typ, name string, parentID int64, path, icon, routeName, redirect string, keepAlive, hideInMenu, isExternal *bool, method string, sort int32, status int, description string) (*Permission, error) {{ "{" }}
     	code = strings.TrimSpace(code)
     	if code == "" {{ "{" }}
     		return nil, ValidationError{{ "{" }}Field: "code", Msg: "must not be empty"{{ "}" }}

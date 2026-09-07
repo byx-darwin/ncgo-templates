@@ -39,7 +39,7 @@ body: |
     	return out, nil
     {{ "}" }}
 
-    func (r *Repo) ListMenusByParentID(ctx context.Context, parentID string) ([]*menu.Menu, error) {{ "{" }}
+    func (r *Repo) ListMenusByParentID(ctx context.Context, parentID int64) ([]*menu.Menu, error) {{ "{" }}
     	pid := parentID
     	rows, err := r.q.ListMenusByParentID(ctx, &pid)
     	if err != nil {{ "{" }}

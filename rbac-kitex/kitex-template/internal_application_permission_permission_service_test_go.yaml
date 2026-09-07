@@ -16,11 +16,11 @@ body: |
     )
 
     type fakePermRepo struct {{ "{" }}
-    	perms map[string]*permission.Permission
+    	perms map[int64]*permission.Permission
     	next  int64
     {{ "}" }}
 
-    func (f *fakePermRepo) GetByID(ctx context.Context, id string) (*permission.Permission, error) {{ "{" }}
+    func (f *fakePermRepo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
     	p, ok := f.perms[id]
     	if !ok {{ "{" }}
     		return nil, permission.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
@@ -36,11 +36,11 @@ body: |
     	return out, nil
     {{ "}" }}
 
-    func (f *fakePermRepo) ListFiltered(ctx context.Context, typ string, parentID string, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    func (f *fakePermRepo) ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
     	return f.List(ctx, limit, offset)
     {{ "}" }}
 
-    func (f *fakePermRepo) ListChildren(ctx context.Context, parentID string) ([]*permission.Permission, error) {{ "{" }}
+    func (f *fakePermRepo) ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error) {{ "{" }}
     	var out []*permission.Permission
     	for _, p := range f.perms {{ "{" }}
     		if p.ParentID == parentID {{ "{" }}
@@ -53,9 +53,9 @@ body: |
     func (f *fakePermRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.perms)), nil {{ "}" }}
 
     func (f *fakePermRepo) Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
-    	if p.ID == "" {{ "{" }}
+    	if p.ID == 0 {{ "{" }}
     		f.next++
-    		p.ID = fmt.Sprint(f.next)
+    		p.ID = f.next
     	{{ "}" }}
     	f.perms[p.ID] = p
     	return p, nil
@@ -66,7 +66,7 @@ body: |
     	return p, nil
     {{ "}" }}
 
-    func (f *fakePermRepo) Delete(ctx context.Context, id string) error {{ "{" }}
+    func (f *fakePermRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
     	delete(f.perms, id)
     	return nil
     {{ "}" }}
@@ -78,7 +78,7 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	repo := &fakePermRepo{{ "{" }}perms: map[string]*permission.Permission{{ "{" }}{{ "}}" }}
+    	repo := &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}}" }}
     	aud := audit.NewMemoryWriter()
     	return New(repo, e, aud), e, aud
     {{ "}" }}
@@ -111,6 +111,14 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
+    func TestCreateRejectsNonIntegerParentID(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+    	if _, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "x", Type: permission.TypeMenu, Name: "X", ParentID: "not-a-number"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("Create(non-integer parent_id) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
     func TestUpdateChangesFields(t *testing.T) {{ "{" }}
     	ctx := context.Background()
     	svc, _, _ := newPermService(t)
@@ -119,12 +127,38 @@ body: |
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
     	newName := "Updated Name"
-    	updated, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: p.ID, Name: &newName{{ "}" }})
+    	updated, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: fmt.Sprint(p.ID), Name: &newName{{ "}" }})
     	if err != nil {{ "{" }}
     		t.Fatalf("Update: %v", err)
     	{{ "}" }}
     	if updated.Name != "Updated Name" {{ "{" }}
     		t.Fatalf("Name = %q, want Updated Name", updated.Name)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestUpdateClearsParentIDToRoot(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+
+    	parent, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system", Type: permission.TypeCatalog, Name: "System"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create parent: %v", err)
+    	{{ "}" }}
+    	child, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system:user", Type: permission.TypeMenu, Name: "Users", ParentID: fmt.Sprint(parent.ID){{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create child: %v", err)
+    	{{ "}" }}
+    	if child.ParentID == 0 {{ "{" }}
+    		t.Fatalf("precondition: child.ParentID = 0, want non-zero")
+    	{{ "}" }}
+
+    	empty := ""
+    	updated, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: fmt.Sprint(child.ID), ParentID: &empty{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Update: %v", err)
+    	{{ "}" }}
+    	if updated.ParentID != 0 {{ "{" }}
+    		t.Fatalf("ParentID = %d, want 0 (root)", updated.ParentID)
     	{{ "}" }}
     {{ "}" }}
 
@@ -136,19 +170,19 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Create parent: %v", err)
     	{{ "}" }}
-    	child, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system:user", Type: permission.TypeMenu, Name: "Users", ParentID: parent.ID{{ "}" }})
+    	child, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system:user", Type: permission.TypeMenu, Name: "Users", ParentID: fmt.Sprint(parent.ID){{ "}" }})
     	if err != nil {{ "{" }}
     		t.Fatalf("Create child: %v", err)
     	{{ "}" }}
 
-    	if err := svc.Delete(ctx, parent.ID); err != nil {{ "{" }}
+    	if err := svc.Delete(ctx, fmt.Sprint(parent.ID)); err != nil {{ "{" }}
     		t.Fatalf("Delete: %v", err)
     	{{ "}" }}
     	// Both parent and child should be deleted.
-    	if _, err := svc.Get(ctx, parent.ID); err == nil {{ "{" }}
+    	if _, err := svc.Get(ctx, fmt.Sprint(parent.ID)); err == nil {{ "{" }}
     		t.Fatal("parent should be deleted")
     	{{ "}" }}
-    	if _, err := svc.Get(ctx, child.ID); err == nil {{ "{" }}
+    	if _, err := svc.Get(ctx, fmt.Sprint(child.ID)); err == nil {{ "{" }}
     		t.Fatal("child should be cascade-deleted")
     	{{ "}" }}
     {{ "}" }}
@@ -168,7 +202,7 @@ body: |
     		t.Fatal("Enforce before delete = false, want true")
     	{{ "}" }}
 
-    	if err := svc.Delete(ctx, p.ID); err != nil {{ "{" }}
+    	if err := svc.Delete(ctx, fmt.Sprint(p.ID)); err != nil {{ "{" }}
     		t.Fatalf("Delete: %v", err)
     	{{ "}" }}
     	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); allowed {{ "{" }}

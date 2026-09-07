@@ -11,7 +11,7 @@ body: |-
       service TEXT NOT NULL,
       phase TEXT NOT NULL,
       method TEXT NOT NULL,
-      match_kind TEXT NOT NULL CHECK (match_kind IN ('exact', 'pattern')),
+      match_kind TEXT NOT NULL CHECK (match_kind IN ('exact', 'prefix', 'glob', 'regex')),
       path TEXT NOT NULL DEFAULT '*',
       path_pattern TEXT NOT NULL DEFAULT '*',
       app_key TEXT,  -- NULL means fallback rule (no app_key match)

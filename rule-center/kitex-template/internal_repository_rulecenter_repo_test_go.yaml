@@ -1,0 +1,63 @@
+# Kitex custom template — internal/repository/rulecenter/repo_test.go
+path: internal/repository/rulecenter/repo_test.go
+update_behavior:
+  type: skip
+body: |-
+  package rulecenterrepo
+
+  import (
+  	"context"
+  	"os"
+  	"os/exec"
+  	"testing"
+  	"time"
+
+  	"github.com/jackc/pgx/v5/pgxpool"
+  )
+
+  // TestRateLimitRuleMatchKindCheckConstraint exercises the rate_limit_rules
+  // match_kind CHECK constraint against a real postgres, inserting one rule
+  // per match_kind value the usecase layer actually supports (exact/prefix/
+  // glob/regex). It is gated on `pg_isready` plus a reachable POSTGRES_DSN so
+  // the happy-path seed/test/e2e runs stay hermetic. When the gate is absent
+  // the test prints an explicit `skipped:` line instead of silently passing.
+  func TestRateLimitRuleMatchKindCheckConstraint(t *testing.T) {
+  	if _, err := exec.LookPath("pg_isready"); err != nil {
+  		t.Skipf("skipped: pg_isready not installed (install postgres client to run)")
+  	}
+  	dsn := os.Getenv("POSTGRES_DSN")
+  	if dsn == "" {
+  		t.Skipf("skipped: POSTGRES_DSN not set")
+  	}
+  	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+  	defer cancel()
+  	pool, err := pgxpool.New(ctx, dsn)
+  	if err != nil {
+  		t.Fatalf("connect postgres: %v", err)
+  	}
+  	defer pool.Close()
+  	if err := pool.Ping(ctx); err != nil {
+  		t.Fatalf("ping postgres: %v", err)
+  	}
+
+  	for _, matchKind := range []string{"exact", "prefix", "glob", "regex"} {
+  		matchKind := matchKind
+  		t.Run(matchKind, func(t *testing.T) {
+  			var id int64
+  			err := pool.QueryRow(ctx,
+  				`INSERT INTO rate_limit_rules (service, phase, method, match_kind)
+  				 VALUES ($1, $2, $3, $4) RETURNING id`,
+  				"integration-test-svc", "pre_auth", "GET", matchKind,
+  			).Scan(&id)
+  			if err != nil {
+  				t.Fatalf("insert rule with match_kind=%q: %v", matchKind, err)
+  			}
+  			if id == 0 {
+  				t.Fatalf("inserted rule with match_kind=%q has id 0", matchKind)
+  			}
+  			if _, err := pool.Exec(ctx, `DELETE FROM rate_limit_rules WHERE id = $1`, id); err != nil {
+  				t.Fatalf("cleanup rule id=%d: %v", id, err)
+  			}
+  		})
+  	}
+  }

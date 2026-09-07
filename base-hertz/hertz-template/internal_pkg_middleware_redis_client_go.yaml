@@ -15,10 +15,11 @@ body: |-
         "{{.Module}}/internal/base/data"
     )
 
-    // sharedRedisClient returns the process-wide shared Redis client used by the
-    // rate-limit store. cfg is rate_limit.redis, which conf.Validate merges from
-    // the top-level redis when left empty. Returns nil when no addrs are
-    // configured, in which case NewStore falls back to the in-memory store.
+    // sharedRedisClient returns the process-wide shared Redis client used by
+    // the idempotency/signature-nonce stores. cfg is e.g. idempotency.redis,
+    // which conf.Validate merges from the top-level redis when left empty.
+    // Returns nil when no addrs are configured, in which case NewStore falls
+    // back to the in-memory store.
     func sharedRedisClient(cfg conf.RedisConfig) redis.UniversalClient {
         if len(cfg.Addrs) == 0 {
             return nil

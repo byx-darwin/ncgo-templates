@@ -162,12 +162,75 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
+    func TestDeleteRemovesCasbinPolicyAndRoleBindings(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, store, _ := newRoleService(t)
+
+    	if err := svc.GrantPermissions(ctx, "1", []string{{ "{" }}"user:create"{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("GrantPermissions: %v", err)
+    	{{ "}" }}
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	if _, err := e.AddRoleForUser("alice", "admin"); err != nil {{ "{" }}
+    		t.Fatalf("AddRoleForUser: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", "user:create", "POST"); !allowed {{ "{" }}
+    		t.Fatal("precondition: Enforce(admin, user:create, POST) = false, want true")
+    	{{ "}" }}
+    	roles, err := e.GetRolesForUser("alice")
+    	if err != nil || len(roles) != 1 {{ "{" }}
+    		t.Fatalf("precondition: GetRolesForUser(alice) = %v, %v, want [admin]", roles, err)
+    	{{ "}" }}
+
+    	if err := svc.Delete(ctx, "1"); err != nil {{ "{" }}
+    		t.Fatalf("Delete: %v", err)
+    	{{ "}" }}
+
+    	e2, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e2.Enforce("admin", "user:create", "POST"); allowed {{ "{" }}
+    		t.Fatal("Enforce(admin, user:create, POST) after Delete = true, want false")
+    	{{ "}" }}
+    	roles, err = e2.GetRolesForUser("alice")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetRolesForUser: %v", err)
+    	{{ "}" }}
+    	if len(roles) != 0 {{ "{" }}
+    		t.Fatalf("GetRolesForUser(alice) after Delete = %v, want []", roles)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestDeleteCasbinCleanupErrorsDoNotFailRequest(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	roles := &fakeRoleRepo{{ "{" }}roles: map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }}
+    	perms := &fakePermReader{{ "{" }}perms: map[string]*permission.Permission{{ "{}" }}{{ "}" }}
+    	aud := audit.NewMemoryWriter()
+    	svc := New(roles, perms, &errEnforcer{{ "{" }}Enforcer: e, removeErr: errors.New("boom"){{ "}" }}, aud)
+
+    	if err := svc.Delete(ctx, "1"); err != nil {{ "{" }}
+    		t.Fatalf("Delete with casbin cleanup errors = %v, want nil (cleanup failure must not fail the request)", err)
+    	{{ "}" }}
+    {{ "}" }}
+
     type errEnforcer struct {{ "{" }}
     	*casbin.Enforcer
     	removeErr error
     {{ "}" }}
 
     func (e *errEnforcer) RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error) {{ "{" }}
+    	return false, e.removeErr
+    {{ "}" }}
+
+    func (e *errEnforcer) RemoveFilteredGroupingPolicy(fieldIndex int, fieldValues ...string) (bool, error) {{ "{" }}
     	return false, e.removeErr
     {{ "}" }}
 

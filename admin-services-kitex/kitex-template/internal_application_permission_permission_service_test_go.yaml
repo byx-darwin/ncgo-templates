@@ -211,6 +211,33 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
+    func TestDeleteCascadeRemovesCasbinPolicyForChildren(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, e, _ := newPermService(t)
+
+    	parent, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system", Type: permission.TypeCatalog, Name: "System"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create parent: %v", err)
+    	{{ "}" }}
+    	child, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system:user:delete", Type: permission.TypeAPI, Name: "Delete User", ParentID: fmt.Sprint(parent.ID), Method: "DELETE"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create child: %v", err)
+    	{{ "}" }}
+    	if _, err := e.AddPolicy("admin", child.Code, "DELETE"); err != nil {{ "{" }}
+    		t.Fatalf("AddPolicy: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", child.Code, "DELETE"); !allowed {{ "{" }}
+    		t.Fatal("Enforce before delete = false, want true")
+    	{{ "}" }}
+
+    	if err := svc.Delete(ctx, fmt.Sprint(parent.ID)); err != nil {{ "{" }}
+    		t.Fatalf("Delete: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", child.Code, "DELETE"); allowed {{ "{" }}
+    		t.Fatal("Enforce(child) after cascade delete = true, want false")
+    	{{ "}" }}
+    {{ "}" }}
+
     type errEnforcer struct {{ "{" }}
     	removeErr error
     {{ "}" }}

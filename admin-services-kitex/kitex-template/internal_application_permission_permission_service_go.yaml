@@ -150,7 +150,8 @@ body: |
     {{ "}" }}
 
     // Delete removes a permission and cascades to children (tree semantics).
-    // Also removes stale Casbin policies.
+    // Also removes stale Casbin policies for the permission and every
+    // descendant it cascades to.
     func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
     	pid, err := strconv.ParseInt(id, 10, 64)
     	if err != nil {{ "{" }}
@@ -160,28 +161,32 @@ body: |
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	// Cascade: delete children recursively (DFS post-order).
-    	if err := s.cascadeDelete(ctx, pid); err != nil {{ "{" }}
+    	// Cascade: delete children recursively (DFS post-order), cleaning
+    	// Casbin policy for every node along the way (including this one).
+    	if err := s.cascadeDelete(ctx, p); err != nil {{ "{" }}
     		return err
-    	{{ "}" }}
-    	if _, err := s.enforcer.RemoveFilteredPolicy(1, p.Code); err != nil {{ "{" }}
-    		klog.CtxErrorf(ctx, "permission.delete: remove casbin policies for permission %s failed: %v", p.Code, err)
     	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "permission.delete", p.Code, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
-    func (s *Service) cascadeDelete(ctx context.Context, parentID int64) error {{ "{" }}
-    	children, err := s.perms.ListChildren(ctx, parentID)
+    func (s *Service) cascadeDelete(ctx context.Context, p *permission.Permission) error {{ "{" }}
+    	children, err := s.perms.ListChildren(ctx, p.ID)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	for _, child := range children {{ "{" }}
-    		if err := s.cascadeDelete(ctx, child.ID); err != nil {{ "{" }}
+    		if err := s.cascadeDelete(ctx, child); err != nil {{ "{" }}
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	return s.perms.Delete(ctx, parentID)
+    	if err := s.perms.Delete(ctx, p.ID); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if _, err := s.enforcer.RemoveFilteredPolicy(1, p.Code); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "permission.delete: remove casbin policies for permission %s failed: %v", p.Code, err)
+    	{{ "}" }}
+    	return nil
     {{ "}" }}
 
     // List returns a page of permissions and the total count.

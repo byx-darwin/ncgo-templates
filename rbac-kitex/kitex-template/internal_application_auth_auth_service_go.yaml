@@ -155,11 +155,11 @@ body: |
     func (s *Service) ValidateToken(ctx context.Context, accessToken string) (uid string, roles []string, valid bool) {{ "{" }}
     	blacked, err := s.tokens.IsBlacklisted(ctx, accessToken)
     	if err != nil || blacked {{ "{" }}
-    		return 0, nil, false
+    		return "", nil, false
     	{{ "}" }}
     	claims, err := s.jwt.Parse(accessToken)
     	if err != nil {{ "{" }}
-    		return 0, nil, false
+    		return "", nil, false
     	{{ "}" }}
     	return claims.Uid, claims.Roles, true
     {{ "}" }}

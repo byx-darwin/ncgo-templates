@@ -36,7 +36,7 @@ body: |-
     }
 
     func (s *RedisStore) GetRefresh(ctx context.Context, refreshToken string) (string, error) {
-    	return 0, errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
+    	return "", errors.New("token: redis store not wired in v1 (seam; see NewRedisStore)")
     }
 
     func (s *RedisStore) DeleteRefresh(ctx context.Context, refreshToken string) error {

@@ -19,7 +19,7 @@ body: |
 
     // UpdateUserInput is the command to update a user (all fields optional).
     type UpdateUserInput struct {{ "{" }}
-    	ID       int64
+    	ID       string
     	Password *string
     	Status   *int
     	Nickname *string

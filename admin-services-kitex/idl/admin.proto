@@ -70,7 +70,7 @@ message LogoutResp {}
 message ValidateTokenReq { string access_token = 1; }
 message ValidateTokenResp {
   string uid = 1;
-  repeated string role_codes = 2;
+  repeated string roles = 2;
   bool valid = 3;
 }
 
@@ -275,11 +275,11 @@ message RateLimitConfig {
 }
 
 message CreateRuleResp {
-  string id = 1;
+  int64 id = 1;
 }
 
 message UpdateRuleReq {
-  string id = 1;
+  int64 id = 1;
   optional bool enabled = 2;
   optional int32 priority = 3;
   repeated string key_by = 4;
@@ -294,7 +294,7 @@ message UpdateRuleReq {
 message UpdateRuleResp {}
 
 message DeleteRuleReq {
-  string id = 1;
+  int64 id = 1;
 }
 
 message DeleteRuleResp {}
@@ -314,7 +314,7 @@ message ListRulesResp {
 }
 
 message RateLimitRule {
-  string id = 1;
+  int64 id = 1;
   string service = 2;
   string phase = 3;
   string method = 4;

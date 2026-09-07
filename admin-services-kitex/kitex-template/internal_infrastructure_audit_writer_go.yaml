@@ -14,7 +14,7 @@ body: |-
 
     // Entry is a single audit log line.
     type Entry struct {
-    	ActorUID   int64
+    	ActorUID   string
     	Action     string
     	Target     string
     	DetailJSON string
@@ -22,7 +22,7 @@ body: |-
 
     // Writer records RBAC mutations for audit.
     type Writer interface {
-    	Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error
+    	Write(ctx context.Context, actorUID string, action, target, detailJSON string) error
     }
 
     // SQLWriter persists audit entries via sqlc.
@@ -35,9 +35,9 @@ body: |-
     	return &SQLWriter{q: q}
     }
 
-    func (w *SQLWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
-    	var actor *int64
-    	if actorUID != 0 {
+    func (w *SQLWriter) Write(ctx context.Context, actorUID string, action, target, detailJSON string) error {
+    	var actor *string
+    	if actorUID != "" {
     		v := actorUID
     		actor = &v
     	}
@@ -61,7 +61,7 @@ body: |-
     	return &MemoryWriter{}
     }
 
-    func (w *MemoryWriter) Write(ctx context.Context, actorUID int64, action, target, detailJSON string) error {
+    func (w *MemoryWriter) Write(ctx context.Context, actorUID string, action, target, detailJSON string) error {
     	w.mu.Lock()
     	defer w.mu.Unlock()
     	w.entries = append(w.entries, Entry{

@@ -1,0 +1,39 @@
+name: Template Build Check
+
+on:
+  pull_request:
+    paths:
+      - 'rbac-kitex/**'
+      - 'admin-services-kitex/**'
+
+jobs:
+  build-check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        template: [rbac-kitex, admin-services-kitex]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install ncgo
+        run: go install github.com/byx-darwin/ncgo@latest
+
+      - name: Render ${{ matrix.template }}
+        run: |
+          ncgo new scratch \
+            --module github.com/acme/scratch \
+            --kind kitex \
+            --dir /tmp/scratch-${{ matrix.template }} \
+            --template-dir ${{ matrix.template }}
+
+      - name: Build
+        working-directory: /tmp/scratch-${{ matrix.template }}
+        run: go build ./...
+
+      - name: Vet
+        working-directory: /tmp/scratch-${{ matrix.template }}
+        run: go vet ./...

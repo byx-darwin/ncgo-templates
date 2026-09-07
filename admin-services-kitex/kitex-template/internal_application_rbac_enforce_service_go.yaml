@@ -26,6 +26,6 @@ body: |
     {{ "}" }}
 
     // Enforce reports whether uid is allowed to perform act on obj.
-    func (s *EnforceService) Enforce(ctx context.Context, uid int64, obj, act string) (bool, error) {{ "{" }}
+    func (s *EnforceService) Enforce(ctx context.Context, uid string, obj, act string) (bool, error) {{ "{" }}
     	return s.enforcer.Enforce(fmt.Sprint(uid), obj, act)
     {{ "}" }}

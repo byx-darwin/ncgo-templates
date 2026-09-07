@@ -14,7 +14,7 @@ body: |-
 
     // Claims is the JWT payload: the authenticated user id plus role codes.
     type Claims struct {
-    	Uid   int64    `json:"uid"`
+    	Uid   string   `json:"uid"`
     	Roles []string `json:"roles"`
     	jwt.RegisteredClaims
     }
@@ -30,7 +30,7 @@ body: |-
     }
 
     // Sign issues an HS256 token carrying uid and roles, expiring after ttl.
-    func (m *JWTManager) Sign(uid int64, roles []string, ttl time.Duration) (string, error) {
+    func (m *JWTManager) Sign(uid string, roles []string, ttl time.Duration) (string, error) {
     	now := time.Now()
     	claims := Claims{
     		Uid:   uid,

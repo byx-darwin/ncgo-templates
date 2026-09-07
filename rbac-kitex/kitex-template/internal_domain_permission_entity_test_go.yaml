@@ -13,7 +13,7 @@ body: |
     func boolPtr(b bool) *bool {{ "{" }} return &b {{ "}" }}
 
     func TestNewRejectsUnknownType(t *testing.T) {{ "{" }}
-    	p, err := New("user:create", "bogus", "Create User", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	p, err := New("user:create", "bogus", "Create User", "", "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
     	if err == nil {{ "{" }}
     		t.Fatalf("New with type=bogus = %+v, want error", p)
     	{{ "}" }}
@@ -22,7 +22,7 @@ body: |
     {{ "}" }}
 
     func TestNewAPIRequiresMethod(t *testing.T) {{ "{" }}
-    	p, err := New("user:create", TypeAPI, "Create User", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	p, err := New("user:create", TypeAPI, "Create User", "", "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
     	if err == nil {{ "{" }}
     		t.Fatalf("New(api, no method) = %+v, want error", p)
     	{{ "}" }}
@@ -32,7 +32,7 @@ body: |
     {{ "}" }}
 
     func TestNewAPIRejectsInvalidMethod(t *testing.T) {{ "{" }}
-    	p, err := New("user:create", TypeAPI, "Create User", 0, "", "", "", "", nil, nil, nil, "PATCH", 0, StatusEnabled, "")
+    	p, err := New("user:create", TypeAPI, "Create User", "", "", "", "", "", nil, nil, nil, "PATCH", 0, StatusEnabled, "")
     	if err == nil {{ "{" }}
     		t.Fatalf("New(api, PATCH) = %+v, want error", p)
     	{{ "}" }}
@@ -40,7 +40,7 @@ body: |
 
     func TestNewAPIAcceptsValidMethods(t *testing.T) {{ "{" }}
     	for _, m := range []string{{ "{" }}"GET", "POST", "PUT", "DELETE", "get"{{ "}" }} {{ "{" }}
-    		p, err := New("user:create", TypeAPI, "Create User", 0, "", "", "", "", nil, nil, nil, m, 0, StatusEnabled, "")
+    		p, err := New("user:create", TypeAPI, "Create User", "", "", "", "", "", nil, nil, nil, m, 0, StatusEnabled, "")
     		if err != nil {{ "{" }}
     			t.Fatalf("New(api, %s): %v", m, err)
     		{{ "}" }}
@@ -52,7 +52,7 @@ body: |
 
     func TestNewMenuTypeClearsMethod(t *testing.T) {{ "{" }}
     	for _, typ := range []string{{ "{" }}TypeCatalog, TypeMenu, TypeButton{{ "}" }} {{ "{" }}
-    		p, err := New("x:"+typ, typ, typ, 0, "", "", "", "", nil, nil, nil, "GET", 0, StatusEnabled, "")
+    		p, err := New("x:"+typ, typ, typ, "", "", "", "", "", nil, nil, nil, "GET", 0, StatusEnabled, "")
     		if err != nil {{ "{" }}
     			t.Fatalf("New(%s): %v", typ, err)
     		{{ "}" }}
@@ -63,7 +63,7 @@ body: |
     {{ "}" }}
 
     func TestNewAcceptsValidCatalog(t *testing.T) {{ "{" }}
-    	p, err := New("system", TypeCatalog, "System", 0, "/system", "setting", "", "", nil, nil, boolPtr(false), "", 1, StatusEnabled, "System module")
+    	p, err := New("system", TypeCatalog, "System", "", "/system", "setting", "", "", nil, nil, boolPtr(false), "", 1, StatusEnabled, "System module")
     	if err != nil {{ "{" }}
     		t.Fatalf("New: %v", err)
     	{{ "}" }}
@@ -79,14 +79,14 @@ body: |
     {{ "}" }}
 
     func TestNewRejectsEmptyCode(t *testing.T) {{ "{" }}
-    	_, err := New("", TypeMenu, "Name", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	_, err := New("", TypeMenu, "Name", "", "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
     	if err == nil {{ "{" }}
     		t.Fatal("want error for empty code")
     	{{ "}" }}
     {{ "}" }}
 
     func TestNewRejectsEmptyName(t *testing.T) {{ "{" }}
-    	_, err := New("code", TypeMenu, "", 0, "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
+    	_, err := New("code", TypeMenu, "", "", "", "", "", "", nil, nil, nil, "", 0, StatusEnabled, "")
     	if err == nil {{ "{" }}
     		t.Fatal("want error for empty name")
     	{{ "}" }}

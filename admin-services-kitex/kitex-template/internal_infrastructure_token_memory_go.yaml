@@ -7,7 +7,6 @@ body: |-
 
     import (
     	"context"
-    	"strconv"
     	"sync"
     	"time"
     )
@@ -32,17 +31,17 @@ body: |-
     	}
     }
 
-    func (s *MemoryStore) SetRefresh(ctx context.Context, uid int64, refreshToken string, ttl time.Duration) error {
+    func (s *MemoryStore) SetRefresh(ctx context.Context, uid string, refreshToken string, ttl time.Duration) error {
     	s.mu.Lock()
     	defer s.mu.Unlock()
     	s.refresh[refreshToken] = memoryEntry{
-    		value:     strconv.FormatInt(uid, 10),
+    		value:     uid,
     		expiresAt: time.Now().Add(ttl),
     	}
     	return nil
     }
 
-    func (s *MemoryStore) GetRefresh(ctx context.Context, refreshToken string) (int64, error) {
+    func (s *MemoryStore) GetRefresh(ctx context.Context, refreshToken string) (string, error) {
     	s.mu.Lock()
     	defer s.mu.Unlock()
     	entry, ok := s.refresh[refreshToken]
@@ -50,13 +49,9 @@ body: |-
     		if ok {
     			delete(s.refresh, refreshToken)
     		}
-    		return 0, ErrNotFound
+    		return "", ErrNotFound
     	}
-    	uid, err := strconv.ParseInt(entry.value, 10, 64)
-    	if err != nil {
-    		return 0, ErrNotFound
-    	}
-    	return uid, nil
+    	return entry.value, nil
     }
 
     func (s *MemoryStore) DeleteRefresh(ctx context.Context, refreshToken string) error {

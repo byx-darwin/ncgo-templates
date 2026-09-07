@@ -12,7 +12,7 @@ body: |-
 
     func TestJWTManagerRoundTrip(t *testing.T) {
     	mgr := NewJWTManager("test-secret-change-me")
-    	token, err := mgr.Sign(42, []string{"admin"}, 5*time.Minute)
+    	token, err := mgr.Sign("42", []string{"admin"}, 5*time.Minute)
     	if err != nil {
     		t.Fatalf("Sign: %v", err)
     	}
@@ -20,8 +20,8 @@ body: |-
     	if err != nil {
     		t.Fatalf("Parse: %v", err)
     	}
-    	if claims.Uid != 42 {
-    		t.Fatalf("Uid = %d, want 42", claims.Uid)
+    	if claims.Uid != "42" {
+    		t.Fatalf("Uid = %s, want 42", claims.Uid)
     	}
     	if len(claims.Roles) != 1 || claims.Roles[0] != "admin" {
     		t.Fatalf("Roles = %v, want [admin]", claims.Roles)
@@ -30,7 +30,7 @@ body: |-
 
     func TestJWTExpiredRejected(t *testing.T) {
     	mgr := NewJWTManager("test-secret-change-me")
-    	token, err := mgr.Sign(1, nil, -time.Minute)
+    	token, err := mgr.Sign("1", nil, -time.Minute)
     	if err != nil {
     		t.Fatalf("Sign: %v", err)
     	}
@@ -41,7 +41,7 @@ body: |-
 
     func TestJWTWrongSecretRejected(t *testing.T) {
     	mgr := NewJWTManager("test-secret-change-me")
-    	token, err := mgr.Sign(1, nil, 5*time.Minute)
+    	token, err := mgr.Sign("1", nil, 5*time.Minute)
     	if err != nil {
     		t.Fatalf("Sign: %v", err)
     	}

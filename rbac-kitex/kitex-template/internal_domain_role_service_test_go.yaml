@@ -43,7 +43,7 @@ body: |
 
     func TestAssignRejectsEmptyCode(t *testing.T) {{ "{" }}
     	ctx := t.Context()
-    	if err := Assign(ctx, 1, []string{{ "{" }}""{{ "}" }}); err == nil {{ "{" }}
+    	if err := Assign(ctx, "1", []string{{ "{" }}""{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("Assign with empty code: want error")
     	{{ "}" }}
     {{ "}" }}

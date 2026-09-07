@@ -16,11 +16,11 @@ body: |
     )
 
     type fakePermRepo struct {{ "{" }}
-    	perms map[int64]*permission.Permission
+    	perms map[string]*permission.Permission
     	next  int64
     {{ "}" }}
 
-    func (f *fakePermRepo) GetByID(ctx context.Context, id int64) (*permission.Permission, error) {{ "{" }}
+    func (f *fakePermRepo) GetByID(ctx context.Context, id string) (*permission.Permission, error) {{ "{" }}
     	p, ok := f.perms[id]
     	if !ok {{ "{" }}
     		return nil, permission.NotFoundError{{ "{" }}Key: fmt.Sprint(id){{ "}" }}
@@ -36,11 +36,11 @@ body: |
     	return out, nil
     {{ "}" }}
 
-    func (f *fakePermRepo) ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
+    func (f *fakePermRepo) ListFiltered(ctx context.Context, typ string, parentID string, status int, limit, offset int32) ([]*permission.Permission, error) {{ "{" }}
     	return f.List(ctx, limit, offset)
     {{ "}" }}
 
-    func (f *fakePermRepo) ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error) {{ "{" }}
+    func (f *fakePermRepo) ListChildren(ctx context.Context, parentID string) ([]*permission.Permission, error) {{ "{" }}
     	var out []*permission.Permission
     	for _, p := range f.perms {{ "{" }}
     		if p.ParentID == parentID {{ "{" }}
@@ -53,9 +53,9 @@ body: |
     func (f *fakePermRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(f.perms)), nil {{ "}" }}
 
     func (f *fakePermRepo) Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error) {{ "{" }}
-    	if p.ID == 0 {{ "{" }}
+    	if p.ID == "" {{ "{" }}
     		f.next++
-    		p.ID = f.next
+    		p.ID = fmt.Sprint(f.next)
     	{{ "}" }}
     	f.perms[p.ID] = p
     	return p, nil
@@ -66,7 +66,7 @@ body: |
     	return p, nil
     {{ "}" }}
 
-    func (f *fakePermRepo) Delete(ctx context.Context, id int64) error {{ "{" }}
+    func (f *fakePermRepo) Delete(ctx context.Context, id string) error {{ "{" }}
     	delete(f.perms, id)
     	return nil
     {{ "}" }}
@@ -78,7 +78,7 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	repo := &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}}" }}
+    	repo := &fakePermRepo{{ "{" }}perms: map[string]*permission.Permission{{ "{" }}{{ "}}" }}
     	aud := audit.NewMemoryWriter()
     	return New(repo, e, aud), e, aud
     {{ "}" }}

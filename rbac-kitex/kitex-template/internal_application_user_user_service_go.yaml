@@ -70,7 +70,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "user.create", in.Username, "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.create", in.Username, "{{ "{" }}{{ "}" }}")
     	return saved, nil
     {{ "}" }}
 
@@ -113,7 +113,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "user.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
     	return updated, nil
     {{ "}" }}
 
@@ -123,7 +123,7 @@ body: |
     		return err
     	{{ "}" }}
     	_, _ = s.enforcer.DeleteRolesForUser(fmt.Sprint(id))
-    	_ = s.audit.Write(ctx, 0, "user.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
@@ -177,6 +177,6 @@ body: |
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "user.assign_roles", fmt.Sprint(uid), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.assign_roles", fmt.Sprint(uid), "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}

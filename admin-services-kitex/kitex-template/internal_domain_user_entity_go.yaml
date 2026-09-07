@@ -16,7 +16,7 @@ body: |
 
     // User is the aggregate root for the user aggregate.
     type User struct {{ "{" }}
-    	ID           int64
+    	ID           string
     	Username     string
     	PasswordHash string
     	Nickname     string

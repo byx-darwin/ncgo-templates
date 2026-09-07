@@ -52,7 +52,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "permission.create", in.Code, "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "permission.create", in.Code, "{{ "{" }}{{ "}" }}")
     	return saved, nil
     {{ "}" }}
 
@@ -111,7 +111,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "permission.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "permission.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
     	return updated, nil
     {{ "}" }}
 
@@ -132,7 +132,7 @@ body: |
     		return err
     	{{ "}" }}
     	_, _ = s.enforcer.RemoveFilteredPolicy(1, p.Code)
-    	_ = s.audit.Write(ctx, 0, "permission.delete", p.Code, "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "permission.delete", p.Code, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 

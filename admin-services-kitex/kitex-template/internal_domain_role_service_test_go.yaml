@@ -33,17 +33,17 @@ body: |
 
     func TestAssignValidatesRoleID(t *testing.T) {{ "{" }}
     	ctx := t.Context()
-    	if err := Assign(ctx, 0, []string{{ "{" }}"user:create"{{ "}" }}); err == nil {{ "{" }}
+    	if err := Assign(ctx, "", []string{{ "{" }}"user:create"{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("Assign with roleID 0: want error")
     	{{ "}" }}
-    	if err := Assign(ctx, 1, []string{{ "{" }}"user:create"{{ "}" }}); err != nil {{ "{" }}
+    	if err := Assign(ctx, "1", []string{{ "{" }}"user:create"{{ "}" }}); err != nil {{ "{" }}
     		t.Fatalf("Assign with valid roleID: %v", err)
     	{{ "}" }}
     {{ "}" }}
 
     func TestAssignRejectsEmptyCode(t *testing.T) {{ "{" }}
     	ctx := t.Context()
-    	if err := Assign(ctx, 1, []string{{ "{" }}""{{ "}" }}); err == nil {{ "{" }}
+    	if err := Assign(ctx, "1", []string{{ "{" }}""{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("Assign with empty code: want error")
     	{{ "}" }}
     {{ "}" }}

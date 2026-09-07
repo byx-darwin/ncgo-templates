@@ -17,18 +17,18 @@ body: |
 
     // UserRepo is the user persistence + role-assignment port consumed by the service.
     type UserRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id int64) (*user.User, error)
+    	GetByID(ctx context.Context, id string) (*user.User, error)
     	GetByUsername(ctx context.Context, username string) (*user.User, error)
     	List(ctx context.Context, limit, offset int32) ([]*user.User, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, u *user.User) (*user.User, error)
     	Update(ctx context.Context, u *user.User) (*user.User, error)
-    	UpdatePassword(ctx context.Context, id int64, passwordHash string) error
-    	Delete(ctx context.Context, id int64) error
-    	SetStatus(ctx context.Context, id int64, status int) error
-    	AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error
-    	ListRoles(ctx context.Context, uid int64) ([]*role.Role, error)
-    	ListRoleIDs(ctx context.Context, uid int64) ([]int64, error)
+    	UpdatePassword(ctx context.Context, id string, passwordHash string) error
+    	Delete(ctx context.Context, id string) error
+    	SetStatus(ctx context.Context, id string, status int) error
+    	AssignRoles(ctx context.Context, uid string, roleIDs []string) error
+    	ListRoles(ctx context.Context, uid string) ([]*role.Role, error)
+    	ListRoleIDs(ctx context.Context, uid string) ([]string, error)
     {{ "}" }}
 
     // Enforcer syncs role bindings into Casbin (g links).
@@ -70,7 +70,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "user.create", in.Username, "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.create", in.Username, "{{ "{" }}{{ "}" }}")
     	return saved, nil
     {{ "}" }}
 
@@ -113,27 +113,27 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "user.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
     	return updated, nil
     {{ "}" }}
 
     // Delete removes a user.
-    func (s *Service) Delete(ctx context.Context, id int64) error {{ "{" }}
+    func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
     	if err := s.users.Delete(ctx, id); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	_, _ = s.enforcer.DeleteRolesForUser(fmt.Sprint(id))
-    	_ = s.audit.Write(ctx, 0, "user.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.delete", fmt.Sprint(id), "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
     // Get returns a single user.
-    func (s *Service) Get(ctx context.Context, id int64) (*user.User, error) {{ "{" }}
+    func (s *Service) Get(ctx context.Context, id string) (*user.User, error) {{ "{" }}
     	return s.users.GetByID(ctx, id)
     {{ "}" }}
 
     // GetRoleCodes returns the role codes assigned to a user (for RPC responses).
-    func (s *Service) GetRoleCodes(ctx context.Context, uid int64) ([]string, error) {{ "{" }}
+    func (s *Service) GetRoleCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
     	roles, err := s.users.ListRoles(ctx, uid)
     	if err != nil {{ "{" }}
     		return nil, err
@@ -163,7 +163,7 @@ body: |
     {{ "}" }}
 
     // AssignRoles replaces the user's role set and syncs the Casbin g links.
-    func (s *Service) AssignRoles(ctx context.Context, uid int64, roleIDs []int64) error {{ "{" }}
+    func (s *Service) AssignRoles(ctx context.Context, uid string, roleIDs []string) error {{ "{" }}
     	if err := s.users.AssignRoles(ctx, uid, roleIDs); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -177,6 +177,6 @@ body: |
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, 0, "user.assign_roles", fmt.Sprint(uid), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "user.assign_roles", fmt.Sprint(uid), "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}

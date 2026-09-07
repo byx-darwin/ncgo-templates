@@ -17,10 +17,10 @@ body: |
     // Menu is a read-only view over the permissions table (WHERE type IN ('catalog','menu')).
     // It does not have its own write path — writes go through the permission aggregate.
     type Menu struct {{ "{" }}
-    	ID         int64
+    	ID         string
     	Code       string // permission code
     	Name       string
-    	ParentID   int64
+    	ParentID   string
     	Type       string // catalog | menu
     	Path       string
     	Icon       string
@@ -44,7 +44,7 @@ body: |
     	if len(items) == 0 {{ "{" }}
     		return nil
     	{{ "}" }}
-    	byID := make(map[int64]*Node, len(items))
+    	byID := make(map[string]*Node, len(items))
     	for _, m := range items {{ "{" }}
     		if m == nil {{ "{" }}
     			continue

@@ -9,6 +9,8 @@ body: |
     	"context"
     	"strconv"
 
+    	"github.com/cloudwego/kitex/pkg/klog"
+
     	"{{.Module}}/internal/db/gen"
     	"{{.Module}}/internal/domain/permission"
     	"{{.Module}}/internal/domain/role"
@@ -171,7 +173,9 @@ body: |
     		return err
     	{{ "}" }}
     	// Sync Casbin policies: clear existing then add new.
-    	_, _ = s.enforcer.RemoveFilteredPolicy(0, r.Code)
+    	if _, err := s.enforcer.RemoveFilteredPolicy(0, r.Code); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "role.grant_permissions: remove existing casbin policies for role %s failed: %v", r.Code, err)
+    	{{ "}" }}
     	for _, p := range perms {{ "{" }}
     		if _, err := s.enforcer.AddPolicy(r.Code, p.Code, p.Method); err != nil {{ "{" }}
     			return err

@@ -7,6 +7,7 @@ body: |
 
     import (
     	"context"
+    	"errors"
     	"fmt"
     	"testing"
 
@@ -158,5 +159,33 @@ body: |
     	svc, _, _ := newRoleService(t)
     	if _, err := svc.Update(ctx, UpdateRoleInput{{ "{" }}ID: "not-a-number", Name: "X"{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("Update(non-integer id) = nil, want error")
+    	{{ "}" }}
+    {{ "}" }}
+
+    type errEnforcer struct {{ "{" }}
+    	*casbin.Enforcer
+    	removeErr error
+    {{ "}" }}
+
+    func (e *errEnforcer) RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error) {{ "{" }}
+    	return false, e.removeErr
+    {{ "}" }}
+
+    func TestGrantPermissionsCasbinCleanupErrorDoesNotFailRequest(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	roles := &fakeRoleRepo{{ "{" }}roles: map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }}{{ "}" }}
+    	perms := &fakePermReader{{ "{" }}perms: map[string]*permission.Permission{{ "{" }}
+    		"user:create": {{ "{" }}ID: 1, Code: "user:create", Type: permission.TypeAPI, Name: "Create User", Method: "POST"{{ "}" }},
+    	{{ "}}" }}
+    	aud := audit.NewMemoryWriter()
+    	svc := New(roles, perms, &errEnforcer{{ "{" }}Enforcer: e, removeErr: errors.New("boom"){{ "}" }}, aud)
+
+    	if err := svc.GrantPermissions(ctx, "1", []string{{ "{" }}"user:create"{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("GrantPermissions with casbin cleanup error = %v, want nil (cleanup failure must not fail the request)", err)
     	{{ "}" }}
     {{ "}" }}

@@ -163,28 +163,24 @@ body: |
     	{{ "}" }}
     	// Cascade: delete children recursively (DFS post-order), cleaning
     	// Casbin policy for every node along the way (including this one).
-    	if err := s.cascadeDelete(ctx, pid); err != nil {{ "{" }}
+    	if err := s.cascadeDelete(ctx, p); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "permission.delete", p.Code, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
 
-    func (s *Service) cascadeDelete(ctx context.Context, parentID int64) error {{ "{" }}
-    	children, err := s.perms.ListChildren(ctx, parentID)
+    func (s *Service) cascadeDelete(ctx context.Context, p *permission.Permission) error {{ "{" }}
+    	children, err := s.perms.ListChildren(ctx, p.ID)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	for _, child := range children {{ "{" }}
-    		if err := s.cascadeDelete(ctx, child.ID); err != nil {{ "{" }}
+    		if err := s.cascadeDelete(ctx, child); err != nil {{ "{" }}
     			return err
     		{{ "}" }}
     	{{ "}" }}
-    	p, err := s.perms.GetByID(ctx, parentID)
-    	if err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	if err := s.perms.Delete(ctx, parentID); err != nil {{ "{" }}
+    	if err := s.perms.Delete(ctx, p.ID); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	if _, err := s.enforcer.RemoveFilteredPolicy(1, p.Code); err != nil {{ "{" }}

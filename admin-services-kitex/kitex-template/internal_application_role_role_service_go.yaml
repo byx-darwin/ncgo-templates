@@ -36,10 +36,12 @@ body: |
     	ListByCodes(ctx context.Context, codes []string) ([]*permission.Permission, error)
     {{ "}" }}
 
-    // Enforcer syncs permission grants into Casbin (p policies).
+    // Enforcer syncs permission grants into Casbin (p policies) and manages
+    // role-to-user bindings (g policies).
     type Enforcer interface {{ "{" }}
     	AddPolicy(params ...any) (bool, error)
     	RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error)
+    	RemoveFilteredGroupingPolicy(fieldIndex int, fieldValues ...string) (bool, error)
     {{ "}" }}
 
     // Service implements the role management use cases. Public methods take the
@@ -100,14 +102,25 @@ body: |
     	return saved, nil
     {{ "}" }}
 
-    // Delete removes a role identified by its decimal-string id.
+    // Delete removes a role identified by its decimal-string id, and cleans
+    // up its Casbin p policies and any g role bindings held by users.
     func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
     	rid, err := strconv.ParseInt(id, 10, 64)
     	if err != nil {{ "{" }}
     		return role.ValidationError{{ "{" }}Field: "id", Msg: "must be a valid integer id"{{ "}" }}
     	{{ "}" }}
+    	r, err := s.roles.GetByID(ctx, rid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
     	if err := s.roles.Delete(ctx, rid); err != nil {{ "{" }}
     		return err
+    	{{ "}" }}
+    	if _, err := s.enforcer.RemoveFilteredPolicy(0, r.Code); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "role.delete: remove casbin policies for role %s failed: %v", r.Code, err)
+    	{{ "}" }}
+    	if _, err := s.enforcer.RemoveFilteredGroupingPolicy(1, r.Code); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "role.delete: remove casbin role bindings for role %s failed: %v", r.Code, err)
     	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "role.delete", id, "{{ "{" }}{{ "}" }}")
     	return nil

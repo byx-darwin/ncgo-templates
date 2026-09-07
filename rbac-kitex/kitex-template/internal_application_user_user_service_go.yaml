@@ -9,6 +9,8 @@ body: |
     	"context"
     	"strconv"
 
+    	"github.com/cloudwego/kitex/pkg/klog"
+
     	"{{.Module}}/internal/domain/role"
     	"{{.Module}}/internal/domain/user"
     	"{{.Module}}/internal/infrastructure/audit"
@@ -131,7 +133,9 @@ body: |
     	if err := s.users.Delete(ctx, u.ID); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_, _ = s.enforcer.DeleteRolesForUser(id)
+    	if _, err := s.enforcer.DeleteRolesForUser(id); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "user.delete: remove casbin role bindings for user %s failed: %v", id, err)
+    	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "user.delete", id, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}
@@ -198,7 +202,9 @@ body: |
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_, _ = s.enforcer.DeleteRolesForUser(uid)
+    	if _, err := s.enforcer.DeleteRolesForUser(uid); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "user.assign_roles: remove existing casbin role bindings for user %s failed: %v", uid, err)
+    	{{ "}" }}
     	for _, r := range roles {{ "{" }}
     		if _, err := s.enforcer.AddRoleForUser(uid, r.Code); err != nil {{ "{" }}
     			return err

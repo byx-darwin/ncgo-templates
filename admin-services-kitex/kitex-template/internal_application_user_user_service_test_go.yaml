@@ -7,6 +7,7 @@ body: |
 
     import (
     	"context"
+    	"errors"
     	"fmt"
     	"strings"
     	"testing"
@@ -212,5 +213,64 @@ body: |
     	{{ "}" }}
     	if allowed, _ := e.Enforce(created.UUID, "user:create", "POST"); !allowed {{ "{" }}
     		t.Fatal("Enforce(uid, user:create, POST) = false, want true")
+    	{{ "}" }}
+    {{ "}" }}
+
+    type errEnforcer struct {{ "{" }}
+    	*casbin.Enforcer
+    	deleteErr error
+    {{ "}" }}
+
+    func (e *errEnforcer) DeleteRolesForUser(user string, domain ...string) (bool, error) {{ "{" }}
+    	return false, e.deleteErr
+    {{ "}" }}
+
+    func TestDeleteCasbinCleanupErrorDoesNotFailRequest(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	repo := &fakeUserRepo{{ "{" }}
+    		users:     map[int64]*user.User{{ "{" }}{{ "}" }},
+    		byUUID:    map[string]int64{{ "{" }}{{ "}" }},
+    		roleDefs:  map[int64]*role.Role{{ "{" }}{{ "}" }},
+    		rolesByID: map[int64][]*role.Role{{ "{" }}{{ "}" }},
+    	{{ "}" }}
+    	aud := audit.NewMemoryWriter()
+    	svc := New(repo, &errEnforcer{{ "{" }}Enforcer: e, deleteErr: errors.New("boom"){{ "}" }}, aud)
+
+    	created, err := svc.Create(ctx, CreateUserInput{{ "{" }}Username: "dave", Password: "Passw0rd!"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if err := svc.Delete(ctx, created.UUID); err != nil {{ "{" }}
+    		t.Fatalf("Delete with casbin cleanup error = %v, want nil (cleanup failure must not fail the request)", err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestAssignRolesCasbinCleanupErrorDoesNotFailRequest(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := casbin.NewMemoryPolicyStore()
+    	e, err := casbin.NewEnforcer(store)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewEnforcer: %v", err)
+    	{{ "}" }}
+    	repo := &fakeUserRepo{{ "{" }}
+    		users:     map[int64]*user.User{{ "{" }}{{ "}" }},
+    		byUUID:    map[string]int64{{ "{" }}{{ "}" }},
+    		roleDefs:  map[int64]*role.Role{{ "{" }}1: {{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}}" }},
+    		rolesByID: map[int64][]*role.Role{{ "{" }}{{ "}" }},
+    	{{ "}" }}
+    	aud := audit.NewMemoryWriter()
+    	svc := New(repo, &errEnforcer{{ "{" }}Enforcer: e, deleteErr: errors.New("boom"){{ "}" }}, aud)
+
+    	created, err := svc.Create(ctx, CreateUserInput{{ "{" }}Username: "erin", Password: "Passw0rd!"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if err := svc.AssignRoles(ctx, created.UUID, []string{{ "{" }}"1"{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("AssignRoles with casbin cleanup error = %v, want nil (cleanup failure must not fail the request)", err)
     	{{ "}" }}
     {{ "}" }}

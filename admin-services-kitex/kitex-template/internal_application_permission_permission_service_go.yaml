@@ -7,7 +7,7 @@ body: |
 
     import (
     	"context"
-    	"fmt"
+    	"strconv"
 
     	"{{.Module}}/internal/domain/permission"
     	"{{.Module}}/internal/infrastructure/audit"
@@ -15,14 +15,14 @@ body: |
 
     // PermRepo is the permission persistence port consumed by the service.
     type PermRepo interface {{ "{" }}
-    	GetByID(ctx context.Context, id string) (*permission.Permission, error)
+    	GetByID(ctx context.Context, id int64) (*permission.Permission, error)
     	List(ctx context.Context, limit, offset int32) ([]*permission.Permission, error)
-    	ListFiltered(ctx context.Context, typ string, parentID string, status int, limit, offset int32) ([]*permission.Permission, error)
-    	ListChildren(ctx context.Context, parentID string) ([]*permission.Permission, error)
+    	ListFiltered(ctx context.Context, typ string, parentID int64, status int, limit, offset int32) ([]*permission.Permission, error)
+    	ListChildren(ctx context.Context, parentID int64) ([]*permission.Permission, error)
     	Count(ctx context.Context) (int64, error)
     	Save(ctx context.Context, p *permission.Permission) (*permission.Permission, error)
     	Update(ctx context.Context, p *permission.Permission) (*permission.Permission, error)
-    	Delete(ctx context.Context, id string) error
+    	Delete(ctx context.Context, id int64) error
     {{ "}" }}
 
     // Enforcer removes stale Casbin policies when a permission is deleted.
@@ -30,7 +30,10 @@ body: |
     	RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error)
     {{ "}" }}
 
-    // Service implements the permission management use cases.
+    // Service implements the permission management use cases. Public methods
+    // take the external decimal-string permission id (and parent_id) and
+    // resolve them to internal int64 keys via strconv before calling PermRepo.
+    // A parent_id of "" means root (internal 0).
     type Service struct {{ "{" }}
     	perms    PermRepo
     	enforcer Enforcer
@@ -44,7 +47,15 @@ body: |
 
     // Create persists a new permission (validating type via the domain).
     func (s *Service) Create(ctx context.Context, in CreatePermissionInput) (*permission.Permission, error) {{ "{" }}
-    	p, err := permission.New(in.Code, in.Type, in.Name, in.ParentID, in.Path, in.Icon, in.RouteName, in.Redirect, in.KeepAlive, in.HideInMenu, in.IsExternal, in.Method, in.Sort, in.Status, in.Description)
+    	var parentID int64
+    	if in.ParentID != "" {{ "{" }}
+    		pid, err := strconv.ParseInt(in.ParentID, 10, 64)
+    		if err != nil {{ "{" }}
+    			return nil, permission.ValidationError{{ "{" }}Field: "parent_id", Msg: "must be a valid integer id"{{ "}" }}
+    		{{ "}" }}
+    		parentID = pid
+    	{{ "}" }}
+    	p, err := permission.New(in.Code, in.Type, in.Name, parentID, in.Path, in.Icon, in.RouteName, in.Redirect, in.KeepAlive, in.HideInMenu, in.IsExternal, in.Method, in.Sort, in.Status, in.Description)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -58,7 +69,11 @@ body: |
 
     // Update modifies an existing permission.
     func (s *Service) Update(ctx context.Context, in UpdatePermissionInput) (*permission.Permission, error) {{ "{" }}
-    	p, err := s.perms.GetByID(ctx, in.ID)
+    	id, err := strconv.ParseInt(in.ID, 10, 64)
+    	if err != nil {{ "{" }}
+    		return nil, permission.ValidationError{{ "{" }}Field: "id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	p, err := s.perms.GetByID(ctx, id)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -72,7 +87,11 @@ body: |
     		p.Name = *in.Name
     	{{ "}" }}
     	if in.ParentID != nil {{ "{" }}
-    		p.ParentID = *in.ParentID
+    		pid, err := strconv.ParseInt(*in.ParentID, 10, 64)
+    		if err != nil {{ "{" }}
+    			return nil, permission.ValidationError{{ "{" }}Field: "parent_id", Msg: "must be a valid integer id"{{ "}" }}
+    		{{ "}" }}
+    		p.ParentID = pid
     	{{ "}" }}
     	if in.Path != nil {{ "{" }}
     		p.Path = *in.Path
@@ -111,24 +130,32 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, "", "permission.update", fmt.Sprint(in.ID), "{{ "{" }}{{ "}" }}")
+    	_ = s.audit.Write(ctx, "", "permission.update", in.ID, "{{ "{" }}{{ "}" }}")
     	return updated, nil
     {{ "}" }}
 
-    // Get returns a single permission by ID.
+    // Get returns a single permission by decimal-string ID.
     func (s *Service) Get(ctx context.Context, id string) (*permission.Permission, error) {{ "{" }}
-    	return s.perms.GetByID(ctx, id)
+    	pid, err := strconv.ParseInt(id, 10, 64)
+    	if err != nil {{ "{" }}
+    		return nil, permission.ValidationError{{ "{" }}Field: "id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	return s.perms.GetByID(ctx, pid)
     {{ "}" }}
 
     // Delete removes a permission and cascades to children (tree semantics).
     // Also removes stale Casbin policies.
     func (s *Service) Delete(ctx context.Context, id string) error {{ "{" }}
-    	p, err := s.perms.GetByID(ctx, id)
+    	pid, err := strconv.ParseInt(id, 10, 64)
+    	if err != nil {{ "{" }}
+    		return permission.ValidationError{{ "{" }}Field: "id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	p, err := s.perms.GetByID(ctx, pid)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	// Cascade: delete children recursively (DFS post-order).
-    	if err := s.cascadeDelete(ctx, id); err != nil {{ "{" }}
+    	if err := s.cascadeDelete(ctx, pid); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	_, _ = s.enforcer.RemoveFilteredPolicy(1, p.Code)
@@ -136,7 +163,7 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (s *Service) cascadeDelete(ctx context.Context, parentID string) error {{ "{" }}
+    func (s *Service) cascadeDelete(ctx context.Context, parentID int64) error {{ "{" }}
     	children, err := s.perms.ListChildren(ctx, parentID)
     	if err != nil {{ "{" }}
     		return err
@@ -162,7 +189,14 @@ body: |
     		if status == 0 {{ "{" }}
     			status = -1 // no filter
     		{{ "}" }}
-    		perms, err = s.perms.ListFiltered(ctx, filter.Type, filter.ParentID, status, filter.PageSize, offset)
+    		var parentID int64
+    		if filter.ParentID != "" {{ "{" }}
+    			parentID, err = strconv.ParseInt(filter.ParentID, 10, 64)
+    			if err != nil {{ "{" }}
+    				return nil, 0, permission.ValidationError{{ "{" }}Field: "parent_id", Msg: "must be a valid integer id"{{ "}" }}
+    			{{ "}" }}
+    		{{ "}" }}
+    		perms, err = s.perms.ListFiltered(ctx, filter.Type, parentID, status, filter.PageSize, offset)
     	{{ "}" }} else {{ "{" }}
     		perms, err = s.perms.List(ctx, filter.PageSize, offset)
     	{{ "}" }}

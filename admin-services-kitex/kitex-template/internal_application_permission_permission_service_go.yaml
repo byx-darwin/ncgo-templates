@@ -9,6 +9,8 @@ body: |
     	"context"
     	"strconv"
 
+    	"github.com/cloudwego/kitex/pkg/klog"
+
     	"{{.Module}}/internal/domain/permission"
     	"{{.Module}}/internal/infrastructure/audit"
     )
@@ -162,7 +164,9 @@ body: |
     	if err := s.cascadeDelete(ctx, pid); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_, _ = s.enforcer.RemoveFilteredPolicy(1, p.Code)
+    	if _, err := s.enforcer.RemoveFilteredPolicy(1, p.Code); err != nil {{ "{" }}
+    		klog.CtxErrorf(ctx, "permission.delete: remove casbin policies for permission %s failed: %v", p.Code, err)
+    	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "permission.delete", p.Code, "{{ "{" }}{{ "}" }}")
     	return nil
     {{ "}" }}

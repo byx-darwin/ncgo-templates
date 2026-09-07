@@ -7,6 +7,7 @@ body: |
 
     import (
     	"context"
+    	"errors"
     	"fmt"
     	"testing"
 
@@ -207,5 +208,28 @@ body: |
     	{{ "}" }}
     	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); allowed {{ "{" }}
     		t.Fatal("Enforce after delete = true, want false")
+    	{{ "}" }}
+    {{ "}" }}
+
+    type errEnforcer struct {{ "{" }}
+    	removeErr error
+    {{ "}" }}
+
+    func (e *errEnforcer) RemoveFilteredPolicy(fieldIndex int, fieldValues ...string) (bool, error) {{ "{" }}
+    	return false, e.removeErr
+    {{ "}" }}
+
+    func TestDeleteCasbinCleanupErrorDoesNotFailRequest(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	repo := &fakePermRepo{{ "{" }}perms: map[int64]*permission.Permission{{ "{" }}{{ "}}" }}
+    	aud := audit.NewMemoryWriter()
+    	svc := New(repo, &errEnforcer{{ "{" }}removeErr: errors.New("boom"){{ "}" }}, aud)
+
+    	p, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "user:delete", Type: permission.TypeAPI, Name: "Delete User", Method: "DELETE"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if err := svc.Delete(ctx, fmt.Sprint(p.ID)); err != nil {{ "{" }}
+    		t.Fatalf("Delete with casbin cleanup error = %v, want nil (cleanup failure must not fail the request)", err)
     	{{ "}" }}
     {{ "}" }}

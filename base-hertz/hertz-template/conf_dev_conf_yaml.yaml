@@ -39,7 +39,7 @@ body: |-
       # 连接健康检查周期，单位秒
       health_check_period_seconds: "30s"
     # ncgo:add-infra:start redis
-    # Redis 连接配置：作为共享默认值供 rate_limit / idempotency / signature nonce 复用
+    # Redis 连接配置：作为共享默认值供 idempotency / signature nonce 复用
     # 如需给某个模块单独走另一套 Redis，可在对应模块的 redis 字段内覆盖
     # 结构与 go-middleware/redis.Config 对齐；已带 add-infra 标记，重复添加保持幂等。
     redis:

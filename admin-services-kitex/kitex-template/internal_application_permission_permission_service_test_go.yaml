@@ -136,6 +136,32 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
+    func TestUpdateClearsParentIDToRoot(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, _, _ := newPermService(t)
+
+    	parent, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system", Type: permission.TypeCatalog, Name: "System"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create parent: %v", err)
+    	{{ "}" }}
+    	child, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "system:user", Type: permission.TypeMenu, Name: "Users", ParentID: fmt.Sprint(parent.ID){{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create child: %v", err)
+    	{{ "}" }}
+    	if child.ParentID == 0 {{ "{" }}
+    		t.Fatalf("precondition: child.ParentID = 0, want non-zero")
+    	{{ "}" }}
+
+    	empty := ""
+    	updated, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: fmt.Sprint(child.ID), ParentID: &empty{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Update: %v", err)
+    	{{ "}" }}
+    	if updated.ParentID != 0 {{ "{" }}
+    		t.Fatalf("ParentID = %d, want 0 (root)", updated.ParentID)
+    	{{ "}" }}
+    {{ "}" }}
+
     func TestDeleteCascadesChildren(t *testing.T) {{ "{" }}
     	ctx := context.Background()
     	svc, _, _ := newPermService(t)

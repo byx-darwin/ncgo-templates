@@ -6,6 +6,7 @@ on:
       - 'rbac-kitex/**'
       - 'admin-services-kitex/**'
       - 'admin-bff-hertz/**'
+      - 'rule-center/**'
 
 jobs:
   duplicate-path-check:
@@ -21,10 +22,8 @@ jobs:
           fi
           scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/clean
 
-      # rule-center still has unresolved duplicate path: declarations
-      # (tracked as Issue #43 follow-up); add it here once cleaned up.
       - name: Check for duplicate path declarations
-        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template rbac-kitex/kitex-template admin-services-kitex/kitex-template
+        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template rbac-kitex/kitex-template admin-services-kitex/kitex-template rule-center/kitex-template
 
   build-check:
     runs-on: ubuntu-latest
@@ -40,6 +39,9 @@ jobs:
           - name: admin-bff-hertz
             kind: hertz
             db: postgres
+          - name: rule-center
+            kind: kitex
+            db: none
     steps:
       - uses: actions/checkout@v4
 

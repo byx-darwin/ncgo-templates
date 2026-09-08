@@ -160,8 +160,7 @@ body: |-
           return consts.StatusForbidden
 
       // Token / JWT errors → 401
-      case CodeTokenMissing, CodeTokenInvalid, CodeTokenExpired,
-          CodeClaimsInvalid, CodeSessionInvalid:
+      case CodeTokenMissing, CodeTokenInvalid, CodeTokenExpired:
           return consts.StatusUnauthorized
 
       case frameworkerror.CodeAuthFailed:

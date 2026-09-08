@@ -33,14 +33,14 @@ body: |
     	{{ "}" }}
 
     	resp, err := h.rbacCli.GetUserMenuTree(ctx, &api.GetUserMenuTreeReq{{ "{" }}
-    		Uid: claims.Uid,
+    		UserId: claims.UserID,
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
 
-    	response.OK(c, resp.Roots)
+    	response.OK(c, resp.Menus)
     {{ "}" }}
 
     func (h *CurrentUserHandler) GetPerms(ctx context.Context, c *app.RequestContext) {{ "{" }}
@@ -51,12 +51,12 @@ body: |
     	{{ "}" }}
 
     	resp, err := h.rbacCli.GetUserPermCodes(ctx, &api.GetUserPermCodesReq{{ "{" }}
-    		Uid: claims.Uid,
+    		UserId: claims.UserID,
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
 
-    	response.OK(c, resp.Codes)
+    	response.OK(c, resp.PermCodes)
     {{ "}" }}

@@ -85,7 +85,7 @@ body: |
     		return
     	{{ "}" }}
 
-    	_, err := h.rbacCli.Logout(ctx, &api.LogoutReq{{ "{" }}AccessToken: claims.UUID{{ "}" }})
+    	_, err := h.rbacCli.Logout(ctx, &api.LogoutReq{{ "{" }}UserId: claims.UserID{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

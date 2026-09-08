@@ -26,7 +26,7 @@ body: |-
     // Add HTTP methods to the IDL proto, then rerun `make update`.
     // Implement handler methods here as:
     //   func (uc *UseCase) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error) {{ "{" }}
-    //       // Placeholder code 10010 shares its value with frameworkerror.CodeRPCUnavailable;
-    //       // replace with a domain-specific error code when implementing.
-    //       return nil, goerror.In("adminbffservice.usecase").Code(10010).Public("not_implemented").Errorf("Ping: not implemented")
+    //       // Raw literal 10010 collides with frameworkerror.CodeRPCUnavailable; use
+    //       // response.CodeNotImplemented (10402) instead, or a domain-specific error code.
+    //       return nil, goerror.In("adminbffservice.usecase").Code(response.CodeNotImplemented).Public("not_implemented").Errorf("Ping: not implemented")
     //   {{ "}" }}

@@ -8,36 +8,36 @@ import "api.proto";
 
 // AuthService handles authentication operations
 service AuthService {
-  rpc Login(LoginRequest) returns (LoginResponse);
-  rpc Refresh(RefreshRequest) returns (RefreshResponse);
-  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc Login(LoginReq) returns (LoginResp);
+  rpc Refresh(RefreshReq) returns (RefreshResp);
+  rpc Logout(LogoutReq) returns (LogoutResp);
 }
 
-message LoginRequest {
+message LoginReq {
   string username = 1;
   string password = 2;
 }
 
-message LoginResponse {
+message LoginResp {
   string access_token = 1;
   string refresh_token = 2;
   int64 expires_in = 3;
 }
 
-message RefreshRequest {
+message RefreshReq {
   string refresh_token = 1;
 }
 
-message RefreshResponse {
+message RefreshResp {
   string access_token = 1;
   string refresh_token = 2;
   int64 expires_in = 3;
 }
 
-message LogoutRequest {
+message LogoutReq {
   string user_id = 1;
 }
 
-message LogoutResponse {
+message LogoutResp {
   bool success = 1;
 }

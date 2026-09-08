@@ -5,13 +5,41 @@ on:
     paths:
       - 'rbac-kitex/**'
       - 'admin-services-kitex/**'
+      - 'admin-bff-hertz/**'
 
 jobs:
+  duplicate-path-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify fixture tests still pass
+        run: |
+          if scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/has-duplicate; then
+            echo "expected has-duplicate fixture to fail the duplicate-path check, but it passed" >&2
+            exit 1
+          fi
+          scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/clean
+
+      # rbac-kitex, admin-services-kitex, and rule-center still have unresolved duplicate
+      # path: declarations (tracked as Issue #52 follow-ups); add them here once cleaned up.
+      - name: Check for duplicate path declarations
+        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template
+
   build-check:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        template: [rbac-kitex, admin-services-kitex]
+        include:
+          - name: rbac-kitex
+            kind: kitex
+            db: none
+          - name: admin-services-kitex
+            kind: kitex
+            db: none
+          - name: admin-bff-hertz
+            kind: hertz
+            db: postgres
     steps:
       - uses: actions/checkout@v4
 
@@ -22,18 +50,27 @@ jobs:
       - name: Install ncgo
         run: go install github.com/byx-darwin/ncgo@latest
 
-      - name: Render ${{ matrix.template }}
+      - name: Render ${{ matrix.name }}
         run: |
           ncgo new scratch \
             --module github.com/acme/scratch \
-            --kind kitex \
-            --dir /tmp/scratch-${{ matrix.template }} \
-            --template-dir ${{ matrix.template }}
+            --kind ${{ matrix.kind }} \
+            --db ${{ matrix.db }} \
+            --dir /tmp/scratch-${{ matrix.name }} \
+            --template-dir ${{ matrix.name }}
+
+      - name: Generate kitex-client RPC dependencies
+        if: matrix.name == 'admin-bff-hertz'
+        working-directory: /tmp/scratch-${{ matrix.name }}
+        run: |
+          ncgo add kitex-client authority --idl idl/rbac.proto --service RBACService
+          ncgo add kitex-client auth --idl idl/auth.proto --service AuthService
+          ncgo add kitex-client rulecenter --idl idl/rule_center.proto --service RuleService
 
       - name: Build
-        working-directory: /tmp/scratch-${{ matrix.template }}
+        working-directory: /tmp/scratch-${{ matrix.name }}
         run: go build ./...
 
       - name: Vet
-        working-directory: /tmp/scratch-${{ matrix.template }}
+        working-directory: /tmp/scratch-${{ matrix.name }}
         run: go vet ./...

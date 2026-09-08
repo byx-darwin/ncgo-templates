@@ -50,7 +50,12 @@ body: |-
   }
 
   type AuthConfig struct {
-      CallerAllowlist CallerAllowlistConfig `json:"caller_allowlist" yaml:"caller_allowlist"`
+      CallerAllowlist   CallerAllowlistConfig `json:"caller_allowlist" yaml:"caller_allowlist"`
+      JWTSecret         string                `json:"jwt_secret" yaml:"jwt_secret"`
+      AccessTTLSeconds  int                   `json:"access_ttl_seconds" yaml:"access_ttl_seconds"`
+      RefreshTTLSeconds int                   `json:"refresh_ttl_seconds" yaml:"refresh_ttl_seconds"`
+      TokenStore        string                `json:"token_store" yaml:"token_store"` // memory | redis (seam)
+      RedisAddr         string                `json:"redis_addr" yaml:"redis_addr"`
   }
 
   type CallerAllowlistConfig struct {
@@ -245,7 +250,13 @@ body: |-
               },
           },
           RPC: RPCConfig{RequestTimeoutSeconds: config.Duration{Duration: 3 * time.Second}},
-          Auth: AuthConfig{CallerAllowlist: CallerAllowlistConfig{Header: "x-caller-service"}},
+          Auth: AuthConfig{
+              CallerAllowlist:   CallerAllowlistConfig{Header: "x-caller-service"},
+              JWTSecret:         "dev-secret-change-me",
+              AccessTTLSeconds:  3600,
+              RefreshTTLSeconds: 604800,
+              TokenStore:        "memory",
+          },
           Database: DatabaseConfig{
               Enabled:                  false,
               MaxConns:                 20,
@@ -300,6 +311,17 @@ body: |-
           if !c.Auth.CallerAllowlist.AllowMissing && len(c.Auth.CallerAllowlist.AllowedCallers) == 0 {
               return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.caller_allowlist.allowed_callers is empty")
           }
+      }
+      if c.Auth.JWTSecret == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.jwt_secret is empty")
+      }
+      if c.Auth.AccessTTLSeconds <= 0 || c.Auth.RefreshTTLSeconds <= 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth token TTLs must be positive")
+      }
+      switch c.Auth.TokenStore {
+      case "", "memory", "redis":
+      default:
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.token_store must be memory or redis")
       }
       if c.Database.Enabled {
           if c.Database.DSN == "" {

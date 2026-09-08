@@ -43,6 +43,14 @@ body: |-
       allowed_callers: []
       # 是否允许请求头缺失；false 时缺失会被拒绝
       allow_missing: false
+    # JWT 签名密钥；生产环境必须通过环境变量/密钥管理覆盖，不能使用此默认值
+    jwt_secret: "dev-secret-change-me"
+    # access token 有效期，单位秒
+    access_ttl_seconds: 3600
+    # refresh token 有效期，单位秒
+    refresh_ttl_seconds: 604800
+    # token 存储方式：memory | redis
+    token_store: "memory"
   # 日志配置（由 go-common/log 读取）
   log:
     # 日志级别：debug/info/warn/error

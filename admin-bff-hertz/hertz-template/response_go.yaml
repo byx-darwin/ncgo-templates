@@ -65,8 +65,8 @@ body: |-
 
       CodeDependencyError       = 10300
       CodeRPCFailed             = 10301
-      CodeRouteNotFound         = 10008
-      CodeMethodNotAllowed      = 10009
+      CodeRouteNotFound         = 10400
+      CodeMethodNotAllowed      = 10401
       CodeNotImplemented        = 10010
   )
 

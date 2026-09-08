@@ -8,10 +8,10 @@ import "api.proto";
 
 // RuleService handles rate limit rule management
 service RuleService {
-  rpc ListRules(ListRulesRequest) returns (ListRulesResponse);
-  rpc CreateRule(CreateRuleRequest) returns (CreateRuleResponse);
-  rpc UpdateRule(UpdateRuleRequest) returns (UpdateRuleResponse);
-  rpc DeleteRule(DeleteRuleRequest) returns (DeleteRuleResponse);
+  rpc ListRules(ListRulesReq) returns (ListRulesResp);
+  rpc CreateRule(CreateRuleReq) returns (CreateRuleResp);
+  rpc UpdateRule(UpdateRuleReq) returns (UpdateRuleResp);
+  rpc DeleteRule(DeleteRuleReq) returns (DeleteRuleResp);
 }
 
 message RateLimitRule {
@@ -25,17 +25,17 @@ message RateLimitRule {
   bool enabled = 8;
 }
 
-message ListRulesRequest {
+message ListRulesReq {
   int32 page = 1;
   int32 page_size = 2;
 }
 
-message ListRulesResponse {
+message ListRulesResp {
   repeated RateLimitRule rules = 1;
   int32 total = 2;
 }
 
-message CreateRuleRequest {
+message CreateRuleReq {
   string name = 1;
   string path_pattern = 2;
   string method = 3;
@@ -45,11 +45,11 @@ message CreateRuleRequest {
   bool enabled = 7;
 }
 
-message CreateRuleResponse {
+message CreateRuleResp {
   RateLimitRule rule = 1;
 }
 
-message UpdateRuleRequest {
+message UpdateRuleReq {
   string id = 1;
   string name = 2;
   string path_pattern = 3;
@@ -60,14 +60,14 @@ message UpdateRuleRequest {
   bool enabled = 8;
 }
 
-message UpdateRuleResponse {
+message UpdateRuleResp {
   RateLimitRule rule = 1;
 }
 
-message DeleteRuleRequest {
+message DeleteRuleReq {
   string id = 1;
 }
 
-message DeleteRuleResponse {
+message DeleteRuleResp {
   bool success = 1;
 }

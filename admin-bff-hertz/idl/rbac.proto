@@ -8,45 +8,45 @@ import "api.proto";
 
 // RBACService handles role-based access control operations
 service RBACService {
-  rpc Enforce(EnforceRequest) returns (EnforceResponse);
+  rpc Enforce(EnforceReq) returns (EnforceResp);
 
   // User management
-  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
-  rpc GetUser(GetUserRequest) returns (GetUserResponse);
-  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
-  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
-  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  rpc ListUsers(ListUsersReq) returns (ListUsersResp);
+  rpc GetUser(GetUserReq) returns (GetUserResp);
+  rpc CreateUser(CreateUserReq) returns (CreateUserResp);
+  rpc UpdateUser(UpdateUserReq) returns (UpdateUserResp);
+  rpc DeleteUser(DeleteUserReq) returns (DeleteUserResp);
 
   // Role management
-  rpc ListRoles(ListRolesRequest) returns (ListRolesResponse);
-  rpc CreateRole(CreateRoleRequest) returns (CreateRoleResponse);
-  rpc UpdateRole(UpdateRoleRequest) returns (UpdateRoleResponse);
-  rpc DeleteRole(DeleteRoleRequest) returns (DeleteRoleResponse);
-  rpc AssignRolesToUser(AssignRolesToUserRequest) returns (AssignRolesToUserResponse);
+  rpc ListRoles(ListRolesReq) returns (ListRolesResp);
+  rpc CreateRole(CreateRoleReq) returns (CreateRoleResp);
+  rpc UpdateRole(UpdateRoleReq) returns (UpdateRoleResp);
+  rpc DeleteRole(DeleteRoleReq) returns (DeleteRoleResp);
+  rpc AssignRolesToUser(AssignRolesToUserReq) returns (AssignRolesToUserResp);
 
   // Permission management
-  rpc ListPermissions(ListPermissionsRequest) returns (ListPermissionsResponse);
-  rpc GetPermission(GetPermissionRequest) returns (GetPermissionResponse);
-  rpc CreatePermission(CreatePermissionRequest) returns (CreatePermissionResponse);
-  rpc UpdatePermission(UpdatePermissionRequest) returns (UpdatePermissionResponse);
-  rpc DeletePermission(DeletePermissionRequest) returns (DeletePermissionResponse);
-  rpc GrantPermissionsToRole(GrantPermissionsToRoleRequest) returns (GrantPermissionsToRoleResponse);
+  rpc ListPermissions(ListPermissionsReq) returns (ListPermissionsResp);
+  rpc GetPermission(GetPermissionReq) returns (GetPermissionResp);
+  rpc CreatePermission(CreatePermissionReq) returns (CreatePermissionResp);
+  rpc UpdatePermission(UpdatePermissionReq) returns (UpdatePermissionResp);
+  rpc DeletePermission(DeletePermissionReq) returns (DeletePermissionResp);
+  rpc GrantPermissionsToRole(GrantPermissionsToRoleReq) returns (GrantPermissionsToRoleResp);
 
   // Menu management
-  rpc ListMenus(ListMenusRequest) returns (ListMenusResponse);
+  rpc ListMenus(ListMenusReq) returns (ListMenusResp);
 
   // Current user operations
-  rpc GetUserMenuTree(GetUserMenuTreeRequest) returns (GetUserMenuTreeResponse);
-  rpc GetUserPermCodes(GetUserPermCodesRequest) returns (GetUserPermCodesResponse);
+  rpc GetUserMenuTree(GetUserMenuTreeReq) returns (GetUserMenuTreeResp);
+  rpc GetUserPermCodes(GetUserPermCodesReq) returns (GetUserPermCodesResp);
 }
 
-message EnforceRequest {
+message EnforceReq {
   string uid = 1;
   string obj = 2;
   string act = 3;
 }
 
-message EnforceResponse {
+message EnforceResp {
   bool allowed = 1;
 }
 
@@ -59,36 +59,36 @@ message User {
   repeated string roles = 5;
 }
 
-message ListUsersRequest {
+message ListUsersReq {
   int32 page = 1;
   int32 page_size = 2;
 }
 
-message ListUsersResponse {
+message ListUsersResp {
   repeated User users = 1;
   int32 total = 2;
 }
 
-message GetUserRequest {
+message GetUserReq {
   string id = 1;
 }
 
-message GetUserResponse {
+message GetUserResp {
   User user = 1;
 }
 
-message CreateUserRequest {
+message CreateUserReq {
   string username = 1;
   string password = 2;
   string email = 3;
   repeated string roles = 4;
 }
 
-message CreateUserResponse {
+message CreateUserResp {
   User user = 1;
 }
 
-message UpdateUserRequest {
+message UpdateUserReq {
   string id = 1;
   string username = 2;
   string email = 3;
@@ -96,15 +96,15 @@ message UpdateUserRequest {
   repeated string roles = 5;
 }
 
-message UpdateUserResponse {
+message UpdateUserResp {
   User user = 1;
 }
 
-message DeleteUserRequest {
+message DeleteUserReq {
   string id = 1;
 }
 
-message DeleteUserResponse {
+message DeleteUserResp {
   bool success = 1;
 }
 
@@ -116,51 +116,51 @@ message Role {
   repeated string permissions = 4;
 }
 
-message ListRolesRequest {
+message ListRolesReq {
   int32 page = 1;
   int32 page_size = 2;
 }
 
-message ListRolesResponse {
+message ListRolesResp {
   repeated Role roles = 1;
   int32 total = 2;
 }
 
-message CreateRoleRequest {
+message CreateRoleReq {
   string name = 1;
   string description = 2;
   repeated string permissions = 3;
 }
 
-message CreateRoleResponse {
+message CreateRoleResp {
   Role role = 1;
 }
 
-message UpdateRoleRequest {
+message UpdateRoleReq {
   string id = 1;
   string name = 2;
   string description = 3;
   repeated string permissions = 4;
 }
 
-message UpdateRoleResponse {
+message UpdateRoleResp {
   Role role = 1;
 }
 
-message DeleteRoleRequest {
+message DeleteRoleReq {
   string id = 1;
 }
 
-message DeleteRoleResponse {
+message DeleteRoleResp {
   bool success = 1;
 }
 
-message AssignRolesToUserRequest {
+message AssignRolesToUserReq {
   string user_id = 1;
   repeated string role_ids = 2;
 }
 
-message AssignRolesToUserResponse {}
+message AssignRolesToUserResp {}
 
 // Permission messages
 message Permission {
@@ -170,59 +170,59 @@ message Permission {
   string description = 4;
 }
 
-message ListPermissionsRequest {
+message ListPermissionsReq {
   int32 page = 1;
   int32 page_size = 2;
 }
 
-message ListPermissionsResponse {
+message ListPermissionsResp {
   repeated Permission permissions = 1;
   int32 total = 2;
 }
 
-message GetPermissionRequest {
+message GetPermissionReq {
   string id = 1;
 }
 
-message GetPermissionResponse {
+message GetPermissionResp {
   Permission permission = 1;
 }
 
-message CreatePermissionRequest {
+message CreatePermissionReq {
   string code = 1;
   string name = 2;
   string description = 3;
 }
 
-message CreatePermissionResponse {
+message CreatePermissionResp {
   Permission permission = 1;
 }
 
-message UpdatePermissionRequest {
+message UpdatePermissionReq {
   string id = 1;
   string code = 2;
   string name = 3;
   string description = 4;
 }
 
-message UpdatePermissionResponse {
+message UpdatePermissionResp {
   Permission permission = 1;
 }
 
-message DeletePermissionRequest {
+message DeletePermissionReq {
   string id = 1;
 }
 
-message DeletePermissionResponse {
+message DeletePermissionResp {
   bool success = 1;
 }
 
-message GrantPermissionsToRoleRequest {
+message GrantPermissionsToRoleReq {
   string role_id = 1;
   repeated string permission_codes = 2;
 }
 
-message GrantPermissionsToRoleResponse {}
+message GrantPermissionsToRoleResp {}
 
 // Menu messages
 message Menu {
@@ -234,28 +234,28 @@ message Menu {
   int32 order = 6;
 }
 
-message ListMenusRequest {
+message ListMenusReq {
   int32 page = 1;
   int32 page_size = 2;
 }
 
-message ListMenusResponse {
+message ListMenusResp {
   repeated Menu menus = 1;
   int32 total = 2;
 }
 
-message GetUserMenuTreeRequest {
+message GetUserMenuTreeReq {
   string user_id = 1;
 }
 
-message GetUserMenuTreeResponse {
+message GetUserMenuTreeResp {
   repeated Menu menus = 1;
 }
 
-message GetUserPermCodesRequest {
+message GetUserPermCodesReq {
   string user_id = 1;
 }
 
-message GetUserPermCodesResponse {
+message GetUserPermCodesResp {
   repeated string perm_codes = 1;
 }

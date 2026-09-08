@@ -47,8 +47,8 @@ body: |
     	rulerepo "{{.Module}}/internal/repository/rulecenter"
     	userrepo "{{.Module}}/internal/repository/user"
     	ruleusecase "{{.Module}}/internal/usecase/rulecenter"
-    	"{{.Module}}/kitex_gen/api/{{ToLower .ServiceName}}/v1/authservice"
-    	"{{.Module}}/kitex_gen/api/{{ToLower .ServiceName}}/v1/rbacservice"
+    	"{{.Module}}/kitex_gen/api/admin/v1/authservice"
+    	"{{.Module}}/kitex_gen/api/admin/v1/rbacservice"
     	"{{.Module}}/kitex_gen/api/admin/v1/ruleservice"
     )
 

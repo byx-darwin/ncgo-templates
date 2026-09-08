@@ -1,0 +1,2 @@
+path: bar.go
+body: "package foo"

@@ -21,10 +21,10 @@ jobs:
           fi
           scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/clean
 
-      # admin-services-kitex and rule-center still have unresolved duplicate
-      # path: declarations (tracked as Issue #43 follow-ups); add them here once cleaned up.
+      # rule-center still has unresolved duplicate path: declarations
+      # (tracked as Issue #43 follow-up); add it here once cleaned up.
       - name: Check for duplicate path declarations
-        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template rbac-kitex/kitex-template
+        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template rbac-kitex/kitex-template admin-services-kitex/kitex-template
 
   build-check:
     runs-on: ubuntu-latest

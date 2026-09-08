@@ -67,7 +67,7 @@ body: |-
       CodeRPCFailed             = 10301
       CodeRouteNotFound         = 10400
       CodeMethodNotAllowed      = 10401
-      CodeNotImplemented        = 10010
+      CodeNotImplemented        = 10402
   )
 
   var (

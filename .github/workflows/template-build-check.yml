@@ -13,6 +13,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify fixture tests still pass
+        run: |
+          if scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/has-duplicate; then
+            echo "expected has-duplicate fixture to fail the duplicate-path check, but it passed" >&2
+            exit 1
+          fi
+          scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/clean
+
+      # rbac-kitex, admin-services-kitex, and rule-center still have unresolved duplicate
+      # path: declarations (tracked as Issue #52 follow-ups); add them here once cleaned up.
       - name: Check for duplicate path declarations
         run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template
 
@@ -23,13 +33,13 @@ jobs:
         include:
           - name: rbac-kitex
             kind: kitex
-            dir: rbac-kitex/kitex-template
+            db: none
           - name: admin-services-kitex
             kind: kitex
-            dir: admin-services-kitex/kitex-template
+            db: none
           - name: admin-bff-hertz
             kind: hertz
-            dir: admin-bff-hertz/hertz-template
+            db: postgres
     steps:
       - uses: actions/checkout@v4
 
@@ -45,8 +55,17 @@ jobs:
           ncgo new scratch \
             --module github.com/acme/scratch \
             --kind ${{ matrix.kind }} \
+            --db ${{ matrix.db }} \
             --dir /tmp/scratch-${{ matrix.name }} \
-            --template-dir ${{ matrix.dir }}
+            --template-dir ${{ matrix.name }}
+
+      - name: Generate kitex-client RPC dependencies
+        if: matrix.name == 'admin-bff-hertz'
+        working-directory: /tmp/scratch-${{ matrix.name }}
+        run: |
+          ncgo add kitex-client authority --idl idl/rbac.proto --service RBACService
+          ncgo add kitex-client auth --idl idl/auth.proto --service AuthService
+          ncgo add kitex-client rulecenter --idl idl/rule_center.proto --service RuleService
 
       - name: Build
         working-directory: /tmp/scratch-${{ matrix.name }}

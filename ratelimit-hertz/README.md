@@ -121,7 +121,7 @@ rate_limit:
       - path_prefix: "/api/v1/admin"
         rule:
           key_by: [user_uuid]
-          strategy: sliding_window
+          strategy: fixed_window
           window_seconds: "60s"
           max_requests: 30
 ```
@@ -179,16 +179,6 @@ max_requests: 100
 ```
 
 Simple counter that resets every window.
-
-### Sliding Window
-
-```yaml
-strategy: sliding_window
-window_seconds: "60s"
-max_requests: 100
-```
-
-Smooth rate limiting using weighted previous window.
 
 ### Token Bucket
 

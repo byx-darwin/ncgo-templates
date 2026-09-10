@@ -42,6 +42,7 @@ body: |-
         Swagger SwaggerConfig `yaml:"swagger"`
         Security SecurityConfig `yaml:"security"`
         CORS CORSConfig `yaml:"cors"`
+        RateLimit RateLimitConfig `yaml:"rate_limit"`
         Idempotency IdempotencyConfig `yaml:"idempotency"`
         Auth AuthConfig `yaml:"auth"`
         Logging LoggingConfig `yaml:"logging"`
@@ -114,7 +115,77 @@ body: |-
         Format string `yaml:"format"`
         Mode   string `yaml:"mode"`
     }
-    
+
+    type RateLimitConfig struct {
+        Enabled      bool                    `yaml:"enabled"`
+        Mode         string                  `yaml:"mode"`                 // shadow | enforce
+        Static       StaticLimitConfig       `yaml:"static"`
+        Source       RateLimitSourceConfig   `yaml:"source"`
+        GRPC         RateLimitGRPCConfig     `yaml:"grpc"`
+        RuleCenter   RateLimitDatabaseConfig `yaml:"rule_center"`
+        Database     RateLimitDatabaseConfig `yaml:"database"`
+        Backend      string                  `yaml:"backend"`
+        FailOpen     bool                    `yaml:"fail_open"`
+        KeyPrefix    string                  `yaml:"key_prefix"`
+        AppKeyHeader string                  `yaml:"app_key_header"`
+        SkipPaths    []string                `yaml:"skip_paths"`
+        PreAuth      RateLimitPhaseConfig    `yaml:"pre_auth"`
+        PostAuth     RateLimitPhaseConfig    `yaml:"post_auth"`
+        Memory       MemoryCacheConfig       `yaml:"memory"`
+        Redis        RedisConfig    `yaml:"redis"`
+    }
+
+    type StaticLimitConfig struct {
+        MaxQPS         int `yaml:"max_qps"`
+        MaxConnections int `yaml:"max_connections"`
+    }
+
+    type RateLimitSourceConfig struct {
+        Type            string          `yaml:"type"`
+        CacheTTLSeconds config.Duration `yaml:"cache_ttl_seconds"`
+        FallbackOnError bool            `yaml:"fallback_on_error"`
+    }
+
+    type RateLimitGRPCConfig struct {
+        Target              string          `yaml:"target"`
+        TimeoutMilliseconds config.Duration `yaml:"timeout_milliseconds"`
+        AuthHeader          string          `yaml:"auth_header"`
+        AuthToken           string          `yaml:"auth_token"`
+        ServiceName         string          `yaml:"service_name"`
+    }
+
+    type RateLimitDatabaseConfig struct {
+        QueryTimeoutMilliseconds config.Duration `yaml:"query_timeout_milliseconds"`
+    }
+
+    type RateLimitPhaseConfig struct {
+        Enabled     bool                   `yaml:"enabled"`
+        DefaultRule RateLimitRuleConfig    `yaml:"default_rule"`
+        Rules       []RateLimitMatchConfig `yaml:"rules"`
+    }
+
+    type RateLimitMatchConfig struct {
+        AppKey      string            `yaml:"app_key"`
+        Method      string            `yaml:"method"`
+        MatchKind   string            `yaml:"match_kind"`
+        Path        string            `yaml:"path"`
+        PathPattern string            `yaml:"path_pattern"`
+        PathPrefix  string            `yaml:"path_prefix"`
+        Priority    int               `yaml:"priority"`
+        Rule        RateLimitRuleConfig `yaml:"rule"`
+    }
+
+    type RateLimitRuleConfig struct {
+        Enabled           bool            `yaml:"enabled"`
+        KeyBy             []string        `yaml:"key_by"`
+        Strategy          string          `yaml:"strategy"`
+        WindowSeconds     config.Duration `yaml:"window_seconds"`
+        MaxRequests       int             `yaml:"max_requests"`
+        RequestsPerSecond float64         `yaml:"requests_per_second"`
+        Burst             int             `yaml:"burst"`
+        ClientTTLSeconds  config.Duration `yaml:"client_ttl_seconds"`
+    }
+
     type RedisConfig struct {
         Addrs              []string        `yaml:"addrs"`
         Username           string          `yaml:"username"`
@@ -521,6 +592,7 @@ body: |-
             return
         }
         c.Redis = mergeRedisConfig(c.Redis, defaultRedisConfig())
+        c.RateLimit.Redis = mergeRedisConfig(c.RateLimit.Redis, c.Redis)
         c.Idempotency.Redis = mergeRedisConfig(c.Idempotency.Redis, c.Redis)
         c.Auth.Signature.Nonce.Redis = mergeRedisConfig(c.Auth.Signature.Nonce.Redis, c.Redis)
     }
@@ -666,6 +738,19 @@ body: |-
             }
             if c.Idempotency.MaxBodyBytes < 0 {
                 return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.max_body_bytes must not be negative")
+            }
+        }
+        if c.RateLimit.Enabled {
+            switch c.RateLimit.Backend {
+            case "", "memory", "redis":
+            default:
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.backend must be memory or redis")
+            }
+            if c.RateLimit.Backend == "redis" && len(c.RateLimit.Redis.Addrs) == 0 {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.redis.addrs is empty")
+            }
+            if c.RateLimit.Backend == "memory" && c.RateLimit.Memory.MaxEntries < 0 {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.memory.max_entries must not be negative")
             }
         }
         if err := validateLogging(c.Logging); err != nil {

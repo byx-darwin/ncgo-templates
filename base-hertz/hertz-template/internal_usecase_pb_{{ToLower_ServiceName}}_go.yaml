@@ -12,6 +12,7 @@ body: |-
 
     	goerror "github.com/byx-darwin/go-tools/go-common/error"
 
+    	apppb "{{.Module}}/internal/pb"
     	pb "{{.Module}}/internal/handler/pb"
     	"{{.Module}}/internal/pkg/response"
     )
@@ -28,7 +29,7 @@ body: |-
     }
 
     // Ping .
-    func (uc *UseCase) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingResp, error) {
+    func (uc *UseCase) Ping(ctx context.Context, req *apppb.PingReq) (*apppb.PingResp, error) {
     	_ = ctx
     	_ = req
     	return nil, goerror.

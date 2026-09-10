@@ -909,6 +909,11 @@ body: |-
         if !rule.Enabled {
             return nil
         }
+        switch rule.Strategy {
+        case "", "token_bucket", "fixed_window":
+        default:
+            return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + ".strategy must be token_bucket or fixed_window")
+        }
         if len(rule.KeyBy) == 0 {
             return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + ".key_by must not be empty")
         }

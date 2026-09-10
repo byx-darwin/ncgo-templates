@@ -137,6 +137,30 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
+    func TestUpdateCodeChangeRemovesOldCasbinPolicy(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	svc, e, _ := newPermService(t)
+
+    	p, err := svc.Create(ctx, CreatePermissionInput{{ "{" }}Code: "user:delete", Type: permission.TypeAPI, Name: "Delete User", Method: "DELETE"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if _, err := e.AddPolicy("admin", p.Code, "DELETE"); err != nil {{ "{" }}
+    		t.Fatalf("AddPolicy: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); !allowed {{ "{" }}
+    		t.Fatal("Enforce before update = false, want true")
+    	{{ "}" }}
+
+    	newCode := "user:remove"
+    	if _, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: fmt.Sprint(p.ID), Code: &newCode{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("Update: %v", err)
+    	{{ "}" }}
+    	if allowed, _ := e.Enforce("admin", "user:delete", "DELETE"); allowed {{ "{" }}
+    		t.Fatal("Enforce for old code after update = true, want false")
+    	{{ "}" }}
+    {{ "}" }}
+
     func TestUpdateClearsParentIDToRoot(t *testing.T) {{ "{" }}
     	ctx := context.Background()
     	svc, _, _ := newPermService(t)

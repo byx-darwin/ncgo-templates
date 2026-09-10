@@ -79,6 +79,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
+    	oldCode := p.Code
     	if in.Code != nil {{ "{" }}
     		p.Code = *in.Code
     	{{ "}" }}
@@ -135,6 +136,11 @@ body: |
     	updated, err := s.perms.Update(ctx, p)
     	if err != nil {{ "{" }}
     		return nil, err
+    	{{ "}" }}
+    	if in.Code != nil && *in.Code != oldCode {{ "{" }}
+    		if _, err := s.enforcer.RemoveFilteredPolicy(1, oldCode); err != nil {{ "{" }}
+    			klog.CtxErrorf(ctx, "permission.update: remove stale casbin policies for permission %s failed: %v", oldCode, err)
+    		{{ "}" }}
     	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "permission.update", in.ID, "{{ "{" }}{{ "}" }}")
     	return updated, nil

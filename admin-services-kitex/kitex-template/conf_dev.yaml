@@ -81,3 +81,41 @@ body: |-
     # 连接健康检查周期，单位秒
     # 运维建议：不要过小，否则会增加额外探测开销
     health_check_period_seconds: "30s"
+  # 限流配置（默认关闭；对齐 Default() 取值，避免加载本文件后字段被清零覆盖默认值）
+  rate_limit:
+    # 是否启用限流
+    enabled: false
+    # 限流规则来源：config | grpc | database
+    source:
+      type: "database"
+      cache_ttl_seconds: "60s"
+      fallback_on_error: true
+    grpc:
+      timeout_milliseconds: "200ms"
+      auth_header: "Authorization"
+      service_name: {{ToLower .ServiceInfo.ServiceName}}
+    database:
+      query_timeout_milliseconds: "200ms"
+    # 限流计数后端：memory | redis
+    backend: "memory"
+    key_prefix: "{{ToLower .ServiceInfo.ServiceName}}:rate_limit"
+    app_key_header: "x-app-key"
+    skip_paths: []
+    pre_auth:
+      enabled: true
+      default_rule:
+        enabled: true
+        key_by: ["ip"]
+        strategy: "fixed_window"
+        window_seconds: "60s"
+        max_requests: 100
+        client_ttl_seconds: "300s"
+      rules: []
+    post_auth:
+      enabled: false
+      default_rule:
+        enabled: true
+      rules: []
+    memory:
+      max_entries: 1000
+    redis: {}

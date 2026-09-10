@@ -30,21 +30,49 @@ body: |
       max_conn_lifetime_seconds: "1800s"
       max_conn_idle_time_seconds: "300s"
       health_check_period_seconds: "30s"
-    redis:
-      addrs:
-        - 127.0.0.1:6379
-      db: 0
-      pool_size: 10
-      min_idle_conns: 2
-      dial_timeout: "5s"
-      read_timeout: "3s"
-      write_timeout: "3s"
-      pool_timeout: "4s"
     rate_limit:
       enabled: false
-      backend: "memory"
       source:
         type: "database"
+        cache_ttl_seconds: "60s"
+        fallback_on_error: true
+      grpc:
+        timeout_milliseconds: "200ms"
+        auth_header: "Authorization"
+        service_name: {{ToLower .ServiceInfo.ServiceName}}
+      database:
+        query_timeout_milliseconds: "200ms"
+      backend: "memory"
+      key_prefix: "{{ToLower .ServiceInfo.ServiceName}}:rate_limit"
+      app_key_header: "x-app-key"
+      skip_paths: []
+      pre_auth:
+        enabled: true
+        default_rule:
+          enabled: true
+          key_by: ["ip"]
+          strategy: "fixed_window"
+          window_seconds: "60s"
+          max_requests: 100
+          client_ttl_seconds: "300s"
+        rules: []
+      post_auth:
+        enabled: false
+        default_rule:
+          enabled: true
+        rules: []
+      memory:
+        max_entries: 1000
+      redis:
+        addrs:
+          - 127.0.0.1:6379
+        db: 0
+        pool_size: 10
+        min_idle_conns: 2
+        dial_timeout: "5s"
+        read_timeout: "3s"
+        write_timeout: "3s"
+        pool_timeout: "4s"
     log:
       level: "info"
       format: "console"

@@ -24,7 +24,6 @@ body: |-
         "{{.Module}}/internal/base/conf"
     {{if .WithDatabase}}
         "{{.Module}}/internal/base/data"
-        "{{.Module}}/internal/repository"
     {{end}}
         "{{.Module}}/internal/handler/health"
         "{{.Module}}/internal/pkg/middleware"
@@ -116,9 +115,6 @@ body: |-
             do.ProvideValue[context.Context](injector, startupCtx)
             do.ProvideValue(injector, pool)
             do.ProvideValue(injector, dbData)
-
-            dbData = do.MustInvoke[*data.Data](injector)
-            repository.NewRateLimitRuleRepository()
         }
         {{end}}
 

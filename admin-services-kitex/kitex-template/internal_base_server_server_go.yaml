@@ -47,6 +47,8 @@ body: |
     	rulerepo "{{.Module}}/internal/repository/rulecenter"
     	userrepo "{{.Module}}/internal/repository/user"
     	ruleusecase "{{.Module}}/internal/usecase/rulecenter"
+    	// "admin" is the fixed proto package name from the shared IDL, not a
+    	// {{.ServiceName}}-templated value — do not replace it with a variable.
     	"{{.Module}}/kitex_gen/api/admin/v1/authservice"
     	"{{.Module}}/kitex_gen/api/admin/v1/rbacservice"
     	"{{.Module}}/kitex_gen/api/admin/v1/ruleservice"

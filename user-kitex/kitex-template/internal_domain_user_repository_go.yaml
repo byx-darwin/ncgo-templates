@@ -5,7 +5,10 @@ update_behavior:
 body: |-
     package user
 
-    import "context"
+    import (
+    	"context"
+    	"errors"
+    )
 
     // Repository persists User and Identity aggregates.
     type Repository interface {{ "{" }}
@@ -22,3 +25,6 @@ body: |-
     	ListIdentitiesByUserID(ctx context.Context, userID ID) ([]*Identity, error)
     	DeleteIdentity(ctx context.Context, userID ID, provider string) error
     {{ "}" }}
+
+    // ErrNotFound is returned when a lookup finds no matching row.
+    var ErrNotFound = errors.New("user: not found")

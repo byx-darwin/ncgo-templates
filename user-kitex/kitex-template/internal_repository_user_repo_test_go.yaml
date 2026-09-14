@@ -1,0 +1,95 @@
+# ncgo exported template — internal/repository/user/repo_test.go
+path: internal/repository/user/repo_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package userrepo
+
+    import (
+    	"context"
+    	"os"
+    	"os/exec"
+    	"testing"
+    	"time"
+
+    	"github.com/google/uuid"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    // TestUserRepoPostgresRoundTrip exercises the user repo against a real
+    // postgres. It is gated on `pg_isready` plus a reachable POSTGRES_DSN so the
+    // happy-path seed/test/e2e runs stay hermetic. When the gate is absent the
+    // test prints an explicit `skipped:` line instead of silently passing.
+    func TestUserRepoPostgresRoundTrip(t *testing.T) {{ "{" }}
+    	if _, err := exec.LookPath("pg_isready"); err != nil {{ "{" }}
+    		t.Skipf("skipped: pg_isready not installed (install postgres client to run)")
+    	{{ "}" }}
+    	dsn := os.Getenv("POSTGRES_DSN")
+    	if dsn == "" {{ "{" }}
+    		t.Skipf("skipped: POSTGRES_DSN not set")
+    	{{ "}" }}
+    	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    	defer cancel()
+    	pool, err := pgxpool.New(ctx, dsn)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("connect postgres: %v", err)
+    	{{ "}" }}
+    	defer pool.Close()
+    	if err := pool.Ping(ctx); err != nil {{ "{" }}
+    		t.Fatalf("ping postgres: %v", err)
+    	{{ "}" }}
+
+    	q := gen.New(pool)
+    	repo := New(q, pool)
+
+    	// Create → GetByID → CreateIdentity → GetIdentityByProvider →
+    	// DeleteIdentity round-trip.
+    	u, err := user.NewLocal("integration-user", "argon2hash-placeholder")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewLocal: %v", err)
+    	{{ "}" }}
+    	if err := repo.Create(ctx, u); err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+    	if u.ID == uuid.Nil {{ "{" }}
+    		t.Fatal("created user has nil id")
+    	{{ "}" }}
+
+    	got, err := repo.GetByID(ctx, u.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID: %v", err)
+    	{{ "}" }}
+    	if got.ID != u.ID {{ "{" }}
+    		t.Fatalf("GetByID.ID = %v, want %v", got.ID, u.ID)
+    	{{ "}" }}
+    	if got.Username == nil || *got.Username != "integration-user" {{ "{" }}
+    		t.Fatalf("GetByID.Username = %v, want %q", got.Username, "integration-user")
+    	{{ "}" }}
+
+    	identity, err := user.NewIdentity(u.ID, "github", "gh-12345", "{{ "{" }}}")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewIdentity: %v", err)
+    	{{ "}" }}
+    	if err := repo.CreateIdentity(ctx, identity); err != nil {{ "{" }}
+    		t.Fatalf("CreateIdentity: %v", err)
+    	{{ "}" }}
+
+    	gotIdentity, err := repo.GetIdentityByProvider(ctx, "github", "gh-12345")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetIdentityByProvider: %v", err)
+    	{{ "}" }}
+    	if gotIdentity.UserID != u.ID {{ "{" }}
+    		t.Fatalf("GetIdentityByProvider.UserID = %v, want %v", gotIdentity.UserID, u.ID)
+    	{{ "}" }}
+
+    	if err := repo.DeleteIdentity(ctx, u.ID, "github"); err != nil {{ "{" }}
+    		t.Fatalf("DeleteIdentity: %v", err)
+    	{{ "}" }}
+    	if _, err := repo.GetIdentityByProvider(ctx, "github", "gh-12345"); err != user.ErrNotFound {{ "{" }}
+    		t.Fatalf("GetIdentityByProvider after DeleteIdentity error = %v, want user.ErrNotFound", err)
+    	{{ "}" }}
+    {{ "}" }}

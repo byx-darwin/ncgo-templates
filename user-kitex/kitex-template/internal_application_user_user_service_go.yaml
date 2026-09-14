@@ -61,10 +61,10 @@ body: |-
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
-    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: account banned")
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.PasswordHash == nil {{ "{" }}
-    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: account has no local password")
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	ok, err := auth.VerifyPassword(in.Password, *u.PasswordHash)
     	if err != nil || !ok {{ "{" }}
@@ -145,7 +145,7 @@ body: |-
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
-    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: account banned")
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	return s.issueToken(u)
     {{ "}" }}

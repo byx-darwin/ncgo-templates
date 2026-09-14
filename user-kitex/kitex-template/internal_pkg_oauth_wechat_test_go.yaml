@@ -1,0 +1,53 @@
+# ncgo exported template — internal/pkg/oauth/wechat_test.go
+path: internal/pkg/oauth/wechat_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"net/http"
+    	"net/http/httptest"
+    	"testing"
+    )
+
+    func TestWeChatProvider_ExchangeCode_ReturnsOpenID(t *testing.T) {{ "{" }}
+    	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+    		json.NewEncoder(w).Encode(map[string]any{{ "{" }}"access_token": "wx-tok", "openid": "wx-openid-1", "expires_in": 7200{{ "}" }})
+    	{{ "}" }}))
+    	defer srv.Close()
+
+    	p := NewWeChatProvider(WeChatConfig{{ "{" }}AppID: "appid", AppSecret: "secret", RedirectURL: "https://app.example.com/cb", TokenURL: srv.URL{{ "}" }})
+    	tok, err := p.ExchangeCode(context.Background(), "code-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("exchange: %v", err)
+    	{{ "}" }}
+    	if tok.AccessToken != "wx-tok" {{ "{" }}
+    		t.Fatalf("unexpected access token: %s", tok.AccessToken)
+    	{{ "}" }}
+    	if p.lastOpenID != "wx-openid-1" {{ "{" }}
+    		t.Fatalf("expected openid captured for subsequent userinfo call, got %q", p.lastOpenID)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestWeChatProvider_FetchUserInfo_UsesOpenID(t *testing.T) {{ "{" }}
+    	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+    		if r.URL.Query().Get("openid") != "wx-openid-1" {{ "{" }}
+    			t.Errorf("expected openid query param, got %q", r.URL.RawQuery)
+    		{{ "}" }}
+    		json.NewEncoder(w).Encode(map[string]any{{ "{" }}"openid": "wx-openid-1", "nickname": "小明", "headimgurl": "https://wx/a.png"{{ "}" }})
+    	{{ "}" }}))
+    	defer srv.Close()
+
+    	p := NewWeChatProvider(WeChatConfig{{ "{" }}AppID: "appid", AppSecret: "secret", RedirectURL: "https://app.example.com/cb", UserInfoURL: srv.URL{{ "}" }})
+    	p.lastOpenID = "wx-openid-1"
+    	info, err := p.FetchUserInfo(context.Background(), Token{{ "{" }}AccessToken: "wx-tok"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("fetch user info: %v", err)
+    	{{ "}" }}
+    	if info.ProviderUserID != "wx-openid-1" {{ "{" }}
+    		t.Fatalf("unexpected provider user id: %s", info.ProviderUserID)
+    	{{ "}" }}
+    {{ "}" }}

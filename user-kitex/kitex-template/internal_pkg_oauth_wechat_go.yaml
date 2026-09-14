@@ -1,0 +1,156 @@
+# ncgo exported template — internal/pkg/oauth/wechat.go
+path: internal/pkg/oauth/wechat.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"fmt"
+    	"io"
+    	"net/http"
+    	"net/url"
+    	"time"
+    )
+
+    // WeChatConfig configures a WeChat Open Platform "网站应用" OAuth flow.
+    // WeChat's flow is NOT OIDC-compliant: it uses appid/secret param names,
+    // returns openid alongside the access token, and requires openid as an
+    // explicit query param on the separate userinfo call.
+    type WeChatConfig struct {{ "{" }}
+    	AppID       string
+    	AppSecret   string
+    	RedirectURL string
+    	AuthURLBase string
+    	TokenURL    string
+    	UserInfoURL string
+    {{ "}" }}
+
+    const (
+    	wechatDefaultAuthURL     = "https://open.weixin.qq.com/connect/qrconnect"
+    	wechatDefaultTokenURL    = "https://api.weixin.qq.com/sns/oauth2/access_token"
+    	wechatDefaultUserInfoURL = "https://api.weixin.qq.com/sns/userinfo"
+    )
+
+    // WeChatProvider implements Provider for WeChat Open Platform login.
+    type WeChatProvider struct {{ "{" }}
+    	cfg        WeChatConfig
+    	httpClient *http.Client
+    	// lastOpenID is captured from ExchangeCode's response and required by
+    	// FetchUserInfo, mirroring WeChat's two-step, openid-keyed flow.
+    	lastOpenID string
+    {{ "}" }}
+
+    // NewWeChatProvider builds a Provider from cfg, defaulting empty
+    // endpoint fields to WeChat's production URLs.
+    func NewWeChatProvider(cfg WeChatConfig) *WeChatProvider {{ "{" }}
+    	if cfg.AuthURLBase == "" {{ "{" }}
+    		cfg.AuthURLBase = wechatDefaultAuthURL
+    	{{ "}" }}
+    	if cfg.TokenURL == "" {{ "{" }}
+    		cfg.TokenURL = wechatDefaultTokenURL
+    	{{ "}" }}
+    	if cfg.UserInfoURL == "" {{ "{" }}
+    		cfg.UserInfoURL = wechatDefaultUserInfoURL
+    	{{ "}" }}
+    	return &WeChatProvider{{ "{" }}cfg: cfg, httpClient: http.DefaultClient{{ "}" }}
+    {{ "}" }}
+
+    func (p *WeChatProvider) Name() string {{ "{" }} return "wechat" {{ "}" }}
+
+    func (p *WeChatProvider) AuthURL(state string) string {{ "{" }}
+    	q := url.Values{{ "{" }}
+    		"appid":         {{ "{" }}p.cfg.AppID{{ "}" }},
+    		"redirect_uri":  {{ "{" }}p.cfg.RedirectURL{{ "}" }},
+    		"response_type": {{ "{" }}"code"{{ "}" }},
+    		"scope":         {{ "{" }}"snsapi_login"{{ "}" }},
+    		"state":         {{ "{" }}state{{ "}" }},
+    	{{ "}" }}
+    	return p.cfg.AuthURLBase + "?" + q.Encode() + "#wechat_redirect"
+    {{ "}" }}
+
+    func (p *WeChatProvider) ExchangeCode(ctx context.Context, code string) (Token, error) {{ "{" }}
+    	q := url.Values{{ "{" }}
+    		"appid":      {{ "{" }}p.cfg.AppID{{ "}" }},
+    		"secret":     {{ "{" }}p.cfg.AppSecret{{ "}" }},
+    		"code":       {{ "{" }}code{{ "}" }},
+    		"grant_type": {{ "{" }}"authorization_code"{{ "}" }},
+    	{{ "}" }}
+    	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.TokenURL+"?"+q.Encode(), nil)
+    	if err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	resp, err := p.httpClient.Do(req)
+    	if err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	defer resp.Body.Close()
+    	if resp.StatusCode != http.StatusOK {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: wechat token exchange failed: status %d", resp.StatusCode)
+    	{{ "}" }}
+
+    	var body struct {{ "{" }}
+    		AccessToken string `json:"access_token"`
+    		OpenID      string `json:"openid"`
+    		ExpiresIn   int64  `json:"expires_in"`
+    		ErrCode     int    `json:"errcode"`
+    		ErrMsg      string `json:"errmsg"`
+    	{{ "}" }}
+    	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	if body.ErrCode != 0 {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: wechat error %d: %s", body.ErrCode, body.ErrMsg)
+    	{{ "}" }}
+
+    	p.lastOpenID = body.OpenID
+    	tok := Token{{ "{" }}AccessToken: body.AccessToken{{ "}" }}
+    	if body.ExpiresIn > 0 {{ "{" }}
+    		tok.Expiry = time.Now().Add(time.Duration(body.ExpiresIn) * time.Second)
+    	{{ "}" }}
+    	return tok, nil
+    {{ "}" }}
+
+    func (p *WeChatProvider) FetchUserInfo(ctx context.Context, token Token) (ProviderUserInfo, error) {{ "{" }}
+    	q := url.Values{{ "{" }}
+    		"access_token": {{ "{" }}token.AccessToken{{ "}" }},
+    		"openid":       {{ "{" }}p.lastOpenID{{ "}" }},
+    	{{ "}" }}
+    	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.UserInfoURL+"?"+q.Encode(), nil)
+    	if err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	resp, err := p.httpClient.Do(req)
+    	if err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	defer resp.Body.Close()
+    	if resp.StatusCode != http.StatusOK {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: wechat fetch user info failed: status %d", resp.StatusCode)
+    	{{ "}" }}
+
+    	raw, err := io.ReadAll(resp.Body)
+    	if err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	var body struct {{ "{" }}
+    		OpenID     string `json:"openid"`
+    		Nickname   string `json:"nickname"`
+    		HeadImgURL string `json:"headimgurl"`
+    	{{ "}" }}
+    	if err := json.Unmarshal(raw, &body); err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	return ProviderUserInfo{{ "{" }}
+    		ProviderUserID: body.OpenID,
+    		Nickname:       body.Nickname,
+    		AvatarURL:      body.HeadImgURL,
+    		RawJSON:        string(raw),
+    	{{ "}" }}, nil
+    {{ "}" }}

@@ -1,0 +1,35 @@
+# ncgo exported template — internal/pkg/oauth/github_test.go
+path: internal/pkg/oauth/github_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"net/http"
+    	"net/http/httptest"
+    	"testing"
+    )
+
+    func TestGitHubProvider_FetchUserInfo_UsesLoginAsID(t *testing.T) {{ "{" }}
+    	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+    		json.NewEncoder(w).Encode(map[string]any{{ "{" }}
+    			"id": float64(9001), "login": "octocat", "email": "octo@example.com", "avatar_url": "https://gh/a.png",
+    		{{ "}" }})
+    	{{ "}" }}))
+    	defer srv.Close()
+
+    	p := NewGitHubProvider(GitHubConfig{{ "{" }}ClientID: "cid", ClientSecret: "secret", RedirectURL: "https://app.example.com/cb", UserInfoURL: srv.URL{{ "}" }})
+    	info, err := p.FetchUserInfo(context.Background(), Token{{ "{" }}AccessToken: "tok"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("fetch user info: %v", err)
+    	{{ "}" }}
+    	if info.ProviderUserID != "9001" {{ "{" }}
+    		t.Fatalf("expected numeric github id as string, got %q", info.ProviderUserID)
+    	{{ "}" }}
+    	if info.Nickname != "octocat" {{ "{" }}
+    		t.Fatalf("unexpected nickname: %s", info.Nickname)
+    	{{ "}" }}
+    {{ "}" }}

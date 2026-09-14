@@ -76,7 +76,7 @@ oauth:
     enabled: false
     client_id: ""      # Alipay app_id
     client_secret: ""  # Alipay RSA2 private key (signing is a documented seam — see below)
-    redirect_url: ""
+    redirect_url: ""   # forwarded as redirect_uri on the authorize URL; effective (not merely documentary)
   github:
     enabled: false
     client_id: ""
@@ -113,10 +113,24 @@ third-party login you want to expose; leave the rest `enabled: false`.
 
 ## Seams (documented TODO)
 
+- **`uid` trust boundary (BindProvider/UnbindProvider)**: these RPCs trust
+  the caller-supplied `uid` field as-is and perform no token verification of
+  their own. The caller (a future BFF/gateway) MUST extract `uid` from a
+  verified JWT and never forward a client-supplied `uid` directly — doing so
+  is an authorization bypass, since any caller could then bind/unbind
+  providers for an arbitrary other user's account. See the `uid` field
+  comments on `BindProviderReq`/`UnbindProviderReq` in `idl/user.proto`.
+- **`OAuthCallback` is not transactional**: the create-user + create-identity
+  sequence for a brand-new OAuth user is two separate writes, not wrapped in
+  a DB transaction. A failure between them can leave an orphaned user row
+  with no bound identity (contained, cleanup-able — not a security issue).
+  Tracked as a follow-up, not fixed in this revision.
 - **Alipay RSA2 signing**: production Alipay calls must be RSA2-signed per
   Alipay's Open Platform spec; `AlipayConfig.PrivateKey` is wired through
   but signing itself is out of scope for this template revision (interface
-  contract only — see `internal/pkg/oauth/alipay.go`).
+  contract only — see `internal/pkg/oauth/alipay.go`). `AlipayConfig.RedirectURL`,
+  by contrast, IS effective — it's forwarded as-is into `AuthURL`'s
+  `redirect_uri` param.
 - **Force-logout enforcement**: `ForceLogout` writes a revocation marker to
   Redis; wiring the JWT-verifying middleware in `admin-bff-hertz`/
   `base-hertz` to consult the same key is a follow-up, not part of this

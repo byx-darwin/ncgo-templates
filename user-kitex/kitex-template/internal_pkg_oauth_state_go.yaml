@@ -1,0 +1,51 @@
+# ncgo exported template — internal/pkg/oauth/state.go
+path: internal/pkg/oauth/state.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"errors"
+    	"time"
+
+    	"github.com/redis/go-redis/v9"
+    )
+
+    // StateStore issues and single-use-consumes OAuth CSRF state tokens.
+    type StateStore interface {{ "{" }}
+    	Put(ctx context.Context, state string, ttl time.Duration) error
+    	Consume(ctx context.Context, state string) (bool, error)
+    {{ "}" }}
+
+    const stateKeyPrefix = "oauth:state:"
+
+    // RedisStateStore stores OAuth state tokens in Redis with a TTL and
+    // atomically deletes them on first consumption (GETDEL).
+    type RedisStateStore struct {{ "{" }}
+    	client *redis.Client
+    {{ "}" }}
+
+    // NewRedisStateStore wraps an existing Redis client.
+    func NewRedisStateStore(client *redis.Client) *RedisStateStore {{ "{" }}
+    	return &RedisStateStore{{ "{" }}client: client{{ "}" }}
+    {{ "}" }}
+
+    // Put records state as valid for ttl.
+    func (s *RedisStateStore) Put(ctx context.Context, state string, ttl time.Duration) error {{ "{" }}
+    	return s.client.Set(ctx, stateKeyPrefix+state, "1", ttl).Err()
+    {{ "}" }}
+
+    // Consume reports whether state was valid and, if so, deletes it so it
+    // cannot be replayed.
+    func (s *RedisStateStore) Consume(ctx context.Context, state string) (bool, error) {{ "{" }}
+    	_, err := s.client.GetDel(ctx, stateKeyPrefix+state).Result()
+    	if errors.Is(err, redis.Nil) {{ "{" }}
+    		return false, nil
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return false, err
+    	{{ "}" }}
+    	return true, nil
+    {{ "}" }}

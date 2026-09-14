@@ -1,0 +1,61 @@
+# ncgo exported template — internal/pkg/oauth/state_test.go
+path: internal/pkg/oauth/state_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/alicebob/miniredis/v2"
+    	"github.com/redis/go-redis/v9"
+    )
+
+    func newTestRedis(t *testing.T) *redis.Client {{ "{" }}
+    	t.Helper()
+    	mr, err := miniredis.Run()
+    	if err != nil {{ "{" }}
+    		t.Fatalf("start miniredis: %v", err)
+    	{{ "}" }}
+    	t.Cleanup(mr.Close)
+    	return redis.NewClient(&redis.Options{{ "{" }}Addr: mr.Addr(){{ "}" }})
+    {{ "}" }}
+
+    func TestRedisStateStore_PutConsume(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := NewRedisStateStore(newTestRedis(t))
+
+    	if err := store.Put(ctx, "state-1", time.Minute); err != nil {{ "{" }}
+    		t.Fatalf("put: %v", err)
+    	{{ "}" }}
+
+    	ok, err := store.Consume(ctx, "state-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		t.Fatal("expected state to be found and consumed")
+    	{{ "}" }}
+
+    	ok, err = store.Consume(ctx, "state-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume again: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("expected state to be gone after first consume (single use)")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRedisStateStore_UnknownState(t *testing.T) {{ "{" }}
+    	store := NewRedisStateStore(newTestRedis(t))
+    	ok, err := store.Consume(context.Background(), "never-issued")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("expected unknown state to report not-found")
+    	{{ "}" }}
+    {{ "}" }}

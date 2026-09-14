@@ -1,0 +1,10 @@
+# ncgo exported template — migration/init.sh
+path: migration/init.sh
+update_behavior:
+    type: cover
+body: |-
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    DSN="${DATABASE_URL:?DATABASE_URL not set}"
+    psql "$DSN" -f internal/db/schema/000001_user.sql

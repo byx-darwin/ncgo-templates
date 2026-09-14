@@ -1,0 +1,40 @@
+# ncgo exported template — internal/domain/user/entity_test.go
+path: internal/domain/user/entity_test.go
+update_behavior:
+    type: cover
+body: |-
+    package user
+
+    import "testing"
+
+    func TestNewLocal_RequiresUsernameAndPassword(t *testing.T) {{ "{" }}
+    	if _, err := NewLocal("", "hash"); err == nil {{ "{" }}
+    		t.Fatal("expected error for empty username")
+    	{{ "}" }}
+    	if _, err := NewLocal("alice", ""); err == nil {{ "{" }}
+    		t.Fatal("expected error for empty password hash")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewLocal_SetsDefaults(t *testing.T) {{ "{" }}
+    	u, err := NewLocal("alice", "hash")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("unexpected error: %v", err)
+    	{{ "}" }}
+    	if u.Status != StatusEnabled {{ "{" }}
+    		t.Fatalf("expected StatusEnabled, got %d", u.Status)
+    	{{ "}" }}
+    	if u.ID == (ID{{ "{" }}{{ "}" }}) {{ "{" }}
+    		t.Fatal("expected non-zero UUID")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewFromProvider_SetsDefaults(t *testing.T) {{ "{" }}
+    	u := NewFromProvider()
+    	if u.Status != StatusEnabled {{ "{" }}
+    		t.Fatalf("expected StatusEnabled, got %d", u.Status)
+    	{{ "}" }}
+    	if u.Username != nil {{ "{" }}
+    		t.Fatal("expected nil username for pure third-party user")
+    	{{ "}" }}
+    {{ "}" }}

@@ -9,9 +9,9 @@ body: |-
     	"context"
     	"encoding/json"
     	"fmt"
+    	"io"
     	"net/http"
     	"net/url"
-    	"strconv"
     	"strings"
     	"time"
     )
@@ -111,7 +111,7 @@ body: |-
     		return ProviderUserInfo{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: %s fetch user info failed: status %d", p.cfg.Name, resp.StatusCode)
     	{{ "}" }}
 
-    	raw, err := decodeToRawJSON(resp.Body)
+    	raw, err := io.ReadAll(resp.Body)
     	if err != nil {{ "{" }}
     		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
@@ -134,22 +134,3 @@ body: |-
     		RawJSON:        string(raw),
     	{{ "}" }}, nil
     {{ "}" }}
-
-    // decodeToRawJSON reads body fully so callers can both unmarshal into a
-    // typed struct and retain the original bytes for storage.
-    func decodeToRawJSON(body interface {{ "{" }} Read([]byte) (int, error) {{ "}" }}) ([]byte, error) {{ "{" }}
-    	buf := make([]byte, 0, 4096)
-    	chunk := make([]byte, 4096)
-    	for {{ "{" }}
-    		n, err := body.Read(chunk)
-    		if n > 0 {{ "{" }}
-    			buf = append(buf, chunk[:n]...)
-    		{{ "}" }}
-    		if err != nil {{ "{" }}
-    			break
-    		{{ "}" }}
-    	{{ "}" }}
-    	return buf, nil
-    {{ "}" }}
-
-    var _ = strconv.Itoa // keep strconv import if unused paths trimmed later

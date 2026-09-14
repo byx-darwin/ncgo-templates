@@ -38,6 +38,9 @@ body: |-
     	if limit <= 0 {{ "{" }}
     		limit = 20
     	{{ "}" }}
+    	if limit > 100 {{ "{" }}
+    		limit = 100
+    	{{ "}" }}
     	users, err := s.repo.List(ctx, limit, in.Offset)
     	if err != nil {{ "{" }}
     		return ListUsersOutput{{ "{" }}{{ "}" }}, err

@@ -15,7 +15,8 @@ body: |-
     )
 
     type fakeRepo struct {{ "{" }}
-    	users map[user.ID]*user.User
+    	users     map[user.ID]*user.User
+    	lastLimit int32
     {{ "}" }}
 
     func (r *fakeRepo) Create(ctx context.Context, u *user.User) error {{ "{" }} r.users[u.ID] = u; return nil {{ "}" }}
@@ -29,6 +30,7 @@ body: |-
     func (r *fakeRepo) UpdateStatus(ctx context.Context, id user.ID, status int) error {{ "{" }} r.users[id].Status = status; return nil {{ "}" }}
     func (r *fakeRepo) UpdatePassword(ctx context.Context, id user.ID, hash string) error {{ "{" }} return nil {{ "}" }}
     func (r *fakeRepo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}
+    	r.lastLimit = limit
     	out := make([]*user.User, 0, len(r.users))
     	for _, u := range r.users {{ "{" }}
     		out = append(out, u)
@@ -85,5 +87,25 @@ body: |-
     	{{ "}" }}
     	if len(ids) != 1 || ids[0].Provider != "github" {{ "{" }}
     		t.Fatalf("unexpected identities: %+v", ids)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestListUsers_ClampsLimit(t *testing.T) {{ "{" }}
+    	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
+    	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }})
+    	ctx := context.Background()
+
+    	if _, err := svc.ListUsers(ctx, ListUsersInput{{ "{" }}Limit: 10000{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("list users: %v", err)
+    	{{ "}" }}
+    	if repo.lastLimit != 100 {{ "{" }}
+    		t.Fatalf("expected limit clamped to 100, got %d", repo.lastLimit)
+    	{{ "}" }}
+
+    	if _, err := svc.ListUsers(ctx, ListUsersInput{{ "{" }}Limit: 0{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("list users: %v", err)
+    	{{ "}" }}
+    	if repo.lastLimit != 20 {{ "{" }}
+    		t.Fatalf("expected default limit 20, got %d", repo.lastLimit)
     	{{ "}" }}
     {{ "}" }}

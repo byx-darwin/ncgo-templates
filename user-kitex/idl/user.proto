@@ -29,6 +29,12 @@ message OAuthStartReq {
   // rejects the state if the purpose (or provider) doesn't match. Defaults
   // to "login" when empty.
   string purpose = 2;
+  // uid is the already-authenticated user starting a bind flow. Required
+  // when purpose == "bind" (OAuthStart rejects a bind request with an
+  // empty uid); ignored when purpose == "login". The caller (a BFF/gateway)
+  // MUST populate this only from a verified JWT, never from unauthenticated
+  // client input.
+  string uid = 3;
 }
 message OAuthStartResp {
   string redirect_url = 1;
@@ -45,12 +51,13 @@ message OAuthCallbackResp {
 }
 
 message BindProviderReq {
-  // uid MUST be extracted from the caller's verified JWT by the invoking
-  // BFF/gateway — this RPC trusts uid as-is and performs no token
-  // verification of its own. Forwarding a client-supplied uid directly is
-  // an authorization bypass: any caller could bind a third-party identity
-  // to an arbitrary other user's account.
-  string uid = 1;
+  reserved 1;
+  reserved "uid";
+  // provider/state/code identify the OAuth callback being completed. The
+  // user being bound is NOT taken from this message — it comes from the
+  // uid embedded in the OAuth state (see OAuthStartReq.uid), which was set
+  // when the bind flow was started by an already-authenticated caller.
+  // This RPC no longer trusts a client-supplied uid.
   string provider = 2;
   string state = 3;
   string code = 4;

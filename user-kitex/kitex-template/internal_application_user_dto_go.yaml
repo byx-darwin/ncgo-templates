@@ -31,7 +31,6 @@ body: |-
     {{ "}" }}
 
     type BindProviderInput struct {{ "{" }}
-    	Uid      string
     	Provider string
     	State    string
     	Code     string

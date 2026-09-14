@@ -48,7 +48,7 @@ body: |-
     	if purpose == "" {{ "{" }}
     		purpose = "login"
     	{{ "}" }}
-    	url, err := h.self.OAuthStart(ctx, req.Provider, purpose)
+    	url, err := h.self.OAuthStart(ctx, req.Provider, purpose, req.Uid)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -64,7 +64,7 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) BindProvider(ctx context.Context, req *userv1.BindProviderReq) (*userv1.BindProviderResp, error) {{ "{" }}
-    	err := h.self.BindProvider(ctx, usersvc.BindProviderInput{{ "{" }}Uid: req.Uid, Provider: req.Provider, State: req.State, Code: req.Code{{ "}" }})
+    	err := h.self.BindProvider(ctx, usersvc.BindProviderInput{{ "{" }}Provider: req.Provider, State: req.State, Code: req.Code{{ "}" }})
     	return &userv1.BindProviderResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
 

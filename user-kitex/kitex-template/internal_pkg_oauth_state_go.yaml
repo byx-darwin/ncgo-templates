@@ -16,29 +16,32 @@ body: |-
 
     // StateStore issues and single-use-consumes OAuth CSRF state tokens.
     //
-    // Put/Consume carry the provider name and a purpose tag ("login" or
-    // "bind") alongside the state token itself, and Consume returns them so
-    // the caller can verify the state was issued for the provider and flow
-    // it is now being presented to. Without this, a state token minted for
-    // (say) a github login could be replayed against a wechat callback, or a
-    // login-flow state could be replayed into the bind flow.
+    // Put/Consume carry the provider name, a purpose tag ("login" or
+    // "bind"), and — for bind flows — the uid of the already-authenticated
+    // user who started the flow. Consume returns all three so the caller
+    // can verify the state was issued for the provider/purpose it is now
+    // being presented to, and (for bind) which user it belongs to without
+    // trusting any client-supplied identity in the callback request.
     type StateStore interface {{ "{" }}
-    	// Put records state as valid for ttl, tagged with the provider it was
-    	// issued for and the purpose of the flow ("login" or "bind").
-    	Put(ctx context.Context, state, provider, purpose string, ttl time.Duration) error
-    	// Consume reports whether state was valid and, if so, deletes it so it
-    	// cannot be replayed, returning the provider and purpose it was
-    	// originally issued with.
-    	Consume(ctx context.Context, state string) (provider, purpose string, ok bool, err error)
+    	// Put records state as valid for ttl, tagged with the provider,
+    	// purpose ("login" or "bind"), and — for "bind" — the uid of the
+    	// user who started the flow (empty for "login").
+    	Put(ctx context.Context, state, provider, purpose, uid string, ttl time.Duration) error
+    	// Consume reports whether state was valid and, if so, deletes it so
+    	// it cannot be replayed, returning the provider, purpose, and uid it
+    	// was originally issued with.
+    	Consume(ctx context.Context, state string) (provider, purpose, uid string, ok bool, err error)
     {{ "}" }}
 
     const stateKeyPrefix = "oauth:state:"
 
     // statePayload is the JSON value stored in Redis for a single state
-    // token, carrying the provider + purpose it was issued for.
+    // token, carrying the provider + purpose + (for bind) uid it was
+    // issued for.
     type statePayload struct {{ "{" }}
     	Provider string `json:"provider"`
     	Purpose  string `json:"purpose"`
+    	Uid      string `json:"uid,omitempty"`
     {{ "}" }}
 
     // RedisStateStore stores OAuth state tokens in Redis with a TTL and
@@ -52,9 +55,10 @@ body: |-
     	return &RedisStateStore{{ "{" }}client: client{{ "}" }}
     {{ "}" }}
 
-    // Put records state as valid for ttl, tagged with provider and purpose.
-    func (s *RedisStateStore) Put(ctx context.Context, state, provider, purpose string, ttl time.Duration) error {{ "{" }}
-    	raw, err := json.Marshal(statePayload{{ "{" }}Provider: provider, Purpose: purpose{{ "}" }})
+    // Put records state as valid for ttl, tagged with provider, purpose,
+    // and (for bind flows) uid.
+    func (s *RedisStateStore) Put(ctx context.Context, state, provider, purpose, uid string, ttl time.Duration) error {{ "{" }}
+    	raw, err := json.Marshal(statePayload{{ "{" }}Provider: provider, Purpose: purpose, Uid: uid{{ "}" }})
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
@@ -62,18 +66,19 @@ body: |-
     {{ "}" }}
 
     // Consume reports whether state was valid and, if so, deletes it so it
-    // cannot be replayed, returning the provider + purpose it was issued for.
-    func (s *RedisStateStore) Consume(ctx context.Context, state string) (provider, purpose string, ok bool, err error) {{ "{" }}
+    // cannot be replayed, returning the provider + purpose + uid it was
+    // issued for.
+    func (s *RedisStateStore) Consume(ctx context.Context, state string) (provider, purpose, uid string, ok bool, err error) {{ "{" }}
     	raw, err := s.client.GetDel(ctx, stateKeyPrefix+state).Result()
     	if errors.Is(err, redis.Nil) {{ "{" }}
-    		return "", "", false, nil
+    		return "", "", "", false, nil
     	{{ "}" }}
     	if err != nil {{ "{" }}
-    		return "", "", false, err
+    		return "", "", "", false, err
     	{{ "}" }}
     	var payload statePayload
     	if err := json.Unmarshal([]byte(raw), &payload); err != nil {{ "{" }}
-    		return "", "", false, err
+    		return "", "", "", false, err
     	{{ "}" }}
-    	return payload.Provider, payload.Purpose, true, nil
+    	return payload.Provider, payload.Purpose, payload.Uid, true, nil
     {{ "}" }}

@@ -1,0 +1,28 @@
+# ncgo exported template — internal/pkg/oauth/google.go
+path: internal/pkg/oauth/google.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    const (
+    	googleAuthEndpoint     = "https://accounts.google.com/o/oauth2/v2/auth"
+    	googleTokenEndpoint    = "https://oauth2.googleapis.com/token"
+    	googleUserInfoEndpoint = "https://openidconnect.googleapis.com/v1/userinfo"
+    )
+
+    // NewGoogleProvider builds a Provider for Google Sign-In. Google's IdP is
+    // fully OIDC-compliant, so this wraps OIDCProvider with fixed endpoints
+    // rather than duplicating the exchange/fetch logic.
+    func NewGoogleProvider(clientID, clientSecret, redirectURL string) *OIDCProvider {{ "{" }}
+    	return NewOIDCProvider(OIDCConfig{{ "{" }}
+    		Name:             "google",
+    		ClientID:         clientID,
+    		ClientSecret:     clientSecret,
+    		RedirectURL:      redirectURL,
+    		AuthEndpoint:     googleAuthEndpoint,
+    		TokenEndpoint:    googleTokenEndpoint,
+    		UserInfoEndpoint: googleUserInfoEndpoint,
+    		Scopes:           []string{{ "{" }}"openid", "email", "profile"{{ "}" }},
+    	{{ "}" }})
+    {{ "}" }}

@@ -23,6 +23,12 @@ message LoginResp {
 
 message OAuthStartReq {
   string provider = 1;
+  // purpose distinguishes a login-flow start ("login") from a bind-flow
+  // start ("bind"); the resulting state token is tagged with it and the
+  // matching callback (OAuthCallback for "login", BindProvider for "bind")
+  // rejects the state if the purpose (or provider) doesn't match. Defaults
+  // to "login" when empty.
+  string purpose = 2;
 }
 message OAuthStartResp {
   string redirect_url = 1;
@@ -39,6 +45,11 @@ message OAuthCallbackResp {
 }
 
 message BindProviderReq {
+  // uid MUST be extracted from the caller's verified JWT by the invoking
+  // BFF/gateway — this RPC trusts uid as-is and performs no token
+  // verification of its own. Forwarding a client-supplied uid directly is
+  // an authorization bypass: any caller could bind a third-party identity
+  // to an arbitrary other user's account.
   string uid = 1;
   string provider = 2;
   string state = 3;
@@ -47,6 +58,9 @@ message BindProviderReq {
 message BindProviderResp {}
 
 message UnbindProviderReq {
+  // uid MUST be extracted from the caller's verified JWT by the invoking
+  // BFF/gateway — see BindProviderReq.uid's comment; the same trust
+  // boundary and authorization-bypass risk applies here.
   string uid = 1;
   string provider = 2;
 }

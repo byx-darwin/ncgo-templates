@@ -30,7 +30,10 @@ body: |-
     {{ "}" }}
 
     func TestNewFromProvider_SetsDefaults(t *testing.T) {{ "{" }}
-    	u := NewFromProvider()
+    	u, err := NewFromProvider()
+    	if err != nil {{ "{" }}
+    		t.Fatalf("unexpected error: %v", err)
+    	{{ "}" }}
     	if u.Status != StatusEnabled {{ "{" }}
     		t.Fatalf("expected StatusEnabled, got %d", u.Status)
     	{{ "}" }}

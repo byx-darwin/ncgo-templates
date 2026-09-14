@@ -44,7 +44,11 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) OAuthStart(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error) {{ "{" }}
-    	url, err := h.self.OAuthStart(ctx, req.Provider)
+    	purpose := req.Purpose
+    	if purpose == "" {{ "{" }}
+    		purpose = "login"
+    	{{ "}" }}
+    	url, err := h.self.OAuthStart(ctx, req.Provider, purpose)
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}

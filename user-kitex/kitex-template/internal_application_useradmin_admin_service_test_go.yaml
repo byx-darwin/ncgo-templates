@@ -1,0 +1,89 @@
+# ncgo exported template — internal/application/useradmin/admin_service_test.go
+path: internal/application/useradmin/admin_service_test.go
+update_behavior:
+    type: cover
+body: |-
+    package useradminsvc
+
+    import (
+    	"context"
+    	"testing"
+
+    	"github.com/google/uuid"
+
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    type fakeRepo struct {{ "{" }}
+    	users map[user.ID]*user.User
+    {{ "}" }}
+
+    func (r *fakeRepo) Create(ctx context.Context, u *user.User) error {{ "{" }} r.users[u.ID] = u; return nil {{ "}" }}
+    func (r *fakeRepo) GetByID(ctx context.Context, id user.ID) (*user.User, error) {{ "{" }}
+    	if u, ok := r.users[id]; ok {{ "{" }}
+    		return u, nil
+    	{{ "}" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }} return nil, user.ErrNotFound {{ "}" }}
+    func (r *fakeRepo) UpdateStatus(ctx context.Context, id user.ID, status int) error {{ "{" }} r.users[id].Status = status; return nil {{ "}" }}
+    func (r *fakeRepo) UpdatePassword(ctx context.Context, id user.ID, hash string) error {{ "{" }} return nil {{ "}" }}
+    func (r *fakeRepo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}
+    	out := make([]*user.User, 0, len(r.users))
+    	for _, u := range r.users {{ "{" }}
+    		out = append(out, u)
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+    func (r *fakeRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(r.users)), nil {{ "}" }}
+    func (r *fakeRepo) CreateIdentity(ctx context.Context, i *user.Identity) error {{ "{" }} return nil {{ "}" }}
+    func (r *fakeRepo) GetIdentityByProvider(ctx context.Context, provider, providerUserID string) (*user.Identity, error) {{ "{" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) ListIdentitiesByUserID(ctx context.Context, userID user.ID) ([]*user.Identity, error) {{ "{" }}
+    	return []*user.Identity{{ "{" }}{{ "{" }}Provider: "github", ProviderUserID: "42"{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+    func (r *fakeRepo) DeleteIdentity(ctx context.Context, userID user.ID, provider string) error {{ "{" }} return nil {{ "}" }}
+
+    type fakeBlacklist struct {{ "{" }} revoked []string {{ "}" }}
+
+    func (b *fakeBlacklist) Revoke(ctx context.Context, uid string) error {{ "{" }}
+    	b.revoked = append(b.revoked, uid)
+    	return nil
+    {{ "}" }}
+
+    func TestBanUser_And_ForceLogout(t *testing.T) {{ "{" }}
+    	id, _ := uuid.NewV7()
+    	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}id: {{ "{" }}ID: id, Status: user.StatusEnabled{{ "}" }}{{ "}" }}{{ "}" }}
+    	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
+    	svc := New(repo, bl)
+    	ctx := context.Background()
+
+    	if err := svc.BanUser(ctx, id.String()); err != nil {{ "{" }}
+    		t.Fatalf("ban: %v", err)
+    	{{ "}" }}
+    	if repo.users[id].Status != user.StatusBanned {{ "{" }}
+    		t.Fatal("expected status banned")
+    	{{ "}" }}
+
+    	if err := svc.ForceLogout(ctx, id.String()); err != nil {{ "{" }}
+    		t.Fatalf("force logout: %v", err)
+    	{{ "}" }}
+    	if len(bl.revoked) != 1 || bl.revoked[0] != id.String() {{ "{" }}
+    		t.Fatalf("expected uid revoked, got %v", bl.revoked)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestListUserIdentities(t *testing.T) {{ "{" }}
+    	id, _ := uuid.NewV7()
+    	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}id: {{ "{" }}ID: id{{ "}" }}{{ "}" }}{{ "}" }}
+    	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }})
+
+    	ids, err := svc.ListUserIdentities(context.Background(), id.String())
+    	if err != nil {{ "{" }}
+    		t.Fatalf("list identities: %v", err)
+    	{{ "}" }}
+    	if len(ids) != 1 || ids[0].Provider != "github" {{ "{" }}
+    		t.Fatalf("unexpected identities: %+v", ids)
+    	{{ "}" }}
+    {{ "}" }}

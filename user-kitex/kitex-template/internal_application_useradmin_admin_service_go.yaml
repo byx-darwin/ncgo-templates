@@ -1,0 +1,90 @@
+# ncgo exported template — internal/application/useradmin/admin_service.go
+path: internal/application/useradmin/admin_service.go
+update_behavior:
+    type: cover
+body: |-
+    package useradminsvc
+
+    import (
+    	"context"
+
+    	"github.com/google/uuid"
+
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    // Service implements admin-facing end-user management operations,
+    // called from admin-bff-hertz via the "user:manage" RBAC-gated endpoints.
+    type Service struct {{ "{" }}
+    	repo      user.Repository
+    	blacklist Blacklist
+    {{ "}" }}
+
+    // New constructs a Service.
+    func New(repo user.Repository, blacklist Blacklist) *Service {{ "{" }}
+    	return &Service{{ "{" }}repo: repo, blacklist: blacklist{{ "}" }}
+    {{ "}" }}
+
+    func toUserDTO(u *user.User) UserDTO {{ "{" }}
+    	username := ""
+    	if u.Username != nil {{ "{" }}
+    		username = *u.Username
+    	{{ "}" }}
+    	return UserDTO{{ "{" }}Uid: u.ID.String(), Username: username, Nickname: u.Nickname, Status: u.Status{{ "}" }}
+    {{ "}" }}
+
+    func (s *Service) ListUsers(ctx context.Context, in ListUsersInput) (ListUsersOutput, error) {{ "{" }}
+    	limit := in.Limit
+    	if limit <= 0 {{ "{" }}
+    		limit = 20
+    	{{ "}" }}
+    	users, err := s.repo.List(ctx, limit, in.Offset)
+    	if err != nil {{ "{" }}
+    		return ListUsersOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	total, err := s.repo.Count(ctx)
+    	if err != nil {{ "{" }}
+    		return ListUsersOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	dtos := make([]UserDTO, 0, len(users))
+    	for _, u := range users {{ "{" }}
+    		dtos = append(dtos, toUserDTO(u))
+    	{{ "}" }}
+    	return ListUsersOutput{{ "{" }}Users: dtos, Total: total{{ "}" }}, nil
+    {{ "}" }}
+
+    func (s *Service) BanUser(ctx context.Context, uid string) error {{ "{" }}
+    	id, err := uuid.Parse(uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	return s.repo.UpdateStatus(ctx, id, user.StatusBanned)
+    {{ "}" }}
+
+    func (s *Service) UnbanUser(ctx context.Context, uid string) error {{ "{" }}
+    	id, err := uuid.Parse(uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	return s.repo.UpdateStatus(ctx, id, user.StatusEnabled)
+    {{ "}" }}
+
+    func (s *Service) ForceLogout(ctx context.Context, uid string) error {{ "{" }}
+    	return s.blacklist.Revoke(ctx, uid)
+    {{ "}" }}
+
+    func (s *Service) ListUserIdentities(ctx context.Context, uid string) ([]IdentityDTO, error) {{ "{" }}
+    	id, err := uuid.Parse(uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	identities, err := s.repo.ListIdentitiesByUserID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]IdentityDTO, 0, len(identities))
+    	for _, i := range identities {{ "{" }}
+    		out = append(out, IdentityDTO{{ "{" }}Provider: i.Provider, ProviderUserID: i.ProviderUserID{{ "}" }})
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}

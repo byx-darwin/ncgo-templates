@@ -63,6 +63,34 @@ body: |-
     	{{ "}" }}
     {{ "}" }}
 
+    // TestRedisStateStore_ProviderAndPurposeAreBound is a regression test for
+    // state-token replay across providers/flows: a state issued for provider
+    // "github" purpose "login" must not silently validate when the caller
+    // expects a different provider or purpose — Consume must return the
+    // original provider/purpose so usersvc can reject the mismatch.
+    func TestRedisStateStore_ProviderAndPurposeAreBound(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := NewRedisStateStore(newTestRedis(t))
+
+    	if err := store.Put(ctx, "state-2", "github", "login", "", time.Minute); err != nil {{ "{" }}
+    		t.Fatalf("put: %v", err)
+    	{{ "}" }}
+
+    	provider, purpose, _, ok, err := store.Consume(ctx, "state-2")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		t.Fatal("expected state to be found")
+    	{{ "}" }}
+    	if provider == "wechat" {{ "{" }}
+    		t.Fatal("state issued for github must not report as wechat")
+    	{{ "}" }}
+    	if purpose == "bind" {{ "{" }}
+    		t.Fatal("state issued for login must not report as bind")
+    	{{ "}" }}
+    {{ "}" }}
+
     func TestRedisStateStore_BindCarriesUid(t *testing.T) {{ "{" }}
     	ctx := context.Background()
     	store := NewRedisStateStore(newTestRedis(t))

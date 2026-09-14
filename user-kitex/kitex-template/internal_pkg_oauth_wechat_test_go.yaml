@@ -8,8 +8,10 @@ body: |-
     import (
     	"context"
     	"encoding/json"
+    	"fmt"
     	"net/http"
     	"net/http/httptest"
+    	"sync"
     	"testing"
     )
 
@@ -27,8 +29,8 @@ body: |-
     	if tok.AccessToken != "wx-tok" {{ "{" }}
     		t.Fatalf("unexpected access token: %s", tok.AccessToken)
     	{{ "}" }}
-    	if p.lastOpenID != "wx-openid-1" {{ "{" }}
-    		t.Fatalf("expected openid captured for subsequent userinfo call, got %q", p.lastOpenID)
+    	if tok.ProviderUserID != "wx-openid-1" {{ "{" }}
+    		t.Fatalf("expected openid threaded through token for subsequent userinfo call, got %q", tok.ProviderUserID)
     	{{ "}" }}
     {{ "}" }}
 
@@ -42,12 +44,84 @@ body: |-
     	defer srv.Close()
 
     	p := NewWeChatProvider(WeChatConfig{{ "{" }}AppID: "appid", AppSecret: "secret", RedirectURL: "https://app.example.com/cb", UserInfoURL: srv.URL{{ "}" }})
-    	p.lastOpenID = "wx-openid-1"
-    	info, err := p.FetchUserInfo(context.Background(), Token{{ "{" }}AccessToken: "wx-tok"{{ "}" }})
+    	info, err := p.FetchUserInfo(context.Background(), Token{{ "{" }}AccessToken: "wx-tok", ProviderUserID: "wx-openid-1"{{ "}" }})
     	if err != nil {{ "{" }}
     		t.Fatalf("fetch user info: %v", err)
     	{{ "}" }}
     	if info.ProviderUserID != "wx-openid-1" {{ "{" }}
     		t.Fatalf("unexpected provider user id: %s", info.ProviderUserID)
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestWeChatProvider_ConcurrentLogins_DoNotCrossContaminate is a regression
+    // test for a cross-request account-takeover-class bug: a single
+    // WeChatProvider instance is shared across all requests in the running
+    // service (see server.go's buildOAuthRegistry). If ExchangeCode ever
+    // stashes a per-request value (like the openid) on the provider's
+    // receiver instead of threading it through the returned Token, two
+    // concurrent WeChat logins can cross-contaminate — one goroutine's
+    // FetchUserInfo call can observe another goroutine's openid. This test
+    // drives many concurrent ExchangeCode+FetchUserInfo pairs, each for a
+    // distinct simulated user, against ONE shared provider instance, and
+    // asserts every goroutine only ever observes its own openid. Run with
+    // -race; it must pass both with and without the race detector.
+    func TestWeChatProvider_ConcurrentLogins_DoNotCrossContaminate(t *testing.T) {{ "{" }}
+    	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+    		code := r.URL.Query().Get("code")
+    		json.NewEncoder(w).Encode(map[string]any{{ "{" }}
+    			"access_token": "tok-" + code,
+    			"openid":       "openid-" + code,
+    			"expires_in":   7200,
+    		{{ "}" }})
+    	{{ "}" }}))
+    	defer tokenSrv.Close()
+
+    	userInfoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+    		openid := r.URL.Query().Get("openid")
+    		json.NewEncoder(w).Encode(map[string]any{{ "{" }}
+    			"openid":     openid,
+    			"nickname":   "user-" + openid,
+    			"headimgurl": "https://wx/" + openid + ".png",
+    		{{ "}" }})
+    	{{ "}" }}))
+    	defer userInfoSrv.Close()
+
+    	p := NewWeChatProvider(WeChatConfig{{ "{" }}
+    		AppID: "appid", AppSecret: "secret", RedirectURL: "https://app.example.com/cb",
+    		TokenURL: tokenSrv.URL, UserInfoURL: userInfoSrv.URL,
+    	{{ "}" }})
+
+    	const n = 50
+    	var wg sync.WaitGroup
+    	errs := make(chan error, n)
+    	for i := 0; i < n; i++ {{ "{" }}
+    		wg.Add(1)
+    		go func(i int) {{ "{" }}
+    			defer wg.Done()
+    			code := fmt.Sprintf("user-%d", i)
+    			tok, err := p.ExchangeCode(context.Background(), code)
+    			if err != nil {{ "{" }}
+    				errs <- err
+    				return
+    			{{ "}" }}
+    			wantOpenID := "openid-" + code
+    			if tok.ProviderUserID != wantOpenID {{ "{" }}
+    				errs <- fmt.Errorf("goroutine %d: exchange got openid %q, want %q", i, tok.ProviderUserID, wantOpenID)
+    				return
+    			{{ "}" }}
+    			info, err := p.FetchUserInfo(context.Background(), tok)
+    			if err != nil {{ "{" }}
+    				errs <- err
+    				return
+    			{{ "}" }}
+    			if info.ProviderUserID != wantOpenID {{ "{" }}
+    				errs <- fmt.Errorf("goroutine %d: fetch user info got openid %q, want %q (cross-user contamination)", i, info.ProviderUserID, wantOpenID)
+    			{{ "}" }}
+    		{{ "}" }}(i)
+    	{{ "}" }}
+    	wg.Wait()
+    	close(errs)
+    	for err := range errs {{ "{" }}
+    		t.Error(err)
     	{{ "}" }}
     {{ "}" }}

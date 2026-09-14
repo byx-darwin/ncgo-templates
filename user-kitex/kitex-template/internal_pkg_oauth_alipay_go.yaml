@@ -27,6 +27,12 @@ body: |-
     	AppID      string
     	PrivateKey string
     	GatewayURL string
+    	// RedirectURL is passed through to AuthURL as the redirect_uri
+    	// parameter. Alipay also lets the callback URL be fixed on the
+    	// Open Platform console (in which case this field is redundant with
+    	// that console setting); when set, it takes effect here so the
+    	// config value is never silently dropped.
+    	RedirectURL string
     {{ "}" }}
 
     const alipayDefaultGatewayURL = "https://openapi.alipay.com/gateway.do"
@@ -52,7 +58,7 @@ body: |-
     	q := url.Values{{ "{" }}
     		"app_id":       {{ "{" }}p.cfg.AppID{{ "}" }},
     		"scope":        {{ "{" }}"auth_user"{{ "}" }},
-    		"redirect_uri": {{ "{" }}""{{ "}" }}, // caller supplies redirect via app config on the Alipay console
+    		"redirect_uri": {{ "{" }}p.cfg.RedirectURL{{ "}" }}, // falls back to the redirect fixed on the Alipay console when empty
     		"state":        {{ "{" }}state{{ "}" }},
     	{{ "}" }}
     	return "https://openauth.alipay.com/oauth2/publicAppAuthorize.htm?" + q.Encode()
@@ -89,22 +95,24 @@ body: |-
     		return Token{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
 
-    	// Alipay's token response already carries user_id; stash it on the
-    	// token's (unexported-equivalent) via RawJSON round-trip in FetchUserInfo
-    	// by re-deriving from the same endpoint shape (alipay.user.info.share).
-    	return Token{{ "{" }}AccessToken: body.Response.AccessToken, RefreshToken: body.Response.UserID{{ "}" }}, nil
+    	// Alipay's token response already carries user_id; thread it through
+    	// via Token.ProviderUserID (a per-call value, never stored on the
+    	// receiver — see Token.ProviderUserID's doc comment) so
+    	// FetchUserInfo does not need a second call.
+    	return Token{{ "{" }}AccessToken: body.Response.AccessToken, ProviderUserID: body.Response.UserID{{ "}" }}, nil
     {{ "}" }}
 
     func (p *AlipayProvider) FetchUserInfo(ctx context.Context, token Token) (ProviderUserInfo, error) {{ "{" }}
     	// Alipay's alipay.user.info.share method also requires RSA2 request
     	// signing in production; user_id is already available from the token
-    	// exchange response (stashed in Token.RefreshToken by ExchangeCode),
-    	// so a minimal, correct implementation does not need a second call.
-    	if token.RefreshToken == "" {{ "{" }}
+    	// exchange response (threaded via Token.ProviderUserID by
+    	// ExchangeCode), so a minimal, correct implementation does not need
+    	// a second call.
+    	if token.ProviderUserID == "" {{ "{" }}
     		return ProviderUserInfo{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: alipay user id missing from token exchange")
     	{{ "}" }}
     	return ProviderUserInfo{{ "{" }}
-    		ProviderUserID: token.RefreshToken,
+    		ProviderUserID: token.ProviderUserID,
     		RawJSON:        "{{ "{" }}{{ "}" }}",
     	{{ "}" }}, nil
     {{ "}" }}

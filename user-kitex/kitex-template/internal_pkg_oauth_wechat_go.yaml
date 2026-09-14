@@ -35,12 +35,16 @@ body: |-
     )
 
     // WeChatProvider implements Provider for WeChat Open Platform login.
+    //
+    // A single WeChatProvider instance is constructed once per process (see
+    // server.go's buildOAuthRegistry) and shared across every concurrent
+    // request. It therefore MUST NOT carry any per-request state on its
+    // receiver — the openid captured by ExchangeCode is threaded to
+    // FetchUserInfo via Token.ProviderUserID instead (a per-call value),
+    // never a field on this struct.
     type WeChatProvider struct {{ "{" }}
     	cfg        WeChatConfig
     	httpClient *http.Client
-    	// lastOpenID is captured from ExchangeCode's response and required by
-    	// FetchUserInfo, mirroring WeChat's two-step, openid-keyed flow.
-    	lastOpenID string
     {{ "}" }}
 
     // NewWeChatProvider builds a Provider from cfg, defaulting empty
@@ -106,8 +110,7 @@ body: |-
     		return Token{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: wechat error %d: %s", body.ErrCode, body.ErrMsg)
     	{{ "}" }}
 
-    	p.lastOpenID = body.OpenID
-    	tok := Token{{ "{" }}AccessToken: body.AccessToken{{ "}" }}
+    	tok := Token{{ "{" }}AccessToken: body.AccessToken, ProviderUserID: body.OpenID{{ "}" }}
     	if body.ExpiresIn > 0 {{ "{" }}
     		tok.Expiry = time.Now().Add(time.Duration(body.ExpiresIn) * time.Second)
     	{{ "}" }}
@@ -117,7 +120,7 @@ body: |-
     func (p *WeChatProvider) FetchUserInfo(ctx context.Context, token Token) (ProviderUserInfo, error) {{ "{" }}
     	q := url.Values{{ "{" }}
     		"access_token": {{ "{" }}token.AccessToken{{ "}" }},
-    		"openid":       {{ "{" }}p.lastOpenID{{ "}" }},
+    		"openid":       {{ "{" }}token.ProviderUserID{{ "}" }},
     	{{ "}" }}
     	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.UserInfoURL+"?"+q.Encode(), nil)
     	if err != nil {{ "{" }}

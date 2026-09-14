@@ -176,8 +176,9 @@ body: |
     	{{ "}" }}
     	if cfg.Alipay.Enabled {{ "{" }}
     		providers["alipay"] = oauth.NewAlipayProvider(oauth.AlipayConfig{{ "{" }}
-    			AppID:      cfg.Alipay.ClientID,
-    			PrivateKey: cfg.Alipay.ClientSecret,
+    			AppID:       cfg.Alipay.ClientID,
+    			PrivateKey:  cfg.Alipay.ClientSecret,
+    			RedirectURL: cfg.Alipay.RedirectURL,
     		{{ "}" }})
     	{{ "}" }}
     	if cfg.GitHub.Enabled {{ "{" }}

@@ -15,6 +15,15 @@ body: |-
     	AccessToken  string
     	RefreshToken string
     	Expiry       time.Time
+    	// ProviderUserID carries a provider-supplied user identifier from
+    	// ExchangeCode to FetchUserInfo for adapters (e.g. wechat, alipay)
+    	// whose token-exchange response embeds the user id alongside the
+    	// token itself. It MUST be threaded through this value, never stored
+    	// on the Provider instance — a single Provider is constructed once
+    	// per process and shared across all concurrent requests, so any
+    	// per-request identifier stashed on the receiver instead of on this
+    	// per-call Token causes cross-request/cross-user contamination.
+    	ProviderUserID string
     {{ "}" }}
 
     // ProviderUserInfo is the normalized profile fetched from a provider

@@ -10,6 +10,7 @@ body: |-
     	"errors"
 
     	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgconn"
     	"github.com/jackc/pgx/v5/pgtype"
     	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -78,8 +79,16 @@ body: |-
     		ID:           toPgUUID(u.ID),
     		Username:     toPgText(u.Username),
     		PasswordHash: toPgText(u.PasswordHash),
+    		Nickname:     toPgText(&u.Nickname),
+    		Avatar:       toPgText(&u.Avatar),
+    		Email:        toPgText(&u.Email),
+    		Phone:        toPgText(&u.Phone),
     	{{ "}" }})
     	if err != nil {{ "{" }}
+    		var pgErr *pgconn.PgError
+    		if errors.As(err, &pgErr) && pgErr.Code == "23505" {{ "{" }}
+    			return user.ErrUsernameTaken
+    		{{ "}" }}
     		return err
     	{{ "}" }}
     	*u = *toDomainUser(row)

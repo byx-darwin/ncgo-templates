@@ -28,3 +28,9 @@ body: |-
 
     // ErrNotFound is returned when a lookup finds no matching row.
     var ErrNotFound = errors.New("user: not found")
+
+    // ErrUsernameTaken is returned by Create when the requested username
+    // already exists (a Postgres unique-constraint violation mapped to this
+    // sentinel by the repository, instead of leaking the raw DB error to
+    // callers).
+    var ErrUsernameTaken = errors.New("user: username already taken")

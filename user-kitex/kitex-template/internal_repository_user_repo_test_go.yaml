@@ -93,3 +93,62 @@ body: |
     		t.Fatalf("GetIdentityByProvider after DeleteIdentity error = %v, want user.ErrNotFound", err)
     	{{ "}" }}
     {{ "}" }}
+
+    // TestUserRepoPostgresRoundTrip_ProfileFields is a regression test for a
+    // bug where Create dropped Nickname/Avatar/Email/Phone on the floor
+    // (only ID/Username/PasswordHash were passed to CreateUserParams), and
+    // then overwrote the caller's in-memory User with the now-NULL values
+    // read back from the DB. It creates a User with those fields populated
+    // (mirroring an OAuth-sourced profile) and asserts a subsequent GetByID
+    // returns the same values.
+    func TestUserRepoPostgresRoundTrip_ProfileFields(t *testing.T) {{ "{" }}
+    	if _, err := exec.LookPath("pg_isready"); err != nil {{ "{" }}
+    		t.Skipf("skipped: pg_isready not installed (install postgres client to run)")
+    	{{ "}" }}
+    	dsn := os.Getenv("POSTGRES_DSN")
+    	if dsn == "" {{ "{" }}
+    		t.Skipf("skipped: POSTGRES_DSN not set")
+    	{{ "}" }}
+    	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    	defer cancel()
+    	pool, err := pgxpool.New(ctx, dsn)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("connect postgres: %v", err)
+    	{{ "}" }}
+    	defer pool.Close()
+    	if err := pool.Ping(ctx); err != nil {{ "{" }}
+    		t.Fatalf("ping postgres: %v", err)
+    	{{ "}" }}
+
+    	q := gen.New(pool)
+    	repo := New(q, pool)
+
+    	u, err := user.NewLocal("integration-user-profile", "argon2hash-placeholder")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewLocal: %v", err)
+    	{{ "}" }}
+    	u.Nickname = "Integration Nick"
+    	u.Avatar = "https://example.com/avatar.png"
+    	u.Email = "integration@example.com"
+    	u.Phone = "+15551234567"
+    	if err := repo.Create(ctx, u); err != nil {{ "{" }}
+    		t.Fatalf("Create: %v", err)
+    	{{ "}" }}
+
+    	got, err := repo.GetByID(ctx, u.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID: %v", err)
+    	{{ "}" }}
+    	if got.Nickname != "Integration Nick" {{ "{" }}
+    		t.Fatalf("GetByID.Nickname = %q, want %q", got.Nickname, "Integration Nick")
+    	{{ "}" }}
+    	if got.Avatar != "https://example.com/avatar.png" {{ "{" }}
+    		t.Fatalf("GetByID.Avatar = %q, want %q", got.Avatar, "https://example.com/avatar.png")
+    	{{ "}" }}
+    	if got.Email != "integration@example.com" {{ "{" }}
+    		t.Fatalf("GetByID.Email = %q, want %q", got.Email, "integration@example.com")
+    	{{ "}" }}
+    	if got.Phone != "+15551234567" {{ "{" }}
+    		t.Fatalf("GetByID.Phone = %q, want %q", got.Phone, "+15551234567")
+    	{{ "}" }}
+    {{ "}" }}

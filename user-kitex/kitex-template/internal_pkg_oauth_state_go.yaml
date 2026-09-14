@@ -1,0 +1,79 @@
+# ncgo exported template — internal/pkg/oauth/state.go
+path: internal/pkg/oauth/state.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"errors"
+    	"time"
+
+    	"github.com/redis/go-redis/v9"
+    )
+
+    // StateStore issues and single-use-consumes OAuth CSRF state tokens.
+    //
+    // Put/Consume carry the provider name and a purpose tag ("login" or
+    // "bind") alongside the state token itself, and Consume returns them so
+    // the caller can verify the state was issued for the provider and flow
+    // it is now being presented to. Without this, a state token minted for
+    // (say) a github login could be replayed against a wechat callback, or a
+    // login-flow state could be replayed into the bind flow.
+    type StateStore interface {{ "{" }}
+    	// Put records state as valid for ttl, tagged with the provider it was
+    	// issued for and the purpose of the flow ("login" or "bind").
+    	Put(ctx context.Context, state, provider, purpose string, ttl time.Duration) error
+    	// Consume reports whether state was valid and, if so, deletes it so it
+    	// cannot be replayed, returning the provider and purpose it was
+    	// originally issued with.
+    	Consume(ctx context.Context, state string) (provider, purpose string, ok bool, err error)
+    {{ "}" }}
+
+    const stateKeyPrefix = "oauth:state:"
+
+    // statePayload is the JSON value stored in Redis for a single state
+    // token, carrying the provider + purpose it was issued for.
+    type statePayload struct {{ "{" }}
+    	Provider string `json:"provider"`
+    	Purpose  string `json:"purpose"`
+    {{ "}" }}
+
+    // RedisStateStore stores OAuth state tokens in Redis with a TTL and
+    // atomically deletes them on first consumption (GETDEL).
+    type RedisStateStore struct {{ "{" }}
+    	client *redis.Client
+    {{ "}" }}
+
+    // NewRedisStateStore wraps an existing Redis client.
+    func NewRedisStateStore(client *redis.Client) *RedisStateStore {{ "{" }}
+    	return &RedisStateStore{{ "{" }}client: client{{ "}" }}
+    {{ "}" }}
+
+    // Put records state as valid for ttl, tagged with provider and purpose.
+    func (s *RedisStateStore) Put(ctx context.Context, state, provider, purpose string, ttl time.Duration) error {{ "{" }}
+    	raw, err := json.Marshal(statePayload{{ "{" }}Provider: provider, Purpose: purpose{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	return s.client.Set(ctx, stateKeyPrefix+state, raw, ttl).Err()
+    {{ "}" }}
+
+    // Consume reports whether state was valid and, if so, deletes it so it
+    // cannot be replayed, returning the provider + purpose it was issued for.
+    func (s *RedisStateStore) Consume(ctx context.Context, state string) (provider, purpose string, ok bool, err error) {{ "{" }}
+    	raw, err := s.client.GetDel(ctx, stateKeyPrefix+state).Result()
+    	if errors.Is(err, redis.Nil) {{ "{" }}
+    		return "", "", false, nil
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return "", "", false, err
+    	{{ "}" }}
+    	var payload statePayload
+    	if err := json.Unmarshal([]byte(raw), &payload); err != nil {{ "{" }}
+    		return "", "", false, err
+    	{{ "}" }}
+    	return payload.Provider, payload.Purpose, true, nil
+    {{ "}" }}

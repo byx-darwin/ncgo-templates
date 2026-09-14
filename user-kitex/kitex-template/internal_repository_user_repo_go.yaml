@@ -1,0 +1,186 @@
+# ncgo exported template — internal/repository/user/repo.go
+path: internal/repository/user/repo.go
+update_behavior:
+    type: cover
+body: |-
+    package userrepo
+
+    import (
+    	"context"
+    	"errors"
+
+    	"github.com/jackc/pgx/v5"
+    	"github.com/jackc/pgx/v5/pgconn"
+    	"github.com/jackc/pgx/v5/pgtype"
+    	"github.com/jackc/pgx/v5/pgxpool"
+
+    	"{{.Module}}/internal/db/gen"
+    	"{{.Module}}/internal/domain/user"
+    )
+
+    // Repo implements user.Repository using sqlc-generated queries.
+    type Repo struct {{ "{" }}
+    	q    *gen.Queries
+    	pool *pgxpool.Pool
+    {{ "}" }}
+
+    // New creates a user repo backed by sqlc Queries and a pgx pool.
+    func New(q *gen.Queries, pool *pgxpool.Pool) *Repo {{ "{" }}
+    	return &Repo{{ "{" }}q: q, pool: pool{{ "}" }}
+    {{ "}" }}
+
+    func toPgUUID(id user.ID) pgtype.UUID {{ "{" }}
+    	return pgtype.UUID{{ "{" }}Bytes: id, Valid: true{{ "}" }}
+    {{ "}" }}
+
+    func toPgText(s *string) pgtype.Text {{ "{" }}
+    	if s == nil {{ "{" }}
+    		return pgtype.Text{{ "{" }}{{ "}" }}
+    	{{ "}" }}
+    	return pgtype.Text{{ "{" }}String: *s, Valid: true{{ "}" }}
+    {{ "}" }}
+
+    func fromPgText(t pgtype.Text) *string {{ "{" }}
+    	if !t.Valid {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	v := t.String
+    	return &v
+    {{ "}" }}
+
+    // toDomainUser/toDomainIdentity take pointer rows because sqlc is
+    // configured with emit_result_struct_pointers: true (sqlc_yaml.yaml),
+    // so every generated query method returns *gen.User / *gen.UserIdentity.
+    func toDomainUser(row *gen.User) *user.User {{ "{" }}
+    	return &user.User{{ "{" }}
+    		ID:           row.ID.Bytes,
+    		Username:     fromPgText(row.Username),
+    		PasswordHash: fromPgText(row.PasswordHash),
+    		Nickname:     row.Nickname.String,
+    		Avatar:       row.Avatar.String,
+    		Email:        row.Email.String,
+    		Phone:        row.Phone.String,
+    		Status:       int(row.Status),
+    	{{ "}" }}
+    {{ "}" }}
+
+    func toDomainIdentity(row *gen.UserIdentity) *user.Identity {{ "{" }}
+    	return &user.Identity{{ "{" }}
+    		ID:             row.ID.Bytes,
+    		UserID:         row.UserID.Bytes,
+    		Provider:       row.Provider,
+    		ProviderUserID: row.ProviderUserID,
+    		RawProfileJSON: row.RawProfileJson,
+    	{{ "}" }}
+    {{ "}" }}
+
+    func (r *Repo) Create(ctx context.Context, u *user.User) error {{ "{" }}
+    	row, err := r.q.CreateUser(ctx, &gen.CreateUserParams{{ "{" }}
+    		ID:           toPgUUID(u.ID),
+    		Username:     toPgText(u.Username),
+    		PasswordHash: toPgText(u.PasswordHash),
+    		Nickname:     toPgText(&u.Nickname),
+    		Avatar:       toPgText(&u.Avatar),
+    		Email:        toPgText(&u.Email),
+    		Phone:        toPgText(&u.Phone),
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		var pgErr *pgconn.PgError
+    		if errors.As(err, &pgErr) && pgErr.Code == "23505" {{ "{" }}
+    			return user.ErrUsernameTaken
+    		{{ "}" }}
+    		return err
+    	{{ "}" }}
+    	*u = *toDomainUser(row)
+    	return nil
+    {{ "}" }}
+
+    func (r *Repo) GetByID(ctx context.Context, id user.ID) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByID(ctx, &gen.GetUserByIDParams{{ "{" }}ID: toPgUUID(id){{ "}" }})
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return nil, user.ErrNotFound
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
+    func (r *Repo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByUsername(ctx, &gen.GetUserByUsernameParams{{ "{" }}Username: toPgText(&username){{ "}" }})
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return nil, user.ErrNotFound
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
+    func (r *Repo) UpdateStatus(ctx context.Context, id user.ID, status int) error {{ "{" }}
+    	_, err := r.q.UpdateUserStatus(ctx, &gen.UpdateUserStatusParams{{ "{" }}ID: toPgUUID(id), Status: int32(status){{ "}" }})
+    	return err
+    {{ "}" }}
+
+    func (r *Repo) UpdatePassword(ctx context.Context, id user.ID, passwordHash string) error {{ "{" }}
+    	_, err := r.q.UpdateUserPassword(ctx, &gen.UpdateUserPasswordParams{{ "{" }}ID: toPgUUID(id), PasswordHash: toPgText(&passwordHash){{ "}" }})
+    	return err
+    {{ "}" }}
+
+    func (r *Repo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}
+    	rows, err := r.q.ListUsers(ctx, &gen.ListUsersParams{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*user.User, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainUser(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) Count(ctx context.Context) (int64, error) {{ "{" }}
+    	return r.q.CountUsers(ctx)
+    {{ "}" }}
+
+    func (r *Repo) CreateIdentity(ctx context.Context, i *user.Identity) error {{ "{" }}
+    	row, err := r.q.CreateUserIdentity(ctx, &gen.CreateUserIdentityParams{{ "{" }}
+    		ID:             toPgUUID(i.ID),
+    		UserID:         toPgUUID(i.UserID),
+    		Provider:       i.Provider,
+    		ProviderUserID: i.ProviderUserID,
+    		RawProfileJson: i.RawProfileJSON,
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	*i = *toDomainIdentity(row)
+    	return nil
+    {{ "}" }}
+
+    func (r *Repo) GetIdentityByProvider(ctx context.Context, provider, providerUserID string) (*user.Identity, error) {{ "{" }}
+    	row, err := r.q.GetIdentityByProvider(ctx, &gen.GetIdentityByProviderParams{{ "{" }}Provider: provider, ProviderUserID: providerUserID{{ "}" }})
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return nil, user.ErrNotFound
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainIdentity(row), nil
+    {{ "}" }}
+
+    func (r *Repo) ListIdentitiesByUserID(ctx context.Context, userID user.ID) ([]*user.Identity, error) {{ "{" }}
+    	rows, err := r.q.ListIdentitiesByUserID(ctx, &gen.ListIdentitiesByUserIDParams{{ "{" }}UserID: toPgUUID(userID){{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	out := make([]*user.Identity, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		out = append(out, toDomainIdentity(row))
+    	{{ "}" }}
+    	return out, nil
+    {{ "}" }}
+
+    func (r *Repo) DeleteIdentity(ctx context.Context, userID user.ID, provider string) error {{ "{" }}
+    	return r.q.DeleteUserIdentity(ctx, &gen.DeleteUserIdentityParams{{ "{" }}UserID: toPgUUID(userID), Provider: provider{{ "}" }})
+    {{ "}" }}

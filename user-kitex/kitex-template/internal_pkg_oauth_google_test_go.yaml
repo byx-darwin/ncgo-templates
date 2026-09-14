@@ -1,0 +1,23 @@
+# ncgo exported template — internal/pkg/oauth/google_test.go
+path: internal/pkg/oauth/google_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import "testing"
+
+    func TestNewGoogleProvider_Name(t *testing.T) {{ "{" }}
+    	p := NewGoogleProvider("cid", "secret", "https://app.example.com/cb")
+    	if p.Name() != "google" {{ "{" }}
+    		t.Fatalf("expected name 'google', got %q", p.Name())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestNewGoogleProvider_AuthURLUsesGoogleEndpoint(t *testing.T) {{ "{" }}
+    	p := NewGoogleProvider("cid", "secret", "https://app.example.com/cb")
+    	url := p.AuthURL("state-1")
+    	if want := "https://accounts.google.com/o/oauth2/v2/auth"; len(url) < len(want) || url[:len(want)] != want {{ "{" }}
+    		t.Fatalf("expected google auth endpoint prefix, got %s", url)
+    	{{ "}" }}
+    {{ "}" }}

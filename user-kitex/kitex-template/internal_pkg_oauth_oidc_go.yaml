@@ -1,0 +1,136 @@
+# ncgo exported template — internal/pkg/oauth/oidc.go
+path: internal/pkg/oauth/oidc.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"fmt"
+    	"io"
+    	"net/http"
+    	"net/url"
+    	"strings"
+    	"time"
+    )
+
+    // OIDCConfig configures a standards-compliant OAuth2/OIDC provider.
+    // Used directly for generic OIDC IdPs, and embedded by any adapter whose
+    // provider is close enough to standard OIDC to reuse the exchange/fetch
+    // logic (only AuthURL/FetchUserInfo field-mapping differ per provider).
+    type OIDCConfig struct {{ "{" }}
+    	Name             string
+    	ClientID         string
+    	ClientSecret     string
+    	RedirectURL      string
+    	AuthEndpoint     string
+    	TokenEndpoint    string
+    	UserInfoEndpoint string
+    	Scopes           []string
+    {{ "}" }}
+
+    // OIDCProvider implements Provider for any standard OAuth2/OIDC IdP.
+    type OIDCProvider struct {{ "{" }}
+    	cfg        OIDCConfig
+    	httpClient *http.Client
+    {{ "}" }}
+
+    // NewOIDCProvider builds a Provider from cfg using the default http.Client.
+    func NewOIDCProvider(cfg OIDCConfig) *OIDCProvider {{ "{" }}
+    	return &OIDCProvider{{ "{" }}cfg: cfg, httpClient: http.DefaultClient{{ "}" }}
+    {{ "}" }}
+
+    func (p *OIDCProvider) Name() string {{ "{" }} return p.cfg.Name {{ "}" }}
+
+    func (p *OIDCProvider) AuthURL(state string) string {{ "{" }}
+    	q := url.Values{{ "{" }}
+    		"client_id":     {{ "{" }}p.cfg.ClientID{{ "}" }},
+    		"redirect_uri":  {{ "{" }}p.cfg.RedirectURL{{ "}" }},
+    		"response_type": {{ "{" }}"code"{{ "}" }},
+    		"state":         {{ "{" }}state{{ "}" }},
+    		"scope":         {{ "{" }}strings.Join(p.cfg.Scopes, " "){{ "}" }},
+    	{{ "}" }}
+    	return p.cfg.AuthEndpoint + "?" + q.Encode()
+    {{ "}" }}
+
+    func (p *OIDCProvider) ExchangeCode(ctx context.Context, code string) (Token, error) {{ "{" }}
+    	form := url.Values{{ "{" }}
+    		"grant_type":    {{ "{" }}"authorization_code"{{ "}" }},
+    		"code":          {{ "{" }}code{{ "}" }},
+    		"redirect_uri":  {{ "{" }}p.cfg.RedirectURL{{ "}" }},
+    		"client_id":     {{ "{" }}p.cfg.ClientID{{ "}" }},
+    		"client_secret": {{ "{" }}p.cfg.ClientSecret{{ "}" }},
+    	{{ "}" }}
+    	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.TokenEndpoint, strings.NewReader(form.Encode()))
+    	if err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+    	req.Header.Set("Accept", "application/json")
+
+    	resp, err := p.httpClient.Do(req)
+    	if err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	defer resp.Body.Close()
+    	if resp.StatusCode != http.StatusOK {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: %s token exchange failed: status %d", p.cfg.Name, resp.StatusCode)
+    	{{ "}" }}
+
+    	var body struct {{ "{" }}
+    		AccessToken  string `json:"access_token"`
+    		RefreshToken string `json:"refresh_token"`
+    		ExpiresIn    int64  `json:"expires_in"`
+    	{{ "}" }}
+    	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	tok := Token{{ "{" }}AccessToken: body.AccessToken, RefreshToken: body.RefreshToken{{ "}" }}
+    	if body.ExpiresIn > 0 {{ "{" }}
+    		tok.Expiry = time.Now().Add(time.Duration(body.ExpiresIn) * time.Second)
+    	{{ "}" }}
+    	return tok, nil
+    {{ "}" }}
+
+    func (p *OIDCProvider) FetchUserInfo(ctx context.Context, token Token) (ProviderUserInfo, error) {{ "{" }}
+    	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.UserInfoEndpoint, nil)
+    	if err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+    	resp, err := p.httpClient.Do(req)
+    	if err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	defer resp.Body.Close()
+    	if resp.StatusCode != http.StatusOK {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: %s fetch user info failed: status %d", p.cfg.Name, resp.StatusCode)
+    	{{ "}" }}
+
+    	raw, err := io.ReadAll(resp.Body)
+    	if err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	var body struct {{ "{" }}
+    		Sub     string `json:"sub"`
+    		Email   string `json:"email"`
+    		Name    string `json:"name"`
+    		Picture string `json:"picture"`
+    	{{ "}" }}
+    	if err := json.Unmarshal(raw, &body); err != nil {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	return ProviderUserInfo{{ "{" }}
+    		ProviderUserID: body.Sub,
+    		Email:          body.Email,
+    		Nickname:       body.Name,
+    		AvatarURL:      body.Picture,
+    		RawJSON:        string(raw),
+    	{{ "}" }}, nil
+    {{ "}" }}

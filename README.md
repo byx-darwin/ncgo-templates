@@ -30,6 +30,7 @@ The registry URL defaults to this repository; override with `--registry <url>` o
 |---|---|---|
 | `base-kitex` | Standard Kitex RPC service (layered layout + health check) | ✅ `ncgo new --kind kitex --template base-kitex` |
 | `rbac-kitex` | RBAC + auth authority service (DDD, Casbin sqlc adapter, JWT login, audit) | ✅ `ncgo new --kind kitex --template rbac-kitex` |
+| `user-kitex` | End-user account service (local password + wechat/alipay/github/google/oidc third-party login, admin management RPCs) | ✅ `ncgo new --kind kitex --template user-kitex` |
 | `admin-services-kitex` | Merged admin authority (RBAC + Rule Center in one service) | ✅ `ncgo new --kind kitex --template admin-services-kitex` |
 | `rule-center` | Rate-limit rule-center service (standalone) | ⚠️ asset-ready; use `admin-services-kitex` for merged version |
 

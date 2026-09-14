@@ -1,0 +1,92 @@
+# ncgo exported template — internal/pkg/oauth/state_test.go
+path: internal/pkg/oauth/state_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/alicebob/miniredis/v2"
+    	"github.com/redis/go-redis/v9"
+    )
+
+    func newTestRedis(t *testing.T) *redis.Client {{ "{" }}
+    	t.Helper()
+    	mr, err := miniredis.Run()
+    	if err != nil {{ "{" }}
+    		t.Fatalf("start miniredis: %v", err)
+    	{{ "}" }}
+    	t.Cleanup(mr.Close)
+    	return redis.NewClient(&redis.Options{{ "{" }}Addr: mr.Addr(){{ "}" }})
+    {{ "}" }}
+
+    func TestRedisStateStore_PutConsume(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := NewRedisStateStore(newTestRedis(t))
+
+    	if err := store.Put(ctx, "state-1", "github", "login", time.Minute); err != nil {{ "{" }}
+    		t.Fatalf("put: %v", err)
+    	{{ "}" }}
+
+    	provider, purpose, ok, err := store.Consume(ctx, "state-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		t.Fatal("expected state to be found and consumed")
+    	{{ "}" }}
+    	if provider != "github" || purpose != "login" {{ "{" }}
+    		t.Fatalf("expected provider=github purpose=login round-tripped, got provider=%q purpose=%q", provider, purpose)
+    	{{ "}" }}
+
+    	_, _, ok, err = store.Consume(ctx, "state-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume again: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("expected state to be gone after first consume (single use)")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRedisStateStore_UnknownState(t *testing.T) {{ "{" }}
+    	store := NewRedisStateStore(newTestRedis(t))
+    	_, _, ok, err := store.Consume(context.Background(), "never-issued")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("expected unknown state to report not-found")
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestRedisStateStore_ProviderAndPurposeAreBound is a regression test for
+    // state-token replay across providers/flows: a state issued for provider
+    // "github" purpose "login" must not silently validate when the caller
+    // expects a different provider or purpose — Consume must return the
+    // original provider/purpose so usersvc can reject the mismatch.
+    func TestRedisStateStore_ProviderAndPurposeAreBound(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := NewRedisStateStore(newTestRedis(t))
+
+    	if err := store.Put(ctx, "state-2", "github", "login", time.Minute); err != nil {{ "{" }}
+    		t.Fatalf("put: %v", err)
+    	{{ "}" }}
+
+    	provider, purpose, ok, err := store.Consume(ctx, "state-2")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		t.Fatal("expected state to be found")
+    	{{ "}" }}
+    	if provider == "wechat" {{ "{" }}
+    		t.Fatal("state issued for github must not report as wechat")
+    	{{ "}" }}
+    	if purpose == "bind" {{ "{" }}
+    		t.Fatal("state issued for login must not report as bind")
+    	{{ "}" }}
+    {{ "}" }}

@@ -1,0 +1,291 @@
+# ncgo exported template — internal/application/user/user_service.go
+path: internal/application/user/user_service.go
+update_behavior:
+    type: cover
+body: |-
+    package usersvc
+
+    import (
+    	"context"
+    	"errors"
+    	"log"
+    	"time"
+
+    	"github.com/google/uuid"
+
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/pkg/oauth"
+    )
+
+    const (
+    	// minUsernameLength/maxUsernameLength bound local-registration
+    	// usernames. Adjust to taste; these are template defaults, not a
+    	// hard protocol requirement.
+    	minUsernameLength = 3
+    	maxUsernameLength = 64
+    	// minPasswordLength is a template default minimum; raise it (and/or
+    	// add a complexity check) to match your own security policy.
+    	minPasswordLength = 8
+    )
+
+    // dummyPasswordHash is a precomputed, valid-format Argon2id PHC hash for
+    // a fixed, never-matching password. Login runs VerifyPassword against it
+    // on the "username not found" path so that path takes about as long as
+    // the real-user path (which always runs a real Argon2id verification) —
+    // otherwise an unknown username returns near-instantly while a real
+    // username spends tens of milliseconds in the KDF, and that timing gap
+    // is itself a username-enumeration side channel even though both paths
+    // already return the same generic error string.
+    const dummyPasswordHash = "$argon2id$v=19$m=65536,t=3,p=4$QkDU1nAIfRMtROQZ6d/YHw$6DdGHU55QaOHHQ9wdPkbEqqFymUY/xHyokpBzOAhmls"
+
+    // Service implements end-user self-service account operations:
+    // local registration/login and third-party OAuth login/binding.
+    type Service struct {{ "{" }}
+    	repo       user.Repository
+    	jwt        *auth.JWTManager
+    	providers  oauth.Registry
+    	stateStore oauth.StateStore
+    	tokenTTL   time.Duration
+    {{ "}" }}
+
+    // New constructs a Service. providers may be a partial registry (only
+    // providers enabled via conf.yaml). stateStore MUST be non-nil for any
+    // call that exercises the OAuth path (OAuthStart/OAuthCallback/
+    // BindProvider) — those methods call it unconditionally and will panic
+    // on a nil stateStore. Unit tests that only exercise Register/Login may
+    // safely pass nil, since those methods never touch it.
+    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration) *Service {{ "{" }}
+    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL{{ "}" }}
+    {{ "}" }}
+
+    func parseUID(uid string) (user.ID, error) {{ "{" }}
+    	return uuid.Parse(uid)
+    {{ "}" }}
+
+    // Register creates a local account and returns its uid.
+    func (s *Service) Register(ctx context.Context, in RegisterInput) (RegisterOutput, error) {{ "{" }}
+    	if l := len(in.Username); l < minUsernameLength || l > maxUsernameLength {{ "{" }}
+    		return RegisterOutput{{ "{" }}{{ "}" }}, errors.New("user: username must be 3-64 characters")
+    	{{ "}" }}
+    	if len(in.Password) < minPasswordLength {{ "{" }}
+    		return RegisterOutput{{ "{" }}{{ "}" }}, errors.New("user: password must be at least 8 characters")
+    	{{ "}" }}
+    	hash, err := auth.HashPassword(in.Password)
+    	if err != nil {{ "{" }}
+    		return RegisterOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	u, err := user.NewLocal(in.Username, hash)
+    	if err != nil {{ "{" }}
+    		return RegisterOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	if err := s.repo.Create(ctx, u); err != nil {{ "{" }}
+    		if errors.Is(err, user.ErrUsernameTaken) {{ "{" }}
+    			return RegisterOutput{{ "{" }}{{ "}" }}, errors.New("user: username already taken")
+    		{{ "}" }}
+    		return RegisterOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	return RegisterOutput{{ "{" }}Uid: u.ID.String(){{ "}" }}, nil
+    {{ "}" }}
+
+    // Login verifies local credentials and issues a JWT.
+    func (s *Service) Login(ctx context.Context, in LoginInput) (LoginOutput, error) {{ "{" }}
+    	u, err := s.repo.GetByUsername(ctx, in.Username)
+    	if err != nil {{ "{" }}
+    		if !errors.Is(err, user.ErrNotFound) {{ "{" }}
+    			// Unexpected (e.g. DB connectivity) failure, not "no such
+    			// user" — log it so an outage is distinguishable from a bad
+    			// password, but still return the same generic error so this
+    			// branch doesn't become a NEW enumeration vector.
+    			log.Printf("user: GetByUsername failed: %v", err)
+    		{{ "}" }}
+    		// Run a dummy verification so this path costs about as much time
+    		// as the real-user path below, closing the timing side-channel.
+    		_, _ = auth.VerifyPassword(in.Password, dummyPasswordHash)
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
+    	{{ "}" }}
+    	if u.IsBanned() {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
+    	{{ "}" }}
+    	if u.PasswordHash == nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
+    	{{ "}" }}
+    	ok, err := auth.VerifyPassword(in.Password, *u.PasswordHash)
+    	if err != nil || !ok {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
+    	{{ "}" }}
+    	return s.issueToken(u)
+    {{ "}" }}
+
+    func (s *Service) issueToken(u *user.User) (LoginOutput, error) {{ "{" }}
+    	token, err := s.jwt.Sign(u.ID.String(), []string{{ "{" }}"user"{{ "}" }}, s.tokenTTL)
+    	if err != nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	return LoginOutput{{ "{" }}Uid: u.ID.String(), Token: token{{ "}" }}, nil
+    {{ "}" }}
+
+    const (
+    	oauthPurposeLogin = "login"
+    	oauthPurposeBind  = "bind"
+    )
+
+    // OAuthStart generates a CSRF state tagged with providerName and purpose
+    // ("login" or "bind"), stores it, and returns the provider's redirect
+    // URL. purpose must be validated/consumed by the matching callback
+    // (OAuthCallback for "login", BindProvider for "bind") so a state minted
+    // for one provider/flow can't be replayed against another.
+    func (s *Service) OAuthStart(ctx context.Context, providerName, purpose string) (string, error) {{ "{" }}
+    	if purpose != oauthPurposeLogin && purpose != oauthPurposeBind {{ "{" }}
+    		return "", errors.New("user: invalid oauth purpose")
+    	{{ "}" }}
+    	p, ok := s.providers.Get(providerName)
+    	if !ok {{ "{" }}
+    		return "", errors.New("user: provider not enabled")
+    	{{ "}" }}
+    	state := uuid.NewString()
+    	if err := s.stateStore.Put(ctx, state, providerName, purpose, 10*time.Minute); err != nil {{ "{" }}
+    		return "", err
+    	{{ "}" }}
+    	return p.AuthURL(state), nil
+    {{ "}" }}
+
+    // OAuthCallback exchanges the code, finds-or-creates the local user
+    // bound to the provider identity, and issues a JWT.
+    func (s *Service) OAuthCallback(ctx context.Context, in OAuthCallbackInput) (LoginOutput, error) {{ "{" }}
+    	provider, purpose, ok, err := s.stateStore.Consume(ctx, in.State)
+    	if err != nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	if !ok || provider != in.Provider || purpose != oauthPurposeLogin {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: oauth state invalid or expired")
+    	{{ "}" }}
+
+    	p, ok := s.providers.Get(in.Provider)
+    	if !ok {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: provider not enabled")
+    	{{ "}" }}
+
+    	tok, err := p.ExchangeCode(ctx, in.Code)
+    	if err != nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	info, err := p.FetchUserInfo(ctx, tok)
+    	if err != nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	identity, err := s.repo.GetIdentityByProvider(ctx, in.Provider, info.ProviderUserID)
+    	if errors.Is(err, user.ErrNotFound) {{ "{" }}
+    		u, err := user.NewFromProvider()
+    		if err != nil {{ "{" }}
+    			return LoginOutput{{ "{" }}{{ "}" }}, err
+    		{{ "}" }}
+    		u.Nickname, u.Avatar, u.Email = info.Nickname, info.AvatarURL, info.Email
+    		if err := s.repo.Create(ctx, u); err != nil {{ "{" }}
+    			return LoginOutput{{ "{" }}{{ "}" }}, err
+    		{{ "}" }}
+    		newIdentity, err := user.NewIdentity(u.ID, in.Provider, info.ProviderUserID, info.RawJSON)
+    		if err != nil {{ "{" }}
+    			return LoginOutput{{ "{" }}{{ "}" }}, err
+    		{{ "}" }}
+    		if err := s.repo.CreateIdentity(ctx, newIdentity); err != nil {{ "{" }}
+    			return LoginOutput{{ "{" }}{{ "}" }}, err
+    		{{ "}" }}
+    		return s.issueToken(u)
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	u, err := s.repo.GetByID(ctx, identity.UserID)
+    	if err != nil {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	if u.IsBanned() {{ "{" }}
+    		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
+    	{{ "}" }}
+    	return s.issueToken(u)
+    {{ "}" }}
+
+    // BindProvider links a third-party identity to an already-authenticated
+    // user. in.Uid MUST come from the caller's verified JWT (extracted by a
+    // BFF/gateway before invoking this RPC), never forwarded verbatim from
+    // client input — this method trusts in.Uid as-is and does not itself
+    // verify a token, so passing through a client-supplied uid is an
+    // authorization bypass (any caller could bind providers to any user).
+    func (s *Service) BindProvider(ctx context.Context, in BindProviderInput) error {{ "{" }}
+    	provider, purpose, ok, err := s.stateStore.Consume(ctx, in.State)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if !ok || provider != in.Provider || purpose != oauthPurposeBind {{ "{" }}
+    		return errors.New("user: oauth state invalid or expired")
+    	{{ "}" }}
+    	p, ok := s.providers.Get(in.Provider)
+    	if !ok {{ "{" }}
+    		return errors.New("user: provider not enabled")
+    	{{ "}" }}
+    	tok, err := p.ExchangeCode(ctx, in.Code)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	info, err := p.FetchUserInfo(ctx, tok)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	existing, err := s.repo.GetIdentityByProvider(ctx, in.Provider, info.ProviderUserID)
+    	if err != nil && !errors.Is(err, user.ErrNotFound) {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if existing != nil {{ "{" }}
+    		return errors.New("user: identity already bound to another user")
+    	{{ "}" }}
+
+    	uid, err := parseUID(in.Uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	identity, err := user.NewIdentity(uid, in.Provider, info.ProviderUserID, info.RawJSON)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	return s.repo.CreateIdentity(ctx, identity)
+    {{ "}" }}
+
+    // UnbindProvider removes a third-party identity from uid. uid MUST come
+    // from the caller's verified JWT — see BindProvider's doc comment; the
+    // same trust boundary applies here.
+    //
+    // Before deleting, it checks the user would still have at least one
+    // authentication method left afterward (a local password, or another
+    // bound identity). Without this check, a user with ONLY a third-party
+    // identity and no local password who unbinds their sole provider would
+    // be permanently locked out — this template has no self-service
+    // "set a password" RPC to recover from that state.
+    func (s *Service) UnbindProvider(ctx context.Context, uid, providerName string) error {{ "{" }}
+    	id, err := parseUID(uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	u, err := s.repo.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if u.PasswordHash == nil {{ "{" }}
+    		identities, err := s.repo.ListIdentitiesByUserID(ctx, id)
+    		if err != nil {{ "{" }}
+    			return err
+    		{{ "}" }}
+    		remaining := 0
+    		for _, ident := range identities {{ "{" }}
+    			if ident.Provider != providerName {{ "{" }}
+    				remaining++
+    			{{ "}" }}
+    		{{ "}" }}
+    		if remaining == 0 {{ "{" }}
+    			return errors.New("user: cannot unbind your only authentication method")
+    		{{ "}" }}
+    	{{ "}" }}
+    	return s.repo.DeleteIdentity(ctx, id, providerName)
+    {{ "}" }}

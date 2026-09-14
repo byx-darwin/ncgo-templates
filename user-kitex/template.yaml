@@ -1,0 +1,20 @@
+name: user-kitex
+kind: kitex
+description: "Official end-user account Kitex RPC template (local password + third-party OAuth2/OIDC login: wechat/alipay/github/google/oidc, admin management RPCs)"
+version: "1"
+skip_default_templates:
+  - handler.yaml
+  - usecase.yaml
+  - repository.yaml
+  - server.yaml
+  - migration_init.yaml
+  - migration_keep.yaml
+  - ratelimit_handler.yaml
+  - ratelimit_middleware_test.yaml
+  - ratelimit_middleware.yaml
+  - ratelimit_proto.yaml
+  - ratelimit_repository.yaml
+  - ratelimit_schema.yaml
+  - ratelimit_server.yaml
+  - ratelimit_sqlc_queries.yaml
+  - ratelimit_usecase.yaml

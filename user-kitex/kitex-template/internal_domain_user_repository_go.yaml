@@ -1,0 +1,36 @@
+# ncgo exported template — internal/domain/user/repository.go
+path: internal/domain/user/repository.go
+update_behavior:
+    type: cover
+body: |-
+    package user
+
+    import (
+    	"context"
+    	"errors"
+    )
+
+    // Repository persists User and Identity aggregates.
+    type Repository interface {{ "{" }}
+    	Create(ctx context.Context, u *User) error
+    	GetByID(ctx context.Context, id ID) (*User, error)
+    	GetByUsername(ctx context.Context, username string) (*User, error)
+    	UpdateStatus(ctx context.Context, id ID, status int) error
+    	UpdatePassword(ctx context.Context, id ID, passwordHash string) error
+    	List(ctx context.Context, limit, offset int32) ([]*User, error)
+    	Count(ctx context.Context) (int64, error)
+
+    	CreateIdentity(ctx context.Context, i *Identity) error
+    	GetIdentityByProvider(ctx context.Context, provider, providerUserID string) (*Identity, error)
+    	ListIdentitiesByUserID(ctx context.Context, userID ID) ([]*Identity, error)
+    	DeleteIdentity(ctx context.Context, userID ID, provider string) error
+    {{ "}" }}
+
+    // ErrNotFound is returned when a lookup finds no matching row.
+    var ErrNotFound = errors.New("user: not found")
+
+    // ErrUsernameTaken is returned by Create when the requested username
+    // already exists (a Postgres unique-constraint violation mapped to this
+    // sentinel by the repository, instead of leaking the raw DB error to
+    // callers).
+    var ErrUsernameTaken = errors.New("user: username already taken")

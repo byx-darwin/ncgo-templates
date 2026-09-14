@@ -1,0 +1,58 @@
+# ncgo exported template — internal/pkg/oauth/alipay_test.go
+path: internal/pkg/oauth/alipay_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"net/http"
+    	"net/http/httptest"
+    	"net/url"
+    	"testing"
+    )
+
+    func TestAlipayProvider_ExchangeCode(t *testing.T) {{ "{" }}
+    	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+    		json.NewEncoder(w).Encode(map[string]any{{ "{" }}
+    			"alipay_system_oauth_token_response": map[string]any{{ "{" }}
+    				"access_token": "ali-tok", "user_id": "2088-user-1",
+    			{{ "}" }},
+    		{{ "}" }})
+    	{{ "}" }}))
+    	defer srv.Close()
+
+    	p := NewAlipayProvider(AlipayConfig{{ "{" }}AppID: "appid", GatewayURL: srv.URL{{ "}" }})
+    	tok, err := p.ExchangeCode(context.Background(), "code-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("exchange: %v", err)
+    	{{ "}" }}
+    	if tok.AccessToken != "ali-tok" {{ "{" }}
+    		t.Fatalf("unexpected access token: %s", tok.AccessToken)
+    	{{ "}" }}
+    	if tok.ProviderUserID != "2088-user-1" {{ "{" }}
+    		t.Fatalf("expected user_id threaded through Token.ProviderUserID, got %q", tok.ProviderUserID)
+    	{{ "}" }}
+
+    	info, err := p.FetchUserInfo(context.Background(), tok)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("fetch user info: %v", err)
+    	{{ "}" }}
+    	if info.ProviderUserID != "2088-user-1" {{ "{" }}
+    		t.Fatalf("expected user_id from token response reused as provider user id, got %q", info.ProviderUserID)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestAlipayProvider_AuthURL_UsesConfiguredRedirectURL(t *testing.T) {{ "{" }}
+    	p := NewAlipayProvider(AlipayConfig{{ "{" }}AppID: "appid", RedirectURL: "https://app.example.com/cb/alipay"{{ "}" }})
+    	raw := p.AuthURL("state-1")
+    	u, err := url.Parse(raw)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("parse auth url: %v", err)
+    	{{ "}" }}
+    	if got := u.Query().Get("redirect_uri"); got != "https://app.example.com/cb/alipay" {{ "{" }}
+    		t.Fatalf("expected configured redirect_uri to be forwarded, got %q", got)
+    	{{ "}" }}
+    {{ "}" }}

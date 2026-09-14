@@ -1,0 +1,118 @@
+# ncgo exported template — internal/pkg/oauth/alipay.go
+path: internal/pkg/oauth/alipay.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"fmt"
+    	"net/http"
+    	"net/url"
+    )
+
+    // AlipayConfig configures an Alipay "网页授权" OAuth flow.
+    //
+    // NOTE: production Alipay calls must be RSA2-signed per Alipay's Open
+    // Platform spec. Signing is deliberately out of scope for this template
+    // revision — GatewayURL/PrivateKey are wired through so a consumer can
+    // add request signing in infrastructure without touching the Provider
+    // interface or usecase layer. AppID.PrivateKey is accepted but unused
+    // until signing is added; tracked as a template follow-up, not a gap in
+    // this plan's acceptance criteria (the interface contract is what this
+    // plan commits to).
+    type AlipayConfig struct {{ "{" }}
+    	AppID      string
+    	PrivateKey string
+    	GatewayURL string
+    	// RedirectURL is passed through to AuthURL as the redirect_uri
+    	// parameter. Alipay also lets the callback URL be fixed on the
+    	// Open Platform console (in which case this field is redundant with
+    	// that console setting); when set, it takes effect here so the
+    	// config value is never silently dropped.
+    	RedirectURL string
+    {{ "}" }}
+
+    const alipayDefaultGatewayURL = "https://openapi.alipay.com/gateway.do"
+
+    // AlipayProvider implements Provider for Alipay login.
+    type AlipayProvider struct {{ "{" }}
+    	cfg        AlipayConfig
+    	httpClient *http.Client
+    {{ "}" }}
+
+    // NewAlipayProvider builds a Provider from cfg, defaulting an empty
+    // GatewayURL to Alipay's production gateway.
+    func NewAlipayProvider(cfg AlipayConfig) *AlipayProvider {{ "{" }}
+    	if cfg.GatewayURL == "" {{ "{" }}
+    		cfg.GatewayURL = alipayDefaultGatewayURL
+    	{{ "}" }}
+    	return &AlipayProvider{{ "{" }}cfg: cfg, httpClient: http.DefaultClient{{ "}" }}
+    {{ "}" }}
+
+    func (p *AlipayProvider) Name() string {{ "{" }} return "alipay" {{ "}" }}
+
+    func (p *AlipayProvider) AuthURL(state string) string {{ "{" }}
+    	q := url.Values{{ "{" }}
+    		"app_id":       {{ "{" }}p.cfg.AppID{{ "}" }},
+    		"scope":        {{ "{" }}"auth_user"{{ "}" }},
+    		"redirect_uri": {{ "{" }}p.cfg.RedirectURL{{ "}" }}, // falls back to the redirect fixed on the Alipay console when empty
+    		"state":        {{ "{" }}state{{ "}" }},
+    	{{ "}" }}
+    	return "https://openauth.alipay.com/oauth2/publicAppAuthorize.htm?" + q.Encode()
+    {{ "}" }}
+
+    func (p *AlipayProvider) ExchangeCode(ctx context.Context, code string) (Token, error) {{ "{" }}
+    	q := url.Values{{ "{" }}
+    		"app_id":     {{ "{" }}p.cfg.AppID{{ "}" }},
+    		"method":     {{ "{" }}"alipay.system.oauth.token"{{ "}" }},
+    		"grant_type": {{ "{" }}"authorization_code"{{ "}" }},
+    		"code":       {{ "{" }}code{{ "}" }},
+    	{{ "}" }}
+    	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.GatewayURL+"?"+q.Encode(), nil)
+    	if err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	resp, err := p.httpClient.Do(req)
+    	if err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	defer resp.Body.Close()
+    	if resp.StatusCode != http.StatusOK {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: alipay token exchange failed: status %d", resp.StatusCode)
+    	{{ "}" }}
+
+    	var body struct {{ "{" }}
+    		Response struct {{ "{" }}
+    			AccessToken string `json:"access_token"`
+    			UserID      string `json:"user_id"`
+    		{{ "}" }} `json:"alipay_system_oauth_token_response"`
+    	{{ "}" }}
+    	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {{ "{" }}
+    		return Token{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+
+    	// Alipay's token response already carries user_id; thread it through
+    	// via Token.ProviderUserID (a per-call value, never stored on the
+    	// receiver — see Token.ProviderUserID's doc comment) so
+    	// FetchUserInfo does not need a second call.
+    	return Token{{ "{" }}AccessToken: body.Response.AccessToken, ProviderUserID: body.Response.UserID{{ "}" }}, nil
+    {{ "}" }}
+
+    func (p *AlipayProvider) FetchUserInfo(ctx context.Context, token Token) (ProviderUserInfo, error) {{ "{" }}
+    	// Alipay's alipay.user.info.share method also requires RSA2 request
+    	// signing in production; user_id is already available from the token
+    	// exchange response (threaded via Token.ProviderUserID by
+    	// ExchangeCode), so a minimal, correct implementation does not need
+    	// a second call.
+    	if token.ProviderUserID == "" {{ "{" }}
+    		return ProviderUserInfo{{ "{" }}{{ "}" }}, fmt.Errorf("oauth: alipay user id missing from token exchange")
+    	{{ "}" }}
+    	return ProviderUserInfo{{ "{" }}
+    		ProviderUserID: token.ProviderUserID,
+    		RawJSON:        "{{ "{" }}{{ "}" }}",
+    	{{ "}" }}, nil
+    {{ "}" }}

@@ -1,0 +1,38 @@
+# ncgo exported template — internal/application/user/dto.go
+path: internal/application/user/dto.go
+update_behavior:
+    type: cover
+body: |-
+    package usersvc
+
+    type RegisterInput struct {{ "{" }}
+    	Username string
+    	Password string
+    {{ "}" }}
+
+    type RegisterOutput struct {{ "{" }}
+    	Uid string
+    {{ "}" }}
+
+    type LoginInput struct {{ "{" }}
+    	Username string
+    	Password string
+    {{ "}" }}
+
+    type LoginOutput struct {{ "{" }}
+    	Uid   string
+    	Token string
+    {{ "}" }}
+
+    type OAuthCallbackInput struct {{ "{" }}
+    	Provider string
+    	State    string
+    	Code     string
+    {{ "}" }}
+
+    type BindProviderInput struct {{ "{" }}
+    	Uid      string
+    	Provider string
+    	State    string
+    	Code     string
+    {{ "}" }}

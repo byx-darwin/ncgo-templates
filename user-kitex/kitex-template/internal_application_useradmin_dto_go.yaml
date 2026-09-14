@@ -1,0 +1,39 @@
+# ncgo exported template — internal/application/useradmin/dto.go
+path: internal/application/useradmin/dto.go
+update_behavior:
+    type: cover
+body: |-
+    package useradminsvc
+
+    import "context"
+
+    type ListUsersInput struct {{ "{" }}
+    	Limit  int32
+    	Offset int32
+    {{ "}" }}
+
+    type UserDTO struct {{ "{" }}
+    	Uid      string
+    	Username string
+    	Nickname string
+    	Status   int
+    {{ "}" }}
+
+    type ListUsersOutput struct {{ "{" }}
+    	Users []UserDTO
+    	Total int64
+    {{ "}" }}
+
+    type IdentityDTO struct {{ "{" }}
+    	Provider       string
+    	ProviderUserID string
+    {{ "}" }}
+
+    // Blacklist revokes a JWT before its natural expiry (e.g. a Redis SET
+    // keyed by uid with the remaining token TTL). Force-logout writes here;
+    // the JWT-verifying middleware (base-hertz/admin-bff-hertz, unchanged
+    // by this plan) is expected to consult the same store — wiring that
+    // check into the middleware is out of scope for user-kitex itself.
+    type Blacklist interface {{ "{" }}
+    	Revoke(ctx context.Context, uid string) error
+    {{ "}" }}

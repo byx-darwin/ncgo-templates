@@ -1,0 +1,61 @@
+# ncgo exported template — internal/pkg/oauth/provider.go
+path: internal/pkg/oauth/provider.go
+update_behavior:
+    type: cover
+body: |-
+    package oauth
+
+    import (
+    	"context"
+    	"time"
+    )
+
+    // Token is the OAuth2 token set returned by a provider's code exchange.
+    type Token struct {{ "{" }}
+    	AccessToken  string
+    	RefreshToken string
+    	Expiry       time.Time
+    	// ProviderUserID carries a provider-supplied user identifier from
+    	// ExchangeCode to FetchUserInfo for adapters (e.g. wechat, alipay)
+    	// whose token-exchange response embeds the user id alongside the
+    	// token itself. It MUST be threaded through this value, never stored
+    	// on the Provider instance — a single Provider is constructed once
+    	// per process and shared across all concurrent requests, so any
+    	// per-request identifier stashed on the receiver instead of on this
+    	// per-call Token causes cross-request/cross-user contamination.
+    	ProviderUserID string
+    {{ "}" }}
+
+    // ProviderUserInfo is the normalized profile fetched from a provider
+    // after a successful token exchange.
+    type ProviderUserInfo struct {{ "{" }}
+    	ProviderUserID string
+    	Email          string
+    	Nickname       string
+    	AvatarURL      string
+    	RawJSON        string
+    {{ "}" }}
+
+    // Provider is implemented once per third-party login supplier. Every
+    // adapter (wechat/alipay/github/google/oidc) satisfies this interface;
+    // usecase code never branches on provider name.
+    type Provider interface {{ "{" }}
+    	// Name returns the provider's registry key (e.g. "github", "wechat").
+    	Name() string
+    	// AuthURL builds the provider's authorization redirect URL, embedding
+    	// state for CSRF protection.
+    	AuthURL(state string) string
+    	// ExchangeCode swaps an authorization code for a token set.
+    	ExchangeCode(ctx context.Context, code string) (Token, error)
+    	// FetchUserInfo retrieves the authenticated user's profile.
+    	FetchUserInfo(ctx context.Context, token Token) (ProviderUserInfo, error)
+    {{ "}" }}
+
+    // Registry looks up a configured Provider by name.
+    type Registry map[string]Provider
+
+    // Get returns the provider for name, or false if not enabled/registered.
+    func (r Registry) Get(name string) (Provider, bool) {{ "{" }}
+    	p, ok := r[name]
+    	return p, ok
+    {{ "}" }}

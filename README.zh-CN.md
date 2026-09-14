@@ -30,6 +30,7 @@ ncgo new my-svc --module github.com/acme/my-svc --kind kitex --template base-kit
 |---|---|---|
 | `base-kitex` | 标准 Kitex RPC 服务（分层布局 + 健康检查） | ✅ `ncgo new --kind kitex --template base-kitex` |
 | `rbac-kitex` | RBAC + 权限认证服务（DDD、Casbin sqlc 适配器、JWT 登录、审计） | ✅ `ncgo new --kind kitex --template rbac-kitex` |
+| `user-kitex` | 终端用户账号服务（本地密码 + 微信/支付宝/GitHub/Google/OIDC 第三方登录，管理端 RPC） | ✅ `ncgo new --kind kitex --template user-kitex` |
 | `admin-services-kitex` | 合并的 Admin 权限服务（RBAC + 规则中心合二为一） | ✅ `ncgo new --kind kitex --template admin-services-kitex` |
 | `rule-center` | 限流规则中心服务（独立版） | ⚠️ 资源就绪；建议使用合并版 `admin-services-kitex` |
 

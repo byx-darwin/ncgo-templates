@@ -1,0 +1,98 @@
+# ncgo exported template — internal/domain/user/entity.go
+path: internal/domain/user/entity.go
+update_behavior:
+    type: cover
+body: |-
+    package user
+
+    import (
+    	"errors"
+
+    	"github.com/google/uuid"
+    )
+
+    // ID is the user aggregate's external and internal identity (UUID v7).
+    type ID = uuid.UUID
+
+    const (
+    	// StatusEnabled is the default active state.
+    	StatusEnabled = 1
+    	// StatusBanned disables a user from logging in.
+    	StatusBanned = 0
+    )
+
+    // User is the aggregate root for the end-user account aggregate.
+    // Username/PasswordHash are pointers because a user who only ever signed
+    // in via a third-party provider has neither.
+    type User struct {{ "{" }}
+    	ID           ID
+    	Username     *string
+    	PasswordHash *string
+    	Nickname     string
+    	Avatar       string
+    	Email        string
+    	Phone        string
+    	Status       int
+    {{ "}" }}
+
+    // NewLocal creates a User for local username/password registration.
+    func NewLocal(username, passwordHash string) (*User, error) {{ "{" }}
+    	if username == "" {{ "{" }}
+    		return nil, errors.New("user: username required")
+    	{{ "}" }}
+    	if passwordHash == "" {{ "{" }}
+    		return nil, errors.New("user: password hash required")
+    	{{ "}" }}
+    	id, err := uuid.NewV7()
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &User{{ "{" }}
+    		ID:           id,
+    		Username:     &username,
+    		PasswordHash: &passwordHash,
+    		Status:       StatusEnabled,
+    	{{ "}" }}, nil
+    {{ "}" }}
+
+    // NewFromProvider creates a User with no local credentials, to be bound
+    // to a third-party identity by the caller immediately after creation.
+    func NewFromProvider() (*User, error) {{ "{" }}
+    	id, err := uuid.NewV7()
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &User{{ "{" }}ID: id, Status: StatusEnabled{{ "}" }}, nil
+    {{ "}" }}
+
+    // IsBanned reports whether the user is currently disabled.
+    func (u *User) IsBanned() bool {{ "{" }}
+    	return u.Status == StatusBanned
+    {{ "}" }}
+
+    // Identity is a third-party account bound to a User.
+    type Identity struct {{ "{" }}
+    	ID              ID
+    	UserID          ID
+    	Provider        string
+    	ProviderUserID  string
+    	RawProfileJSON  string
+    {{ "}" }}
+
+    // NewIdentity creates an Identity binding for userID.
+    func NewIdentity(userID ID, provider, providerUserID, rawProfileJSON string) (*Identity, error) {{ "{" }}
+    	if provider == "" || providerUserID == "" {{ "{" }}
+    		return nil, errors.New("user: provider and provider_user_id required")
+    	{{ "}" }}
+    	id, err := uuid.NewV7()
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &Identity{{ "{" }}
+    		ID:             id,
+    		UserID:         userID,
+    		Provider:       provider,
+    		ProviderUserID: providerUserID,
+    		RawProfileJSON: rawProfileJSON,
+    	{{ "}" }}, nil
+    {{ "}" }}

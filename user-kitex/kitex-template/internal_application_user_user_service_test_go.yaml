@@ -1,0 +1,109 @@
+# ncgo exported template — internal/application/user/user_service_test.go
+path: internal/application/user/user_service_test.go
+update_behavior:
+    type: cover
+body: |-
+    package usersvc
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/pkg/oauth"
+    )
+
+    type fakeRepo struct {{ "{" }}
+    	byUsername map[string]*user.User
+    	byID       map[user.ID]*user.User
+    {{ "}" }}
+
+    func newFakeRepo() *fakeRepo {{ "{" }}
+    	return &fakeRepo{{ "{" }}byUsername: map[string]*user.User{{ "{" }}{{ "}" }}, byID: map[user.ID]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
+    {{ "}" }}
+
+    func (r *fakeRepo) Create(ctx context.Context, u *user.User) error {{ "{" }}
+    	r.byID[u.ID] = u
+    	if u.Username != nil {{ "{" }}
+    		r.byUsername[*u.Username] = u
+    	{{ "}" }}
+    	return nil
+    {{ "}" }}
+    func (r *fakeRepo) GetByID(ctx context.Context, id user.ID) (*user.User, error) {{ "{" }}
+    	if u, ok := r.byID[id]; ok {{ "{" }}
+    		return u, nil
+    	{{ "}" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
+    	if u, ok := r.byUsername[username]; ok {{ "{" }}
+    		return u, nil
+    	{{ "}" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) UpdateStatus(ctx context.Context, id user.ID, status int) error {{ "{" }} r.byID[id].Status = status; return nil {{ "}" }}
+    func (r *fakeRepo) UpdatePassword(ctx context.Context, id user.ID, hash string) error {{ "{" }} r.byID[id].PasswordHash = &hash; return nil {{ "}" }}
+    func (r *fakeRepo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }} return nil, nil {{ "}" }}
+    func (r *fakeRepo) Count(ctx context.Context) (int64, error) {{ "{" }} return int64(len(r.byID)), nil {{ "}" }}
+    func (r *fakeRepo) CreateIdentity(ctx context.Context, i *user.Identity) error {{ "{" }} return nil {{ "}" }}
+    func (r *fakeRepo) GetIdentityByProvider(ctx context.Context, provider, providerUserID string) (*user.Identity, error) {{ "{" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) ListIdentitiesByUserID(ctx context.Context, userID user.ID) ([]*user.Identity, error) {{ "{" }} return nil, nil {{ "}" }}
+    func (r *fakeRepo) DeleteIdentity(ctx context.Context, userID user.ID, provider string) error {{ "{" }} return nil {{ "}" }}
+
+    func newTestService() *Service {{ "{" }}
+    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour)
+    {{ "}" }}
+
+    func TestRegister_And_Login(t *testing.T) {{ "{" }}
+    	svc := newTestService()
+    	ctx := context.Background()
+
+    	regOut, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "alice", Password: "correct horse battery staple"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("register: %v", err)
+    	{{ "}" }}
+    	if regOut.Uid == "" {{ "{" }}
+    		t.Fatal("expected non-empty uid")
+    	{{ "}" }}
+
+    	loginOut, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "correct horse battery staple"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("login: %v", err)
+    	{{ "}" }}
+    	if loginOut.Token == "" {{ "{" }}
+    		t.Fatal("expected non-empty token")
+    	{{ "}" }}
+    	if loginOut.Uid != regOut.Uid {{ "{" }}
+    		t.Fatalf("expected uid %s, got %s", regOut.Uid, loginOut.Uid)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestLogin_WrongPassword(t *testing.T) {{ "{" }}
+    	svc := newTestService()
+    	ctx := context.Background()
+    	if _, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "bob", Password: "correct-pw"{{ "}" }}); err != nil {{ "{" }}
+    		t.Fatalf("register: %v", err)
+    	{{ "}" }}
+    	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "bob", Password: "wrong-pw"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("expected error for wrong password")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestLogin_BannedUser(t *testing.T) {{ "{" }}
+    	svc := newTestService()
+    	ctx := context.Background()
+    	out, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "carol", Password: "pw12345678"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("register: %v", err)
+    	{{ "}" }}
+    	uid, _ := parseUID(out.Uid)
+    	svc.repo.UpdateStatus(ctx, uid, user.StatusBanned)
+
+    	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "carol", Password: "pw12345678"{{ "}" }}); err == nil {{ "{" }}
+    		t.Fatal("expected error for banned user")
+    	{{ "}" }}
+    {{ "}" }}

@@ -1,0 +1,113 @@
+# ncgo exported template — internal/handler/userservice_handler.go
+path: internal/handler/userservice_handler.go
+update_behavior:
+    type: cover
+body: |-
+    package handler
+
+    import (
+    	"context"
+
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	"{{.Module}}/internal/application/useradmin"
+    	"{{.Module}}/internal/application/user"
+    )
+
+    // UserServiceHandlerImpl implements the generated userv1.UserService
+    // interface by delegating to the self-service and admin application
+    // services.
+    type UserServiceHandlerImpl struct {{ "{" }}
+    	self  *usersvc.Service
+    	admin *useradminsvc.Service
+    {{ "}" }}
+
+    // NewUserServiceHandlerImpl wires both application services into the
+    // Kitex handler.
+    func NewUserServiceHandlerImpl(self *usersvc.Service, admin *useradminsvc.Service) *UserServiceHandlerImpl {{ "{" }}
+    	return &UserServiceHandlerImpl{{ "{" }}self: self, admin: admin{{ "}" }}
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {{ "{" }}
+    	out, err := h.self.Register(ctx, usersvc.RegisterInput{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &userv1.RegisterResp{{ "{" }}Uid: out.Uid{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {{ "{" }}
+    	out, err := h.self.Login(ctx, usersvc.LoginInput{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &userv1.LoginResp{{ "{" }}Uid: out.Uid, Token: out.Token{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) OAuthStart(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error) {{ "{" }}
+    	purpose := req.Purpose
+    	if purpose == "" {{ "{" }}
+    		purpose = "login"
+    	{{ "}" }}
+    	url, err := h.self.OAuthStart(ctx, req.Provider, purpose)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &userv1.OAuthStartResp{{ "{" }}RedirectUrl: url{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) OAuthCallback(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error) {{ "{" }}
+    	out, err := h.self.OAuthCallback(ctx, usersvc.OAuthCallbackInput{{ "{" }}Provider: req.Provider, State: req.State, Code: req.Code{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &userv1.OAuthCallbackResp{{ "{" }}Uid: out.Uid, Token: out.Token{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) BindProvider(ctx context.Context, req *userv1.BindProviderReq) (*userv1.BindProviderResp, error) {{ "{" }}
+    	err := h.self.BindProvider(ctx, usersvc.BindProviderInput{{ "{" }}Uid: req.Uid, Provider: req.Provider, State: req.State, Code: req.Code{{ "}" }})
+    	return &userv1.BindProviderResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) UnbindProvider(ctx context.Context, req *userv1.UnbindProviderReq) (*userv1.UnbindProviderResp, error) {{ "{" }}
+    	err := h.self.UnbindProvider(ctx, req.Uid, req.Provider)
+    	return &userv1.UnbindProviderResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (*userv1.ListUsersResp, error) {{ "{" }}
+    	out, err := h.admin.ListUsers(ctx, useradminsvc.ListUsersInput{{ "{" }}Limit: req.Limit, Offset: req.Offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	items := make([]*userv1.UserItem, 0, len(out.Users))
+    	for _, u := range out.Users {{ "{" }}
+    		items = append(items, &userv1.UserItem{{ "{" }}Uid: u.Uid, Username: u.Username, Nickname: u.Nickname, Status: int32(u.Status){{ "}" }})
+    	{{ "}" }}
+    	return &userv1.ListUsersResp{{ "{" }}Users: items, Total: out.Total{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) BanUser(ctx context.Context, req *userv1.BanUserReq) (*userv1.BanUserResp, error) {{ "{" }}
+    	err := h.admin.BanUser(ctx, req.Uid)
+    	return &userv1.BanUserResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) UnbanUser(ctx context.Context, req *userv1.UnbanUserReq) (*userv1.UnbanUserResp, error) {{ "{" }}
+    	err := h.admin.UnbanUser(ctx, req.Uid)
+    	return &userv1.UnbanUserResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) ForceLogout(ctx context.Context, req *userv1.ForceLogoutReq) (*userv1.ForceLogoutResp, error) {{ "{" }}
+    	err := h.admin.ForceLogout(ctx, req.Uid)
+    	return &userv1.ForceLogoutResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) ListUserIdentities(ctx context.Context, req *userv1.ListUserIdentitiesReq) (*userv1.ListUserIdentitiesResp, error) {{ "{" }}
+    	ids, err := h.admin.ListUserIdentities(ctx, req.Uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	items := make([]*userv1.IdentityItem, 0, len(ids))
+    	for _, i := range ids {{ "{" }}
+    		items = append(items, &userv1.IdentityItem{{ "{" }}Provider: i.Provider, ProviderUserId: i.ProviderUserID{{ "}" }})
+    	{{ "}" }}
+    	return &userv1.ListUserIdentitiesResp{{ "{" }}Identities: items{{ "}" }}, nil
+    {{ "}" }}

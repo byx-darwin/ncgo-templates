@@ -25,7 +25,7 @@ body: |
             emit_result_struct_pointers: true
             emit_params_struct_pointers: true
             emit_methods_with_db_argument: false
-            emit_pointers_for_null_types: true
+            emit_pointers_for_null_types: false
             emit_enum_valid_method: true
             emit_all_enum_values: true
             output_db_file_name: "db.go"

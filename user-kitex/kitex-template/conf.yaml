@@ -215,8 +215,28 @@ body: |-
             "google": c.OAuth.Google,
             "oidc":   c.OAuth.OIDC.OAuthProviderConfig,
         } {
-            if p.Enabled && p.ClientID == "" {
+            if !p.Enabled {
+                continue
+            }
+            if p.ClientID == "" {
                 return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth." + name + ".client_id is empty")
+            }
+            if p.ClientSecret == "" {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth." + name + ".client_secret is empty")
+            }
+            if p.RedirectURL == "" {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth." + name + ".redirect_url is empty")
+            }
+        }
+        if c.OAuth.OIDC.Enabled {
+            if c.OAuth.OIDC.AuthEndpoint == "" {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth.oidc.auth_endpoint is empty")
+            }
+            if c.OAuth.OIDC.TokenEndpoint == "" {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth.oidc.token_endpoint is empty")
+            }
+            if c.OAuth.OIDC.UserInfoEndpoint == "" {
+                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth.oidc.user_info_endpoint is empty")
             }
         }
         return nil

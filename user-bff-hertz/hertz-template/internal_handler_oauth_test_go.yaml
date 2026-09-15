@@ -1,0 +1,127 @@
+# ncgo exported template — internal/handler/oauth_test.go
+path: internal/handler/oauth_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/cloudwego/hertz/pkg/app"
+    	"github.com/cloudwego/hertz/pkg/protocol"
+    	"github.com/cloudwego/hertz/pkg/protocol/consts"
+    	"github.com/cloudwego/hertz/pkg/route/param"
+    	"github.com/cloudwego/kitex/client/callopt"
+
+    	"{{.Module}}/internal/base/conf"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    type fakeOAuthUserClient struct {{ "{" }}
+    	userservice.Client
+    	oauthStartFn    func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error)
+    	oauthCallbackFn func(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error)
+    {{ "}" }}
+
+    func (f *fakeOAuthUserClient) OAuthStart(ctx context.Context, req *userv1.OAuthStartReq, callOptions ...callopt.Option) (*userv1.OAuthStartResp, error) {{ "{" }}
+    	return f.oauthStartFn(ctx, req)
+    {{ "}" }}
+    func (f *fakeOAuthUserClient) OAuthCallback(ctx context.Context, req *userv1.OAuthCallbackReq, callOptions ...callopt.Option) (*userv1.OAuthCallbackResp, error) {{ "{" }}
+    	return f.oauthCallbackFn(ctx, req)
+    {{ "}" }}
+
+    type fakeCodeStore struct {{ "{" }}
+    	putFn func(ctx context.Context, jwt string, ttl time.Duration) (string, error)
+    {{ "}" }}
+
+    func (f *fakeCodeStore) Put(ctx context.Context, jwt string, ttl time.Duration) (string, error) {{ "{" }}
+    	return f.putFn(ctx, jwt, ttl)
+    {{ "}" }}
+    func (f *fakeCodeStore) Consume(ctx context.Context, code string) (string, bool, error) {{ "{" }}
+    	if code == "valid-code" {{ "{" }}
+    		return "jwt-from-code", true, nil
+    	{{ "}" }}
+    	return "", false, nil
+    {{ "}" }}
+
+    func newOAuthTestContext(method, path, body string, params map[string]string) *app.RequestContext {{ "{" }}
+    	c := app.NewContext(0)
+    	req := protocol.NewRequest(method, path, nil)
+    	if body != "" {{ "{" }}
+    		req.SetBody([]byte(body))
+    	{{ "}" }}
+    	req.CopyTo(&c.Request)
+    	for k, v := range params {{ "{" }}
+    		c.Params = append(c.Params, param.Param{{ "{" }}Key: k, Value: v{{ "}" }})
+    	{{ "}" }}
+    	return c
+    {{ "}" }}
+
+    func TestOAuthHandler_Start_Redirects(t *testing.T) {{ "{" }}
+    	cli := &fakeOAuthUserClient{{ "{" }}oauthStartFn: func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error) {{ "{" }}
+    		if req.Provider != "github" || req.Purpose != "login" || req.Uid != "" {{ "{" }}
+    			t.Fatalf("unexpected request: %+v", req)
+    		{{ "}" }}
+    		return &userv1.OAuthStartResp{{ "{" }}RedirectUrl: "https://github.com/authorize?..."{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost:3000/callback"{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("GET", "/auth/oauth/github/start", "", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
+    	h.Start(context.Background(), c)
+    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
+    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    	loc := string(c.Response.Header.Get("Location"))
+    	if loc != "https://github.com/authorize?..." {{ "{" }}
+    		t.Fatalf("unexpected redirect location: %s", loc)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_Callback_RedirectsWithCode(t *testing.T) {{ "{" }}
+    	cli := &fakeOAuthUserClient{{ "{" }}oauthCallbackFn: func(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error) {{ "{" }}
+    		return &userv1.OAuthCallbackResp{{ "{" }}Uid: "uid-1", Token: "signed-jwt"{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	putCalled := false
+    	codeStore := &fakeCodeStore{{ "{" }}putFn: func(ctx context.Context, jwt string, ttl time.Duration) (string, error) {{ "{" }}
+    		putCalled = true
+    		if jwt != "signed-jwt" {{ "{" }}
+    			t.Fatalf("expected the callback's jwt to be stored, got %q", jwt)
+    		{{ "}" }}
+    		return "one-time-code", nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewOAuthHandler(cli, codeStore, conf.OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost:3000/callback"{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("GET", "/auth/oauth/github/callback?state=s1&code=c1", "", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
+    	h.Callback(context.Background(), c)
+    	if !putCalled {{ "{" }}
+    		t.Fatal("expected the code store to be used")
+    	{{ "}" }}
+    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
+    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    	loc := string(c.Response.Header.Get("Location"))
+    	if loc != "http://localhost:3000/callback?code=one-time-code" {{ "{" }}
+    		t.Fatalf("unexpected redirect location: %s", loc)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_Exchange_ConsumesCode(t *testing.T) {{ "{" }}
+    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("POST", "/auth/oauth/exchange", `{{ "{" }}"code":"valid-code"{{ "}" }}`, nil)
+    	h.Exchange(context.Background(), c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_Exchange_InvalidCode_Returns401(t *testing.T) {{ "{" }}
+    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("POST", "/auth/oauth/exchange", `{{ "{" }}"code":"never-issued"{{ "}" }}`, nil)
+    	h.Exchange(context.Background(), c)
+    	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("expected 401, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}

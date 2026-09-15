@@ -1,0 +1,85 @@
+# ncgo exported template — internal/handler/oauth.go
+path: internal/handler/oauth.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"time"
+
+    	"github.com/cloudwego/hertz/pkg/app"
+
+    	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/oauthcode"
+    	"{{.Module}}/internal/pkg/response"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    type OAuthHandler struct {{ "{" }}
+    	userCli     userservice.Client
+    	codeStore   oauthcode.Store
+    	redirectCfg conf.OAuthRedirectConfig
+    	codeTTL     time.Duration
+    {{ "}" }}
+
+    func NewOAuthHandler(userCli userservice.Client, codeStore oauthcode.Store, redirectCfg conf.OAuthRedirectConfig, codeTTL time.Duration) *OAuthHandler {{ "{" }}
+    	return &OAuthHandler{{ "{" }}userCli: userCli, codeStore: codeStore, redirectCfg: redirectCfg, codeTTL: codeTTL{{ "}" }}
+    {{ "}" }}
+
+    // Start begins a login-flow OAuth redirect: GET /auth/oauth/:provider/start
+    func (h *OAuthHandler) Start(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	provider := c.Param("provider")
+    	resp, err := h.userCli.OAuthStart(ctx, &userv1.OAuthStartReq{{ "{" }}Provider: provider, Purpose: "login"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	c.Redirect(302, []byte(resp.RedirectUrl))
+    {{ "}" }}
+
+    // Callback completes a login-flow OAuth redirect: GET /auth/oauth/:provider/callback
+    func (h *OAuthHandler) Callback(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	provider := c.Param("provider")
+    	state := string(c.Query("state"))
+    	code := string(c.Query("code"))
+    	resp, err := h.userCli.OAuthCallback(ctx, &userv1.OAuthCallbackReq{{ "{" }}Provider: provider, State: state, Code: code{{ "}" }})
+    	if err != nil {{ "{" }}
+    		c.Redirect(302, []byte(h.redirectCfg.ErrorURL))
+    		return
+    	{{ "}" }}
+    	oneTimeCode, err := h.codeStore.Put(ctx, resp.Token, h.codeTTL)
+    	if err != nil {{ "{" }}
+    		c.Redirect(302, []byte(h.redirectCfg.ErrorURL))
+    		return
+    	{{ "}" }}
+    	c.Redirect(302, []byte(h.redirectCfg.SuccessURL+"?code="+oneTimeCode))
+    {{ "}" }}
+
+    type exchangeReq struct {{ "{" }}
+    	Code string `json:"code"`
+    {{ "}" }}
+
+    // Exchange redeems a one-time code for the JWT it was issued for:
+    // POST /auth/oauth/exchange
+    func (h *OAuthHandler) Exchange(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	var req exchangeReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil || req.Code == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	jwt, ok, err := h.codeStore.Consume(ctx, req.Code)
+    	if err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	if !ok {{ "{" }}
+    		response.ErrorCode(c, response.CodeTokenInvalid)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"token": jwt{{ "}" }})
+    {{ "}" }}

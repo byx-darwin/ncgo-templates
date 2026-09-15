@@ -1,0 +1,51 @@
+# ncgo exported template — internal/router/userbffservice.go
+path: internal/router/userbffservice.go
+update_behavior:
+    type: cover
+loop_service: true
+body: |
+    package router
+
+    import (
+    	"github.com/cloudwego/hertz/pkg/app/server"
+
+    	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/handler"
+    	"{{.Module}}/internal/pkg/middleware"
+    	"{{.Module}}/internal/pkg/oauthcode"
+    	"{{.Module}}/internal/pkg/ratelimit"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    // Register{{.ServiceName}}BffServiceRoutes registers all user-bff-hertz routes.
+    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, userCli userservice.Client, codeStore oauthcode.Store, resolver *ratelimit.Resolver) {{ "{" }}
+    	cfg := conf.Get()
+
+    	authHandler := handler.NewAuthHandler(userCli)
+    	oauthHandler := handler.NewOAuthHandler(userCli, codeStore, cfg.OAuthRedirect, cfg.OAuthCode.TTLSeconds.Duration)
+
+    	h.Use(middleware.CORS(cfg.CORS))
+
+    	auth := h.Group("/auth")
+
+    	// Public: register/login (idempotency on register, rate limit on both)
+    	if cfg.Idempotency.Enabled {{ "{" }}
+    		auth.POST("/register", middleware.Idempotency(cfg.Idempotency), middleware.RateLimit("pre_auth", cfg.RateLimit, cfg.RateLimit.PreAuth, resolver), authHandler.Register)
+    	{{ "}" }} else {{ "{" }}
+    		auth.POST("/register", middleware.RateLimit("pre_auth", cfg.RateLimit, cfg.RateLimit.PreAuth, resolver), authHandler.Register)
+    	{{ "}" }}
+    	auth.POST("/login", middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, resolver), authHandler.Login)
+
+    	// Public: OAuth login flow
+    	oauth := auth.Group("/oauth")
+    	oauth.GET("/:provider/start", oauthHandler.Start)
+    	oauth.GET("/:provider/callback", oauthHandler.Callback)
+    	oauth.POST("/exchange", oauthHandler.Exchange)
+
+    	// Protected: bind flow requires an authenticated user
+    	protected := oauth.Group("")
+    	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
+    	protected.GET("/:provider/bind-start", oauthHandler.BindStart)
+    	protected.GET("/:provider/bind-callback", oauthHandler.BindCallback)
+    	protected.DELETE("/:provider/bind", oauthHandler.Unbind)
+    {{ "}" }}

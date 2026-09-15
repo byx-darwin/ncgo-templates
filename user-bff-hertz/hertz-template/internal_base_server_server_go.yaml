@@ -1,0 +1,157 @@
+# ncgo exported template — internal/base/server/server.go
+path: internal/base/server/server.go
+update_behavior:
+    type: cover
+body: |
+    package server
+
+    import (
+        "context"
+        "log"
+        "strings"
+        "time"
+
+        "github.com/cloudwego/kitex/client"
+        "github.com/redis/go-redis/v9"
+
+        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
+        gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
+        hertzobs "github.com/byx-darwin/go-tools/go-framework/hertz/observability"
+        gtmiddleware "github.com/byx-darwin/go-tools/go-framework/hertz/middleware"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/pkg/oauthcode"
+        "{{.Module}}/internal/pkg/ratelimit"
+        "{{.Module}}/internal/pkg/response"
+        "{{.Module}}/internal/router"
+        ratelimitv1 "{{.Module}}/kitex_gen/api/ratelimit/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    )
+
+    func Run() {{ "{" }}
+        cfg := conf.Get()
+
+        // ncgo:wire:logging:init
+        ctx := context.Background()
+        h, err := hertzframework.NewHTTPServer(ctx, &cfg.Server)
+        if err != nil {{ "{" }}
+            log.Fatalf("create server: %v", err)
+        {{ "}" }}
+
+        // Responder middleware — injects RequestID / Lang / Responder into context
+        responder := response.NewResponder()
+        h.Use(responder.Middleware())
+
+        // AccessLog middleware — uses go-tools AccessLog
+        h.Use(gtmiddleware.AccessLog())
+
+        // OTel tracing — enabled when server.jaeger config is present
+        if cfg.Server.Jaeger != nil && cfg.Server.Jaeger.Enable {{ "{" }}
+            provider, obsErr := hertzobs.NewProvider(ctx, gfconfig.ObservabilityConfig{{ "{" }}
+                Enabled:     true,
+                Endpoint:    cfg.Server.Jaeger.Endpoint,
+                ServiceName: cfg.Server.Registry.Name,
+            {{ "}" }})
+            if obsErr != nil {{ "{" }}
+                log.Fatalf("init observability: %v", obsErr)
+            {{ "}" }}
+            defer func() {{ "{" }}
+                if shutdownErr := provider.Shutdown(); shutdownErr != nil {{ "{" }}
+                    log.Printf("shutdown observability: %v", shutdownErr)
+                {{ "}" }}
+            {{ "}" }}()
+            h.Use(provider.ServerMiddleware())
+        {{ "}" }}
+
+        // Optional structured logging wiring (after `ncgo add infra logging`):
+        // import "{{.Module}}/internal/base/logging"
+        // ncgo:wire:logging:server-middleware
+        // h.Use(logging.HertzRecovery())
+        // h.Use(logging.HertzRequestID())
+        // h.Use(logging.HertzAccessLog())
+
+        // Optional release canary wiring (after `ncgo add infra canary`):
+        // import "{{.Module}}/internal/base/release"
+        // ncgo:wire:canary:server-traffic
+        // if cfg.Release.Enabled {{ "{" }}
+        //     h.Use(release.HertzTraffic())
+        // {{ "}" }}
+
+        // ncgo:wire:ddd — Wire DDD layers (data -> repository -> usecase)
+
+        // One-time OAuth-code -> JWT exchange store, backed by Redis (see
+        // internal/pkg/oauthcode). Falls back to the top-level Redis config
+        // when oauth_code.redis is unset (applyRedisFallbacks in conf.go).
+        redisClient := redis.NewClient(&redis.Options{{ "{" }}
+            Addr:     cfg.OAuthCode.Redis.Addrs[0],
+            Username: cfg.OAuthCode.Redis.Username,
+            Password: cfg.OAuthCode.Redis.Password,
+            DB:       cfg.OAuthCode.Redis.DB,
+        {{ "}" }})
+        codeStore := oauthcode.NewRedisStore(redisClient)
+
+        // Create Kitex RPC clients — locally generated within this project's
+        // own kitex_gen (populated by `ncgo add kitex-client`), not imported
+        // from user-kitex's or rule-center's own generated packages.
+        userCli, err := userservice.NewClient(
+            cfg.RPC.UserService.ServiceName,
+            client.WithHostPorts(cfg.RPC.UserService.HostPorts[0]),
+        )
+        if err != nil {{ "{" }}
+            log.Fatalf("create user service client: %v", err)
+        {{ "}" }}
+
+        ruleCli, err := ruleservice.NewClient(
+            cfg.RPC.RuleCenter.ServiceName,
+            client.WithHostPorts(cfg.RPC.RuleCenter.HostPorts[0]),
+        )
+        if err != nil {{ "{" }}
+            log.Fatalf("create rule center client: %v", err)
+        {{ "}" }}
+
+        // Rate-limit resolver — reads local (config-defined) rules by
+        // default; when rate_limit.source.type is set to "rule_center" it
+        // instead resolves rules dynamically via the rule-center RPC client
+        // above (ListRules, matched by method/path_pattern).
+        resolver := ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{{ "{" }}
+            RuleCenter: ratelimitResolveFunc(ruleCli),
+        {{ "}" }})
+
+        // Register routes
+        router.Register{{.ServiceName}}BffServiceRoutes(h, userCli, codeStore, resolver)
+
+        // Start server
+        h.Spin()
+    {{ "}" }}
+
+    // ratelimitResolveFunc adapts the rule-center RPC client's ListRules
+    // call to ratelimit.GRPCClient, matching returned rules by method and
+    // path_pattern (exact match, or prefix when the pattern doesn't equal
+    // the request path).
+    func ratelimitResolveFunc(ruleCli ruleservice.Client) ratelimit.ResolveFunc {{ "{" }}
+        return func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
+            resp, err := ruleCli.ListRules(ctx, &ratelimitv1.ListRulesReq{{ "{" }}Page: 1, PageSize: 200{{ "}" }})
+            if err != nil {{ "{" }}
+                return nil, false, err
+            {{ "}" }}
+            for _, rule := range resp.Rules {{ "{" }}
+                if rule == nil || !rule.Enabled {{ "{" }}
+                    continue
+                {{ "}" }}
+                if rule.Method != "" && !strings.EqualFold(rule.Method, lookup.Method) {{ "{" }}
+                    continue
+                {{ "}" }}
+                if rule.PathPattern != "" && rule.PathPattern != lookup.Path && !strings.HasPrefix(lookup.Path, rule.PathPattern) {{ "{" }}
+                    continue
+                {{ "}" }}
+                return &conf.RateLimitRuleConfig{{ "{" }}
+                    Enabled:       rule.Enabled,
+                    Strategy:      rule.Strategy,
+                    WindowSeconds: gfconfig.Duration{{ "{" }}Duration: time.Duration(rule.WindowSeconds) * time.Second{{ "}" }},
+                    MaxRequests:   int(rule.Limit),
+                {{ "}" }}, true, nil
+            {{ "}" }}
+            return nil, false, nil
+        {{ "}" }}
+    {{ "}" }}

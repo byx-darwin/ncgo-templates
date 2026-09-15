@@ -152,6 +152,8 @@ body: |-
           return consts.StatusConflict
       case CodeIdempotencyKeyMissing:
           return consts.StatusBadRequest
+      case CodeParamInvalid:
+          return consts.StatusBadRequest
 
       // Signature errors → HTTP status from framework
       case CodeSignatureMissing, CodeSignatureExpired:

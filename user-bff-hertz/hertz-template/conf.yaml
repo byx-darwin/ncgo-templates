@@ -566,6 +566,12 @@ body: |-
       if c.RPC.UserService.ServiceName == "" {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rpc.user_service.service_name is empty")
       }
+      if len(c.RPC.UserService.HostPorts) == 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rpc.user_service.host_ports is empty")
+      }
+      if len(c.RPC.RuleCenter.HostPorts) == 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rpc.rule_center.host_ports is empty")
+      }
       if c.Auth.Token.Enabled && c.Auth.Token.SigningKey == "" {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.token.signing_key is empty")
       }

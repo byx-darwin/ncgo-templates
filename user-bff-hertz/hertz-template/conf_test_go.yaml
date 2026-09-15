@@ -3,8 +3,10 @@
 # fields (and a Redis-fallback set) this package's trimmed Config doesn't
 # have in the same shape (no Database, different OAuth-specific sections).
 # Adapted to test the fields this Config actually has, including the
-# OAuthCode.Redis fallback the default test doesn't know about, and a
-# negative test for the rpc.user_service.service_name requirement.
+# OAuthCode.Redis fallback the default test doesn't know about, and negative
+# tests for the rpc.user_service.service_name and rpc.{user_service,
+# rule_center}.host_ports requirements (the latter guard against the
+# server.go host_ports[0] panic on startup).
 path: internal/base/conf/conf_test.go
 update_behavior:
     type: cover
@@ -38,6 +40,8 @@ body: |
     func TestValidateAppliesRedisFallbacks(t *testing.T) {{ "{" }}
     	cfg := Default()
     	cfg.RPC.UserService.ServiceName = "userservice"
+    	cfg.RPC.UserService.HostPorts = []string{{ "{" }}"127.0.0.1:8001"{{ "}" }}
+    	cfg.RPC.RuleCenter.HostPorts = []string{{ "{" }}"127.0.0.1:8002"{{ "}" }}
     	cfg.OAuthRedirect = OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost/cb", BindSuccessURL: "http://localhost/bind", ErrorURL: "http://localhost/err"{{ "}" }}
     	cfg.Redis.Addrs = []string{{ "{" }}"redis-top:6379"{{ "}" }}
     	cfg.Redis.PoolSize = 32
@@ -58,6 +62,8 @@ body: |
     func TestValidate_RequiresOAuthRedirectURLs(t *testing.T) {{ "{" }}
     	cfg := Default()
     	cfg.RPC.UserService.ServiceName = "userservice"
+    	cfg.RPC.UserService.HostPorts = []string{{ "{" }}"127.0.0.1:8001"{{ "}" }}
+    	cfg.RPC.RuleCenter.HostPorts = []string{{ "{" }}"127.0.0.1:8002"{{ "}" }}
     	if err := cfg.Validate(); err == nil {{ "{" }}
     		t.Fatal("expected error when oauth_redirect URLs are unset")
     	{{ "}" }}
@@ -66,6 +72,8 @@ body: |
     func TestValidate_RequiresTokenSigningKeyWhenEnabled(t *testing.T) {{ "{" }}
     	cfg := Default()
     	cfg.RPC.UserService.ServiceName = "userservice"
+    	cfg.RPC.UserService.HostPorts = []string{{ "{" }}"127.0.0.1:8001"{{ "}" }}
+    	cfg.RPC.RuleCenter.HostPorts = []string{{ "{" }}"127.0.0.1:8002"{{ "}" }}
     	cfg.OAuthRedirect = OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost/cb", BindSuccessURL: "http://localhost/bind", ErrorURL: "http://localhost/err"{{ "}" }}
     	cfg.Auth.Token.Enabled = true
     	if err := cfg.Validate(); err == nil {{ "{" }}
@@ -76,9 +84,31 @@ body: |
     func TestValidate_RequiresUserServiceName(t *testing.T) {{ "{" }}
     	cfg := Default()
     	cfg.RPC.UserService.ServiceName = ""
+    	cfg.RPC.UserService.HostPorts = []string{{ "{" }}"127.0.0.1:8001"{{ "}" }}
+    	cfg.RPC.RuleCenter.HostPorts = []string{{ "{" }}"127.0.0.1:8002"{{ "}" }}
     	cfg.OAuthRedirect = OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost/cb", BindSuccessURL: "http://localhost/bind", ErrorURL: "http://localhost/err"{{ "}" }}
     	if err := cfg.Validate(); err == nil {{ "{" }}
     		t.Fatal("expected error when rpc.user_service.service_name is empty")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestValidate_RequiresUserServiceHostPorts(t *testing.T) {{ "{" }}
+    	cfg := Default()
+    	cfg.RPC.UserService.ServiceName = "userservice"
+    	cfg.RPC.RuleCenter.HostPorts = []string{{ "{" }}"127.0.0.1:8002"{{ "}" }}
+    	cfg.OAuthRedirect = OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost/cb", BindSuccessURL: "http://localhost/bind", ErrorURL: "http://localhost/err"{{ "}" }}
+    	if err := cfg.Validate(); err == nil {{ "{" }}
+    		t.Fatal("expected error when rpc.user_service.host_ports is empty, not a later panic")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestValidate_RequiresRuleCenterHostPorts(t *testing.T) {{ "{" }}
+    	cfg := Default()
+    	cfg.RPC.UserService.ServiceName = "userservice"
+    	cfg.RPC.UserService.HostPorts = []string{{ "{" }}"127.0.0.1:8001"{{ "}" }}
+    	cfg.OAuthRedirect = OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost/cb", BindSuccessURL: "http://localhost/bind", ErrorURL: "http://localhost/err"{{ "}" }}
+    	if err := cfg.Validate(); err == nil {{ "{" }}
+    		t.Fatal("expected error when rpc.rule_center.host_ports is empty, not a later panic")
     	{{ "}" }}
     {{ "}" }}
 

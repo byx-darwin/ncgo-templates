@@ -18,14 +18,17 @@ body: |
     	"github.com/cloudwego/kitex/client/callopt"
 
     	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/middleware"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     type fakeOAuthUserClient struct {{ "{" }}
     	userservice.Client
-    	oauthStartFn    func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error)
-    	oauthCallbackFn func(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error)
+    	oauthStartFn     func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error)
+    	oauthCallbackFn  func(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error)
+    	bindProviderFn   func(ctx context.Context, req *userv1.BindProviderReq) (*userv1.BindProviderResp, error)
+    	unbindProviderFn func(ctx context.Context, req *userv1.UnbindProviderReq) (*userv1.UnbindProviderResp, error)
     {{ "}" }}
 
     func (f *fakeOAuthUserClient) OAuthStart(ctx context.Context, req *userv1.OAuthStartReq, callOptions ...callopt.Option) (*userv1.OAuthStartResp, error) {{ "{" }}
@@ -33,6 +36,12 @@ body: |
     {{ "}" }}
     func (f *fakeOAuthUserClient) OAuthCallback(ctx context.Context, req *userv1.OAuthCallbackReq, callOptions ...callopt.Option) (*userv1.OAuthCallbackResp, error) {{ "{" }}
     	return f.oauthCallbackFn(ctx, req)
+    {{ "}" }}
+    func (f *fakeOAuthUserClient) BindProvider(ctx context.Context, req *userv1.BindProviderReq, callOptions ...callopt.Option) (*userv1.BindProviderResp, error) {{ "{" }}
+    	return f.bindProviderFn(ctx, req)
+    {{ "}" }}
+    func (f *fakeOAuthUserClient) UnbindProvider(ctx context.Context, req *userv1.UnbindProviderReq, callOptions ...callopt.Option) (*userv1.UnbindProviderResp, error) {{ "{" }}
+    	return f.unbindProviderFn(ctx, req)
     {{ "}" }}
 
     type fakeCodeStore struct {{ "{" }}
@@ -123,5 +132,75 @@ body: |
     	h.Exchange(context.Background(), c)
     	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
     		t.Fatalf("expected 401, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func newAuthenticatedOAuthTestContext(method, path, uid string, params map[string]string) *app.RequestContext {{ "{" }}
+    	c := newOAuthTestContext(method, path, "", params)
+    	c.Set(middleware.ContextKeyTokenClaims, &middleware.Claims{{ "{" }}Uid: uid{{ "}" }})
+    	return c
+    {{ "}" }}
+
+    func TestOAuthHandler_BindStart_UsesAuthenticatedUid(t *testing.T) {{ "{" }}
+    	cli := &fakeOAuthUserClient{{ "{" }}oauthStartFn: func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error) {{ "{" }}
+    		if req.Provider != "wechat" || req.Purpose != "bind" || req.Uid != "uid-authenticated" {{ "{" }}
+    			t.Fatalf("unexpected request: %+v", req)
+    		{{ "}" }}
+    		return &userv1.OAuthStartResp{{ "{" }}RedirectUrl: "https://wechat.example/authorize"{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}BindSuccessURL: "http://localhost:3000/settings"{{ "}" }}, time.Minute)
+    	c := newAuthenticatedOAuthTestContext("GET", "/auth/oauth/wechat/bind-start", "uid-authenticated", map[string]string{{ "{" }}"provider": "wechat"{{ "}" }})
+    	h.BindStart(context.Background(), c)
+    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
+    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_BindStart_MissingClaims_Returns401(t *testing.T) {{ "{" }}
+    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("GET", "/auth/oauth/wechat/bind-start", "", map[string]string{{ "{" }}"provider": "wechat"{{ "}" }})
+    	h.BindStart(context.Background(), c)
+    	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("expected 401 when no claims are set, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_BindCallback_RedirectsToBindSuccessURL(t *testing.T) {{ "{" }}
+    	cli := &fakeOAuthUserClient{{ "{" }}bindProviderFn: func(ctx context.Context, req *userv1.BindProviderReq) (*userv1.BindProviderResp, error) {{ "{" }}
+    		return &userv1.BindProviderResp{{ "{" }}{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}BindSuccessURL: "http://localhost:3000/settings"{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("GET", "/auth/oauth/wechat/bind-callback?state=s1&code=c1", "", map[string]string{{ "{" }}"provider": "wechat"{{ "}" }})
+    	h.BindCallback(context.Background(), c)
+    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
+    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
+    	{{ "}" }}
+    	loc := string(c.Response.Header.Get("Location"))
+    	if loc != "http://localhost:3000/settings" {{ "{" }}
+    		t.Fatalf("unexpected redirect location: %s", loc)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_Unbind_UsesAuthenticatedUid(t *testing.T) {{ "{" }}
+    	cli := &fakeOAuthUserClient{{ "{" }}unbindProviderFn: func(ctx context.Context, req *userv1.UnbindProviderReq) (*userv1.UnbindProviderResp, error) {{ "{" }}
+    		if req.Uid != "uid-authenticated" || req.Provider != "github" {{ "{" }}
+    			t.Fatalf("unexpected request: %+v", req)
+    		{{ "}" }}
+    		return &userv1.UnbindProviderResp{{ "{" }}{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
+    	c := newAuthenticatedOAuthTestContext("DELETE", "/auth/oauth/github/bind", "uid-authenticated", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
+    	h.Unbind(context.Background(), c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthHandler_Unbind_MissingClaims_Returns401(t *testing.T) {{ "{" }}
+    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
+    	c := newOAuthTestContext("DELETE", "/auth/oauth/github/bind", "", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
+    	h.Unbind(context.Background(), c)
+    	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("expected 401 when no claims are set, got %d", c.Response.StatusCode())
     	{{ "}" }}
     {{ "}" }}

@@ -14,6 +14,7 @@ body: |
     	"github.com/cloudwego/hertz/pkg/app"
 
     	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/oauthcode"
     	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
@@ -82,4 +83,52 @@ body: |
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"token": jwt{{ "}" }})
+    {{ "}" }}
+
+    // BindStart begins a bind-flow OAuth redirect for the authenticated user:
+    // GET /auth/oauth/:provider/bind-start (JWT-protected)
+    func (h *OAuthHandler) BindStart(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	claims, ok := middleware.GetClaims(c)
+    	if !ok {{ "{" }}
+    		response.ErrorCode(c, response.CodeTokenMissing)
+    		return
+    	{{ "}" }}
+    	provider := c.Param("provider")
+    	resp, err := h.userCli.OAuthStart(ctx, &userv1.OAuthStartReq{{ "{" }}Provider: provider, Purpose: "bind", Uid: claims.Uid{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	c.Redirect(302, []byte(resp.RedirectUrl))
+    {{ "}" }}
+
+    // BindCallback completes a bind-flow OAuth redirect: GET /auth/oauth/:provider/bind-callback
+    // The identity being bound comes from the OAuth state (set in BindStart
+    // from the authenticated caller's JWT), not from anything in this request.
+    func (h *OAuthHandler) BindCallback(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	provider := c.Param("provider")
+    	state := string(c.Query("state"))
+    	code := string(c.Query("code"))
+    	_, err := h.userCli.BindProvider(ctx, &userv1.BindProviderReq{{ "{" }}Provider: provider, State: state, Code: code{{ "}" }})
+    	if err != nil {{ "{" }}
+    		c.Redirect(302, []byte(h.redirectCfg.ErrorURL))
+    		return
+    	{{ "}" }}
+    	c.Redirect(302, []byte(h.redirectCfg.BindSuccessURL))
+    {{ "}" }}
+
+    // Unbind removes a bound third-party identity: DELETE /auth/oauth/:provider/bind (JWT-protected)
+    func (h *OAuthHandler) Unbind(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	claims, ok := middleware.GetClaims(c)
+    	if !ok {{ "{" }}
+    		response.ErrorCode(c, response.CodeTokenMissing)
+    		return
+    	{{ "}" }}
+    	provider := c.Param("provider")
+    	_, err := h.userCli.UnbindProvider(ctx, &userv1.UnbindProviderReq{{ "{" }}Uid: claims.Uid, Provider: provider{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "ok"{{ "}" }})
     {{ "}" }}

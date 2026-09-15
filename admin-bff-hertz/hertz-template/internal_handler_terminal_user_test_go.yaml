@@ -1,0 +1,179 @@
+# ncgo exported template — internal/handler/terminal_user_test.go
+path: internal/handler/terminal_user_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+    	"context"
+    	"encoding/json"
+    	"testing"
+
+    	"github.com/cloudwego/hertz/pkg/app"
+    	"github.com/cloudwego/hertz/pkg/protocol"
+    	"github.com/cloudwego/hertz/pkg/route/param"
+    	"github.com/cloudwego/kitex/client/callopt"
+
+    	"{{.Module}}/internal/pkg/response"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    type fakeTerminalUserClient struct {{ "{" }}
+    	userservice.Client
+    	banErr, unbanErr, logoutErr, unbindErr error
+    	forceLogoutCalled                      bool
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) ListUsers(ctx context.Context, req *userv1.ListUsersReq, callOptions ...callopt.Option) (*userv1.ListUsersResp, error) {{ "{" }}
+    	return &userv1.ListUsersResp{{ "{" }}Users: []*userv1.UserItem{{ "{" }}{{ "{" }}Uid: "u1", Username: "alice"{{ "}" }}{{ "}" }}, Total: 1{{ "}" }}, nil
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) GetUser(ctx context.Context, req *userv1.GetUserReq, callOptions ...callopt.Option) (*userv1.GetUserResp, error) {{ "{" }}
+    	return &userv1.GetUserResp{{ "{" }}User: &userv1.UserItem{{ "{" }}Uid: req.Uid, Username: "alice"{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) ListUserIdentities(ctx context.Context, req *userv1.ListUserIdentitiesReq, callOptions ...callopt.Option) (*userv1.ListUserIdentitiesResp, error) {{ "{" }}
+    	return &userv1.ListUserIdentitiesResp{{ "{" }}Identities: []*userv1.IdentityItem{{ "{" }}{{ "{" }}Provider: "github"{{ "}" }}{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) BanUser(ctx context.Context, req *userv1.BanUserReq, callOptions ...callopt.Option) (*userv1.BanUserResp, error) {{ "{" }}
+    	return &userv1.BanUserResp{{ "{" }}{{ "}" }}, f.banErr
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) UnbanUser(ctx context.Context, req *userv1.UnbanUserReq, callOptions ...callopt.Option) (*userv1.UnbanUserResp, error) {{ "{" }}
+    	return &userv1.UnbanUserResp{{ "{" }}{{ "}" }}, f.unbanErr
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) ForceLogout(ctx context.Context, req *userv1.ForceLogoutReq, callOptions ...callopt.Option) (*userv1.ForceLogoutResp, error) {{ "{" }}
+    	f.forceLogoutCalled = true
+    	return &userv1.ForceLogoutResp{{ "{" }}{{ "}" }}, f.logoutErr
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) AdminUnbindProvider(ctx context.Context, req *userv1.AdminUnbindProviderReq, callOptions ...callopt.Option) (*userv1.AdminUnbindProviderResp, error) {{ "{" }}
+    	return &userv1.AdminUnbindProviderResp{{ "{" }}{{ "}" }}, f.unbindErr
+    {{ "}" }}
+
+    func newTerminalUserTestCtx() (context.Context, *app.RequestContext) {{ "{" }}
+    	c := app.NewContext(0)
+    	req := protocol.NewRequest("GET", "/", nil)
+    	req.CopyTo(&c.Request)
+    	return context.Background(), c
+    {{ "}" }}
+
+    // assertParamInvalid checks that the handler rejected the request via
+    // response.ErrorCode(c, response.CodeRequestParamInvalid). The HTTP status
+    // this maps to is deliberately not asserted here: response.StatusFromCode's
+    // switch (internal/pkg/response/response.go, pre-existing scaffold code,
+    // unrelated to this handler) has no case for CodeRequestParamInvalid /
+    // CodeParamInvalid and so currently falls through to its default (500)
+    // rather than 400 — asserting the business error code is what this
+    // handler is actually responsible for.
+    func assertParamInvalid(t *testing.T, c *app.RequestContext) {{ "{" }}
+    	t.Helper()
+    	var body response.ErrBody
+    	if err := json.Unmarshal(c.Response.Body(), &body); err != nil {{ "{" }}
+    		t.Fatalf("failed to unmarshal response body %q: %v", c.Response.Body(), err)
+    	{{ "}" }}
+    	if body.Code != response.CodeRequestParamInvalid {{ "{" }}
+    		t.Fatalf("code = %d, want %d (CodeRequestParamInvalid)", body.Code, response.CodeRequestParamInvalid)
+    	{{ "}" }}
+    	if c.Response.StatusCode() == 200 {{ "{" }}
+    		t.Fatalf("status = %d, want a non-200 error status", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_List_ReturnsUsers(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	h.List(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Ban_CallsForceLogout(t *testing.T) {{ "{" }}
+    	fake := &fakeTerminalUserClient{{ "{" }}{{ "}" }}
+    	h := NewTerminalUserHandler(fake)
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.Ban(ctx, c)
+    	if !fake.forceLogoutCalled {{ "{" }}
+    		t.Fatal("expected Ban to also call ForceLogout")
+    	{{ "}" }}
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Ban_ForceLogoutFailure_StillReturns200(t *testing.T) {{ "{" }}
+    	fake := &fakeTerminalUserClient{{ "{" }}logoutErr: context.DeadlineExceeded{{ "}" }}
+    	h := NewTerminalUserHandler(fake)
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.Ban(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200 (ban succeeds even if ForceLogout fails)", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Unban_Succeeds(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.Unban(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_UnbindIdentity_UsesAdminRPC(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }}, param.Param{{ "{" }}Key: "provider", Value: "github"{{ "}" }})
+    	h.UnbindIdentity(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_UnbindIdentity_MissingProvider_ReturnsParamInvalid(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.UnbindIdentity(ctx, c)
+    	assertParamInvalid(t, c)
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Get_ReturnsUserAndIdentities(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.Get(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Get_MissingUid_ReturnsParamInvalid(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	h.Get(ctx, c)
+    	assertParamInvalid(t, c)
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Ban_MissingUid_ReturnsParamInvalid(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	h.Ban(ctx, c)
+    	assertParamInvalid(t, c)
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Unban_MissingUid_ReturnsParamInvalid(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	h.Unban(ctx, c)
+    	assertParamInvalid(t, c)
+    {{ "}" }}

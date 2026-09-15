@@ -90,6 +90,31 @@ body: |-
     	{{ "}" }}
     {{ "}" }}
 
+    func TestGetUser_ReturnsDTO(t *testing.T) {{ "{" }}
+    	id, _ := uuid.NewV7()
+    	username := "alice"
+    	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}id: {{ "{" }}ID: id, Username: &username, Nickname: "Alice", Status: user.StatusEnabled{{ "}" }}{{ "}" }}{{ "}" }}
+    	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }})
+
+    	dto, err := svc.GetUser(context.Background(), id.String())
+    	if err != nil {{ "{" }}
+    		t.Fatalf("get user: %v", err)
+    	{{ "}" }}
+    	if dto.Uid != id.String() || dto.Username != "alice" || dto.Nickname != "Alice" || dto.Status != user.StatusEnabled {{ "{" }}
+    		t.Fatalf("unexpected dto: %+v", dto)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestGetUser_NotFound_ReturnsError(t *testing.T) {{ "{" }}
+    	id, _ := uuid.NewV7()
+    	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
+    	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }})
+
+    	if _, err := svc.GetUser(context.Background(), id.String()); err == nil {{ "{" }}
+    		t.Fatal("expected error for missing user")
+    	{{ "}" }}
+    {{ "}" }}
+
     func TestListUsers_ClampsLimit(t *testing.T) {{ "{" }}
     	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
     	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }})

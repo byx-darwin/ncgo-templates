@@ -114,6 +114,28 @@ message ListUserIdentitiesResp {
   repeated IdentityItem identities = 1;
 }
 
+message GetUserReq {
+  string uid = 1;
+}
+message GetUserResp {
+  UserItem user = 1;
+}
+
+message AdminUnbindProviderReq {
+  // uid is the target end-user, specified by an admin operator via
+  // admin-bff-hertz. Trust boundary: admin-bff-hertz's own RBAC
+  // authorization (the "terminal_user:unbind-identity" permission) gates
+  // this call — user-kitex does not re-verify the caller's identity here,
+  // matching the existing admin RPC surface (BanUser/UnbanUser/ForceLogout/
+  // ListUsers already work this way: no per-call caller-identity check,
+  // trust is placed in the calling BFF having already authorized the
+  // operator). Do NOT confuse this with UnbindProviderReq, which is for
+  // self-service callers acting on their own already-authenticated uid.
+  string uid = 1;
+  string provider = 2;
+}
+message AdminUnbindProviderResp {}
+
 service UserService {
   rpc Register(RegisterReq) returns (RegisterResp);
   rpc Login(LoginReq) returns (LoginResp);
@@ -127,4 +149,7 @@ service UserService {
   rpc UnbanUser(UnbanUserReq) returns (UnbanUserResp);
   rpc ForceLogout(ForceLogoutReq) returns (ForceLogoutResp);
   rpc ListUserIdentities(ListUserIdentitiesReq) returns (ListUserIdentitiesResp);
+
+  rpc GetUser(GetUserReq) returns (GetUserResp);
+  rpc AdminUnbindProvider(AdminUnbindProviderReq) returns (AdminUnbindProviderResp);
 }

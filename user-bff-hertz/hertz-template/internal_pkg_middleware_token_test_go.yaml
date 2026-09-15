@@ -1,0 +1,80 @@
+# ncgo exported template — internal/pkg/middleware/token_test.go
+path: internal/pkg/middleware/token_test.go
+update_behavior:
+  type: cover
+body: |-
+  package middleware
+
+  import (
+      "context"
+      "testing"
+      "time"
+
+      "github.com/cloudwego/hertz/pkg/app"
+      "github.com/cloudwego/hertz/pkg/protocol"
+      "github.com/golang-jwt/jwt/v5"
+
+      "{{.Module}}/internal/base/conf"
+  )
+
+  func newTokenTestContext() *app.RequestContext {{ "{" }}
+      c := app.NewContext(0)
+      req := protocol.NewRequest("GET", "/anything", nil)
+      req.CopyTo(&c.Request)
+      return c
+  {{ "}" }}
+
+  func signTestToken(t *testing.T, secret, uid string, roles []string) string {{ "{" }}
+      t.Helper()
+      claims := Claims{{ "{" }}
+          Uid:   uid,
+          Roles: roles,
+          RegisteredClaims: jwt.RegisteredClaims{{ "{" }}
+              ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+          {{ "}" }},
+      {{ "}" }}
+      tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+      if err != nil {{ "{" }}
+          t.Fatalf("sign: %v", err)
+      {{ "}" }}
+      return tok
+  {{ "}" }}
+
+  func TestJWTAuth_ValidToken_SetsClaims(t *testing.T) {{ "{" }}
+      cfg := conf.TokenConfig{{ "{" }}Enabled: true, Header: "Authorization", SigningKey: "test-secret"{{ "}" }}
+      tok := signTestToken(t, "test-secret", "018f0000-0000-7000-8000-000000000001", []string{{ "{" }}"user"{{ "}" }})
+
+      ctx := newTokenTestContext()
+      ctx.Request.Header.Set("Authorization", "Bearer "+tok)
+
+      var reached bool
+      handler := JWTAuth(cfg)
+      handler(context.Background(), ctx)
+      if !ctx.IsAborted() {{ "{" }}
+          reached = true
+      {{ "}" }}
+      if !reached {{ "{" }}
+          t.Fatal("expected handler to call c.Next, not abort")
+      {{ "}" }}
+
+      claims, ok := GetClaims(ctx)
+      if !ok {{ "{" }}
+          t.Fatal("expected claims to be set")
+      {{ "}" }}
+      if claims.Uid != "018f0000-0000-7000-8000-000000000001" {{ "{" }}
+          t.Fatalf("expected uid to round-trip, got %q", claims.Uid)
+      {{ "}" }}
+      if len(claims.Roles) != 1 || claims.Roles[0] != "user" {{ "{" }}
+          t.Fatalf("expected roles to round-trip, got %v", claims.Roles)
+      {{ "}" }}
+  {{ "}" }}
+
+  func TestJWTAuth_MissingToken_Aborts(t *testing.T) {{ "{" }}
+      cfg := conf.TokenConfig{{ "{" }}Enabled: true, Header: "Authorization", SigningKey: "test-secret"{{ "}" }}
+      ctx := newTokenTestContext()
+
+      JWTAuth(cfg)(context.Background(), ctx)
+      if !ctx.IsAborted() {{ "{" }}
+          t.Fatal("expected missing token to abort the chain")
+      {{ "}" }}
+  {{ "}" }}

@@ -1,0 +1,105 @@
+# ncgo exported template — internal/pkg/middleware/token.go
+path: internal/pkg/middleware/token.go
+update_behavior:
+  type: cover
+body: |-
+  package middleware
+
+  import (
+      "context"
+      "errors"
+      "strings"
+
+      goerror "github.com/byx-darwin/go-tools/go-common/error"
+      "github.com/cloudwego/hertz/pkg/app"
+      "github.com/golang-jwt/jwt/v5"
+
+      "{{.Module}}/internal/base/conf"
+      "{{.Module}}/internal/pkg/response"
+  )
+
+  const ContextKeyTokenClaims = "tokenClaims"
+
+  // Claims matches exactly what user-kitex (reusing rbac-kitex's JWT
+  // issuance) signs: Uid + Roles, json key "uid" not "uuid". Do NOT copy
+  // admin-bff-hertz's Claims{UserID, UUID, AK, Roles} shape here — it
+  // decodes an empty identity from a real user-kitex-issued token (see
+  // Issue #66). This mismatch is deliberate and package-local.
+  type Claims struct {{ "{" }}
+      Uid   string   `json:"uid"`
+      Roles []string `json:"roles"`
+      jwt.RegisteredClaims
+  {{ "}" }}
+
+  func JWTAuth(cfg conf.TokenConfig) app.HandlerFunc {{ "{" }}
+      return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+          if !cfg.Enabled {{ "{" }}
+              c.Next(ctx)
+              return
+          {{ "}" }}
+          header := cfg.Header
+          if header == "" {{ "{" }}
+              header = "Authorization"
+          {{ "}" }}
+          raw := strings.TrimSpace(c.Request.Header.Get(header))
+          if strings.HasPrefix(strings.ToLower(raw), "bearer ") {{ "{" }}
+              raw = strings.TrimSpace(raw[7:])
+          {{ "}" }}
+          if raw == "" {{ "{" }}
+              response.ErrorCode(c, response.CodeTokenMissing)
+              c.Abort()
+              return
+          {{ "}" }}
+          claims, err := verifyToken(cfg, raw)
+          if err != nil {{ "{" }}
+              code, _ := response.CodeMsg(err)
+              response.ErrorCode(c, code)
+              c.Abort()
+              return
+          {{ "}" }}
+          c.Set(ContextKeyTokenClaims, claims)
+          c.Next(ctx)
+      {{ "}" }}
+  {{ "}" }}
+
+  func verifyToken(cfg conf.TokenConfig, tokenString string) (*Claims, error) {{ "{" }}
+      if cfg.SigningKey == "" {{ "{" }}
+          return nil, goerror.In("token").Code(response.CodeConfigInvalid).Public(response.MsgFromCode(response.CodeConfigInvalid)).New("token signing key is empty")
+      {{ "}" }}
+      claims := &Claims{{ "{" }}{{ "}" }}
+      options := make([]jwt.ParserOption, 0, 1)
+      if cfg.Issuer != "" {{ "{" }}
+          options = append(options, jwt.WithIssuer(cfg.Issuer))
+      {{ "}" }}
+      token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {{ "{" }}
+          if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {{ "{" }}
+              return nil, goerror.In("token").Code(response.CodeTokenInvalid).Public(response.MsgFromCode(response.CodeTokenInvalid)).New("invalid token signing method")
+          {{ "}" }}
+          return []byte(cfg.SigningKey), nil
+      {{ "}" }}, options...)
+      if err != nil {{ "{" }}
+          if errors.Is(err, jwt.ErrTokenExpired) {{ "{" }}
+              return nil, goerror.In("token").Code(response.CodeTokenExpired).Public(response.MsgFromCode(response.CodeTokenExpired)).Wrap(err)
+          {{ "}" }}
+          if errors.Is(err, jwt.ErrTokenInvalidClaims) || errors.Is(err, jwt.ErrTokenNotValidYet) {{ "{" }}
+              return nil, goerror.In("token").Code(response.CodeClaimsInvalid).Public(response.MsgFromCode(response.CodeClaimsInvalid)).Wrap(err)
+          {{ "}" }}
+          return nil, goerror.In("token").Code(response.CodeTokenInvalid).Public(response.MsgFromCode(response.CodeTokenInvalid)).Wrap(err)
+      {{ "}" }}
+      if token == nil || !token.Valid {{ "{" }}
+          return nil, goerror.In("token").Code(response.CodeTokenInvalid).Public(response.MsgFromCode(response.CodeTokenInvalid)).New("token is invalid")
+      {{ "}" }}
+      if claims.Uid == "" {{ "{" }}
+          return nil, goerror.In("token").Code(response.CodeClaimsInvalid).Public(response.MsgFromCode(response.CodeClaimsInvalid)).New("token claims missing uid")
+      {{ "}" }}
+      return claims, nil
+  {{ "}" }}
+
+  func GetClaims(c *app.RequestContext) (*Claims, bool) {{ "{" }}
+      value, ok := c.Get(ContextKeyTokenClaims)
+      if !ok {{ "{" }}
+          return nil, false
+      {{ "}" }}
+      claims, ok := value.(*Claims)
+      return claims, ok
+  {{ "}" }}

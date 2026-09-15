@@ -1,0 +1,130 @@
+# ncgo exported template — internal/handler/terminal_user.go
+path: internal/handler/terminal_user.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+    	"context"
+    	"strconv"
+
+    	"github.com/cloudwego/hertz/pkg/app"
+
+    	"{{.Module}}/internal/pkg/response"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    type TerminalUserHandler struct {{ "{" }}
+    	userCli userservice.Client
+    {{ "}" }}
+
+    func NewTerminalUserHandler(userCli userservice.Client) *TerminalUserHandler {{ "{" }}
+    	return &TerminalUserHandler{{ "{" }}userCli: userCli{{ "}" }}
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	limit := int32(20)
+    	offset := int32(0)
+    	if v := string(c.Query("limit")); v != "" {{ "{" }}
+    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+    			limit = int32(n)
+    		{{ "}" }}
+    	{{ "}" }}
+    	if v := string(c.Query("offset")); v != "" {{ "{" }}
+    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+    			offset = int32(n)
+    		{{ "}" }}
+    	{{ "}" }}
+
+    	resp, err := h.userCli.ListUsers(ctx, &userv1.ListUsersReq{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+    	response.OK(c, resp)
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) Get(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	uid := c.Param("uid")
+    	if uid == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+
+    	userResp, err := h.userCli.GetUser(ctx, &userv1.GetUserReq{{ "{" }}Uid: uid{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+
+    	identitiesResp, err := h.userCli.ListUserIdentities(ctx, &userv1.ListUserIdentitiesReq{{ "{" }}Uid: uid{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+
+    	response.OK(c, map[string]any{{ "{" }}
+    		"user":       userResp.User,
+    		"identities": identitiesResp.Identities,
+    	{{ "}" }})
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) Ban(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	uid := c.Param("uid")
+    	if uid == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+
+    	if _, err := h.userCli.BanUser(ctx, &userv1.BanUserReq{{ "{" }}Uid: uid{{ "}" }}); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+
+    	// Ban carries an implicit "force logout" per this plan's design: a
+    	// banned account should not keep using an already-issued token. A
+    	// ForceLogout failure here does not roll back the ban (the ban
+    	// itself, recorded in user-kitex's own database, is the source of
+    	// truth and already succeeded) — it's surfaced to the caller as a
+    	// concern rather than an outright failure, since ForceLogout is a
+    	// best-effort revoke (see user-kitex's own noopBlacklist fallback
+    	// when Redis is disabled — it's designed to degrade, not to be
+    	// load-bearing for the ban itself).
+    	logoutErr := ""
+    	if _, err := h.userCli.ForceLogout(ctx, &userv1.ForceLogoutReq{{ "{" }}Uid: uid{{ "}" }}); err != nil {{ "{" }}
+    		logoutErr = err.Error()
+    	{{ "}" }}
+    	response.OK(c, map[string]any{{ "{" }}"banned": true, "force_logout_error": logoutErr{{ "}" }})
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) Unban(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	uid := c.Param("uid")
+    	if uid == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+
+    	if _, err := h.userCli.UnbanUser(ctx, &userv1.UnbanUserReq{{ "{" }}Uid: uid{{ "}" }}); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "unbanned"{{ "}" }})
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) UnbindIdentity(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	uid := c.Param("uid")
+    	provider := c.Param("provider")
+    	if uid == "" || provider == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+
+    	if _, err := h.userCli.AdminUnbindProvider(ctx, &userv1.AdminUnbindProviderReq{{ "{" }}Uid: uid, Provider: provider{{ "}" }}); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "unbound"{{ "}" }})
+    {{ "}" }}

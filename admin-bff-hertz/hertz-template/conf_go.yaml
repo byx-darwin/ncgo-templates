@@ -388,7 +388,8 @@ body: |-
   }
 
   type GRPCConfig struct {
-      Authority ClientConfig `yaml:"authority"`
+      Authority    ClientConfig `yaml:"authority"`
+      TerminalUser ClientConfig `yaml:"terminal_user"`
   }
 
   type ClientConfig struct {
@@ -500,6 +501,12 @@ body: |-
           Security: SecurityConfig{
               InternalPaths: []string{"/healthz", "/readyz"},
               InternalCIDRs: []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"},
+          },
+          GRPC: GRPCConfig{
+              TerminalUser: ClientConfig{
+                  ServiceName: "userservice",
+                  HostPorts:   []string{"127.0.0.1:8890"},
+              },
           },
           CORS: CORSConfig{
               AllowOrigins:  []string{"*"},
@@ -740,6 +747,12 @@ body: |-
       }
       if err := validateServer(c.Server); err != nil {
           return err
+      }
+      if c.GRPC.TerminalUser.ServiceName == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("grpc.terminal_user.service_name is empty")
+      }
+      if len(c.GRPC.TerminalUser.HostPorts) == 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("grpc.terminal_user.host_ports is empty")
       }
       {{if .WithDatabase}}
       if c.Database.Enabled {

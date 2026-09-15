@@ -56,6 +56,18 @@ body: |-
     	return ListUsersOutput{{ "{" }}Users: dtos, Total: total{{ "}" }}, nil
     {{ "}" }}
 
+    func (s *Service) GetUser(ctx context.Context, uid string) (UserDTO, error) {{ "{" }}
+    	id, err := uuid.Parse(uid)
+    	if err != nil {{ "{" }}
+    		return UserDTO{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	u, err := s.repo.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return UserDTO{{ "{" }}{{ "}" }}, err
+    	{{ "}" }}
+    	return toUserDTO(u), nil
+    {{ "}" }}
+
     func (s *Service) BanUser(ctx context.Context, uid string) error {{ "{" }}
     	id, err := uuid.Parse(uid)
     	if err != nil {{ "{" }}

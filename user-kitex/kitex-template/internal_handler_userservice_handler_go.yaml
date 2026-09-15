@@ -111,3 +111,23 @@ body: |-
     	{{ "}" }}
     	return &userv1.ListUserIdentitiesResp{{ "{" }}Identities: items{{ "}" }}, nil
     {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) GetUser(ctx context.Context, req *userv1.GetUserReq) (*userv1.GetUserResp, error) {{ "{" }}
+    	dto, err := h.admin.GetUser(ctx, req.Uid)
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return &userv1.GetUserResp{{ "{" }}User: &userv1.UserItem{{ "{" }}Uid: dto.Uid, Username: dto.Username, Nickname: dto.Nickname, Status: int32(dto.Status){{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) AdminUnbindProvider(ctx context.Context, req *userv1.AdminUnbindProviderReq) (*userv1.AdminUnbindProviderResp, error) {{ "{" }}
+    	// Reuses the same self-service unbind logic as UnbindProvider — see
+    	// this file's UnbindProvider method above and this task's Global
+    	// Constraints note: two wire-level RPCs, one implementation, because
+    	// the actual unbind business logic (the "cannot unbind your only
+    	// auth method" safety check) must apply identically regardless of
+    	// whether the caller is the end-user themselves or an admin acting
+    	// on their behalf via admin-bff-hertz.
+    	err := h.self.UnbindProvider(ctx, req.Uid, req.Provider)
+    	return &userv1.AdminUnbindProviderResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}

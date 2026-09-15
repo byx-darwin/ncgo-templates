@@ -22,7 +22,7 @@ ncgo new my-svc --module github.com/acme/my-svc --kind kitex --template base-kit
 |---|---|---|
 | `base-hertz` | 标准 Hertz HTTP 服务（DDD 分层 + JWT + 签名 + 幂等性） | ✅ `ncgo new --kind hertz --template base-hertz` |
 | `ratelimit-hertz` | 带限流执行的 Hertz HTTP 服务（两阶段：认证前 + 认证后） | ✅ `ncgo new --kind hertz --template ratelimit-hertz` |
-| `admin-bff-hertz` | 带 RBAC 授权的 Admin BFF（JWT + Casbin + gRPC 调用权限服务） | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
+| `admin-bff-hertz` | 带 RBAC 授权与终端用户管理的 Admin BFF（JWT + Casbin + gRPC 调用权限服务 + user-kitex） | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
 | `user-bff-hertz` | 终端用户 HTTP 网关（本地登录 + OAuth 第三方登录，一次性 code 换 JWT，账号绑定解绑） | ✅ `ncgo new --kind hertz --template user-bff-hertz` |
 
 ### RPC 服务 (Kitex)

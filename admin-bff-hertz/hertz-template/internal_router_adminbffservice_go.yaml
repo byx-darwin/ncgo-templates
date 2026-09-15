@@ -13,12 +13,13 @@ body: |
     	"{{.Module}}/internal/handler"
     	"{{.Module}}/internal/pkg/middleware"
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
-    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     // Register{{.ServiceName}}BffServiceRoutes registers all adminbffservice BFF routes
-    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client) {{ "{" }}
+    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client, userCli userservice.Client) {{ "{" }}
     	cfg := conf.Get()
 
     	authHandler := handler.NewAuthHandler(rbacAuthCli)
@@ -28,6 +29,7 @@ body: |
     	menuHandler := handler.NewMenuHandler(rbacCli)
     	currentUserHandler := handler.NewCurrentUserHandler(rbacCli)
     	rateLimitHandler := handler.NewRateLimitHandler(rulecenterCli)
+    	terminalUserHandler := handler.NewTerminalUserHandler(userCli)
 
     	api := h.Group("/api/v1")
 
@@ -51,8 +53,15 @@ body: |
     	protected := api.Group("")
     	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
 
-    	// Authz middleware
-    	protected.Use(middleware.Authz(rbacCli))
+    	// NOTE: Authz(rbacCli) is intentionally NOT registered here at the
+    	// group level. Hertz's RouterGroup.combineHandlers always places a
+    	// group's Use() handlers before a route's own per-route handlers in
+    	// the final chain, and RequestContext.Next is a forward-only loop —
+    	// so a group-level Authz would always run before RequirePermission
+    	// had a chance to set the required permission on the context, and
+    	// would always take its "nothing required" branch, silently
+    	// skipping enforcement. Authz must instead be registered per-route,
+    	// immediately after RequirePermission(code), on every route below.
 
     	// Auth (logout requires auth)
     	protected.POST("/auth/logout", authHandler.Logout)
@@ -64,32 +73,42 @@ body: |
 
     	// RBAC management
     	users := protected.Group("/users")
-    	users.GET("", middleware.RequirePermission("user:list"), userHandler.List)
-    	users.GET("/:id", middleware.RequirePermission("user:read"), userHandler.Get)
-    	users.POST("", middleware.RequirePermission("user:create"), userHandler.Create)
-    	users.PUT("/:id", middleware.RequirePermission("user:update"), userHandler.Update)
-    	users.DELETE("/:id", middleware.RequirePermission("user:delete"), userHandler.Delete)
+    	users.GET("", middleware.RequirePermission("user:list"), middleware.Authz(rbacCli), userHandler.List)
+    	users.GET("/:id", middleware.RequirePermission("user:read"), middleware.Authz(rbacCli), userHandler.Get)
+    	users.POST("", middleware.RequirePermission("user:create"), middleware.Authz(rbacCli), userHandler.Create)
+    	users.PUT("/:id", middleware.RequirePermission("user:update"), middleware.Authz(rbacCli), userHandler.Update)
+    	users.DELETE("/:id", middleware.RequirePermission("user:delete"), middleware.Authz(rbacCli), userHandler.Delete)
 
     	roles := protected.Group("/roles")
-    	roles.GET("", middleware.RequirePermission("role:list"), roleHandler.List)
-    	roles.POST("", middleware.RequirePermission("role:create"), roleHandler.Create)
-    	roles.PUT("/:id", middleware.RequirePermission("role:update"), roleHandler.Update)
-    	roles.DELETE("/:id", middleware.RequirePermission("role:delete"), roleHandler.Delete)
+    	roles.GET("", middleware.RequirePermission("role:list"), middleware.Authz(rbacCli), roleHandler.List)
+    	roles.POST("", middleware.RequirePermission("role:create"), middleware.Authz(rbacCli), roleHandler.Create)
+    	roles.PUT("/:id", middleware.RequirePermission("role:update"), middleware.Authz(rbacCli), roleHandler.Update)
+    	roles.DELETE("/:id", middleware.RequirePermission("role:delete"), middleware.Authz(rbacCli), roleHandler.Delete)
 
     	perms := protected.Group("/permissions")
-    	perms.GET("", middleware.RequirePermission("permission:list"), permHandler.List)
-    	perms.GET("/:id", middleware.RequirePermission("permission:read"), permHandler.Get)
-    	perms.POST("", middleware.RequirePermission("permission:create"), permHandler.Create)
-    	perms.PUT("/:id", middleware.RequirePermission("permission:update"), permHandler.Update)
-    	perms.DELETE("/:id", middleware.RequirePermission("permission:delete"), permHandler.Delete)
+    	perms.GET("", middleware.RequirePermission("permission:list"), middleware.Authz(rbacCli), permHandler.List)
+    	perms.GET("/:id", middleware.RequirePermission("permission:read"), middleware.Authz(rbacCli), permHandler.Get)
+    	perms.POST("", middleware.RequirePermission("permission:create"), middleware.Authz(rbacCli), permHandler.Create)
+    	perms.PUT("/:id", middleware.RequirePermission("permission:update"), middleware.Authz(rbacCli), permHandler.Update)
+    	perms.DELETE("/:id", middleware.RequirePermission("permission:delete"), middleware.Authz(rbacCli), permHandler.Delete)
 
     	menus := protected.Group("/menus")
-    	menus.GET("", middleware.RequirePermission("menu:list"), menuHandler.List)
+    	menus.GET("", middleware.RequirePermission("menu:list"), middleware.Authz(rbacCli), menuHandler.List)
 
     	// Rate limit rules management
     	rules := protected.Group("/rate-limit-rules")
-    	rules.GET("", middleware.RequirePermission("rate_limit:list"), rateLimitHandler.List)
-    	rules.POST("", middleware.RequirePermission("rate_limit:create"), rateLimitHandler.Create)
-    	rules.PUT("/:id", middleware.RequirePermission("rate_limit:update"), rateLimitHandler.Update)
-    	rules.DELETE("/:id", middleware.RequirePermission("rate_limit:delete"), rateLimitHandler.Delete)
+    	rules.GET("", middleware.RequirePermission("rate_limit:list"), middleware.Authz(rbacCli), rateLimitHandler.List)
+    	rules.POST("", middleware.RequirePermission("rate_limit:create"), middleware.Authz(rbacCli), rateLimitHandler.Create)
+    	rules.PUT("/:id", middleware.RequirePermission("rate_limit:update"), middleware.Authz(rbacCli), rateLimitHandler.Update)
+    	rules.DELETE("/:id", middleware.RequirePermission("rate_limit:delete"), middleware.Authz(rbacCli), rateLimitHandler.Delete)
+
+    	// Terminal (end-user) management — distinct from /users (RBAC admin
+    	// accounts above): these call user-kitex, not rbacservice. See this
+    	// plan's design doc for the naming-collision rationale.
+    	terminalUsers := protected.Group("/terminal-users")
+    	terminalUsers.GET("", middleware.RequirePermission("terminal_user:list"), middleware.Authz(rbacCli), terminalUserHandler.List)
+    	terminalUsers.GET("/:uid", middleware.RequirePermission("terminal_user:read"), middleware.Authz(rbacCli), terminalUserHandler.Get)
+    	terminalUsers.POST("/:uid/ban", middleware.RequirePermission("terminal_user:ban"), middleware.Authz(rbacCli), terminalUserHandler.Ban)
+    	terminalUsers.POST("/:uid/unban", middleware.RequirePermission("terminal_user:unban"), middleware.Authz(rbacCli), terminalUserHandler.Unban)
+    	terminalUsers.DELETE("/:uid/identities/:provider", middleware.RequirePermission("terminal_user:unbind-identity"), middleware.Authz(rbacCli), terminalUserHandler.UnbindIdentity)
     {{ "}" }}

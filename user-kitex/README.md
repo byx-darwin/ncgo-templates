@@ -25,14 +25,17 @@ ncgo new user --module github.com/acme/user --kind kitex \
 - `idl/user.proto` — `user.v1.UserService`:
   - **Self-service**: Register / Login / OAuthStart / OAuthCallback /
     BindProvider / UnbindProvider
-  - **Admin**: ListUsers / BanUser / UnbanUser / ForceLogout /
-    ListUserIdentities
+  - **Admin**: ListUsers / GetUser / BanUser / UnbanUser / ForceLogout /
+    ListUserIdentities / AdminUnbindProvider
 - **DDD layers**:
   - `internal/domain/user` — `User`/`Identity` entities, `Repository` port.
   - `internal/application/user` (`usersvc`) — self-service usecases: local
     register/login, OAuth start/callback/bind/unbind.
   - `internal/application/useradmin` (`useradminsvc`) — admin usecases:
-    list/ban/unban/force-logout/list-identities.
+    list/get/ban/unban/force-logout/list-identities. `AdminUnbindProvider`
+    is deliberately *not* here: its handler delegates to `usersvc`'s
+    `UnbindProvider` so the "cannot unbind your only authentication method"
+    safety check applies identically to self-service and admin callers.
 - **Infrastructure**:
   - `internal/infrastructure/auth` — HS256 JWT (`{uid, roles: ["user"]}`) +
     argon2id password hashing (reused conventions from `rbac-kitex`).

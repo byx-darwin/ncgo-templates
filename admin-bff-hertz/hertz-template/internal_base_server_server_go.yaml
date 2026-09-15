@@ -22,6 +22,7 @@ body: |
         authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
         rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
         ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     func Run() {{ "{" }}
@@ -103,8 +104,17 @@ body: |
             log.Fatalf("create rule client: %v", err)
         {{ "}" }}
 
+        userAddr := cfg.GRPC.TerminalUser.HostPorts[0]
+        userCli, err := userservice.NewClient(
+            cfg.GRPC.TerminalUser.ServiceName,
+            client.WithHostPorts(userAddr),
+        )
+        if err != nil {{ "{" }}
+            log.Fatalf("create terminal-user client: %v", err)
+        {{ "}" }}
+
         // Register routes
-        router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli)
+        router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli, userCli)
 
         // Start server
         h.Spin()

@@ -60,6 +60,28 @@ grpc:
     rpc_timeout_seconds: 5
 ```
 
+Connect to the `user-kitex` service (required for Terminal User Management routes — see [API Routes](#terminal-user-management)):
+
+```yaml
+grpc:
+  terminal_user:
+    service_name: "userservice"
+    host_ports:
+      - "127.0.0.1:8890"
+    rpc_timeout_seconds: 3
+    connect_timeout_milliseconds: 100
+```
+
+> The values above are the shipped `conf/dev/conf.yaml` defaults. Note that
+> `rpc_timeout_seconds` / `connect_timeout_milliseconds` / `retry` are parsed
+> into `conf.ClientConfig` but are **not** currently applied to the Kitex
+> clients created in `internal/base/server/server.go` (which pass only
+> `client.WithHostPorts`). This is a pre-existing gap shared with
+> `grpc.authority` — set them for forward compatibility, but do not rely on
+> them to bound RPC latency today.
+
+> **`ForceLogout` caveat:** `POST /api/v1/terminal-users/:uid/ban` triggers `ForceLogout` on `user-kitex` automatically. If the `user-kitex` instance behind `grpc.terminal_user` has its own Redis blacklist disabled (`redis.enabled: false` in its config), `ForceLogout` succeeds at the API level but revokes nothing — this matches `user-kitex`'s documented `noopBlacklist` fallback behavior, not a bug in `admin-bff-hertz`. Enable Redis in `user-kitex` if you need bans to actually invalidate outstanding access tokens.
+
 ### RBAC Authorization
 
 Authorization is handled via Casbin policies:
@@ -154,6 +176,31 @@ PUT    /api/v1/rate-limit-rules/:id  # permission: rate_limit:update
 DELETE /api/v1/rate-limit-rules/:id  # permission: rate_limit:delete
 ```
 
+#### Terminal User Management
+
+Distinct from `/api/v1/users` above: these routes manage end-user (terminal) accounts owned by `user-kitex`, not RBAC admin accounts owned by the authority service. They call `user-kitex` via `grpc.terminal_user` (see [Configuration](#grpc-connection) above), not `rbacservice`.
+
+```
+GET    /api/v1/terminal-users                          # permission: terminal_user:list
+GET    /api/v1/terminal-users/:uid                      # permission: terminal_user:read
+POST   /api/v1/terminal-users/:uid/ban                  # permission: terminal_user:ban
+POST   /api/v1/terminal-users/:uid/unban                # permission: terminal_user:unban
+DELETE /api/v1/terminal-users/:uid/identities/:provider  # permission: terminal_user:unbind-identity
+```
+
+`POST .../ban` bans the account and then makes a best-effort `ForceLogout`
+call. The ban is the source of truth and is never rolled back, so the route
+returns `200` even when `ForceLogout` fails; the failure is reported in the
+response body rather than in the status code:
+
+```json
+{ "banned": true, "force_logout_error": "" }
+```
+
+A non-empty `force_logout_error` means the account is banned but previously
+issued access tokens may still be usable until they expire — clients that care
+about immediate revocation must check this field, not just the status code.
+
 ## Middleware Stack
 
 ### Request Flow
@@ -192,11 +239,32 @@ DELETE /api/v1/rate-limit-rules/:id  # permission: rate_limit:delete
 
 Standard naming convention: `resource:action`
 
-Examples:
-- `user:list` - List users
-- `user:create` - Create user
-- `role:update` - Update role
-- `permission:delete` - Delete permission
+| Code | Description |
+|------|-------------|
+| `user:list` | List users |
+| `user:read` | Get user detail |
+| `user:create` | Create user |
+| `user:update` | Update user |
+| `user:delete` | Delete user |
+| `role:list` | List roles |
+| `role:create` | Create role |
+| `role:update` | Update role |
+| `role:delete` | Delete role |
+| `permission:list` | List permissions |
+| `permission:read` | Get permission detail |
+| `permission:create` | Create permission |
+| `permission:update` | Update permission |
+| `permission:delete` | Delete permission |
+| `menu:list` | List menus |
+| `rate_limit:list` | List rate limit rules |
+| `rate_limit:create` | Create rate limit rule |
+| `rate_limit:update` | Update rate limit rule |
+| `rate_limit:delete` | Delete rate limit rule |
+| `terminal_user:list` | List terminal (end-user) accounts |
+| `terminal_user:read` | Get terminal user detail |
+| `terminal_user:ban` | Ban a terminal user (also triggers `ForceLogout`, see [gRPC Connection](#grpc-connection)) |
+| `terminal_user:unban` | Unban a terminal user |
+| `terminal_user:unbind-identity` | Unbind a third-party identity provider from a terminal user |
 
 ### Casbin Policy Model
 
@@ -372,11 +440,16 @@ make build
 make test
 ```
 
+## Seams
+
+- **`Authz` middleware ordering bug, fixed by this plan.** Prior to this plan, `middleware.Authz(rbacCli)` was registered at the `protected` route-group level via `.Use(...)`, before any per-route `RequirePermission(code)` had a chance to run. Because Hertz's `RouterGroup.combineHandlers` always places group-level `Use()` handlers ahead of a route's own handlers, and `RequestContext.Next` is a forward-only loop, `Authz` always executed with "no permission required yet" on the context and always took its no-op branch — silently skipping enforcement on **every** protected route in this package (all 19 pre-existing routes, not just the 5 new terminal-user ones). This plan fixed it by moving `Authz(rbacCli)` to run per-route, immediately after `RequirePermission(code)`, on every route. **If you are upgrading an existing deployment past this plan, be aware:** RBAC permission checks that were previously inert (any authenticated user could call any protected route regardless of assigned permissions) now actually enforce. Review your Casbin policies before rolling this out, or users without the right permission grants will start seeing `403 permission_denied` on routes that previously "worked."
+
 ## Related Templates
 
 - **base-hertz** - Basic HTTP service (no RBAC)
 - **ratelimit-hertz** - HTTP service with rate limiting execution
 - **admin-services-kitex** - Authority service (RBAC + Rule Center)
+- **user-kitex** - End-user account RPC service backing Terminal User Management (`GetUser`, `AdminUnbindProvider`, and the `BanUser`/`UnbanUser`/`ForceLogout`/`ListUsers`/`ListUserIdentities` RPCs this package's terminal-user routes call)
 
 ## License
 

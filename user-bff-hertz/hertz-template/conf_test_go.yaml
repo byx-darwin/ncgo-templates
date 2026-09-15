@@ -8,7 +8,7 @@
 path: internal/base/conf/conf_test.go
 update_behavior:
     type: cover
-body: |-
+body: |
     package conf
 
     import "testing"

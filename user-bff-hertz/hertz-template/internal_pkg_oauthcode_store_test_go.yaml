@@ -2,7 +2,7 @@
 path: internal/pkg/oauthcode/store_test.go
 update_behavior:
     type: cover
-body: |-
+body: |
     package oauthcode
 
     import (

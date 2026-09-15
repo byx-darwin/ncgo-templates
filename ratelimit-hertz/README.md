@@ -265,7 +265,11 @@ type Claims struct {
 }
 ```
 
-`Uid` comes from a verified JWT (`TokenAuth`); `AK` comes from a verified HMAC signature (`SignatureAuth`, `X-App-Key`/`X-Signature` headers) — a separate, non-JWT open-API auth path. `TokenAuth` preserves any `AK` `SignatureAuth` already set earlier in the chain instead of overwriting it, so a request that carries both (signed + JWT-authenticated) ends up with both fields populated.
+`Uid` comes from a verified JWT (`TokenAuth`); `AK` comes from a verified HMAC signature (`SignatureAuth`, `X-App-Key`/`X-Signature` headers) — a separate, non-JWT open-API auth path. `TokenAuth` preserves any `AK` `SignatureAuth` already set earlier in the chain instead of overwriting it.
+
+**Registration order limits what's actually reachable today** (`signature → idempotency → JWT`, with `RateLimit` registered engine-level even earlier via `h.Use(...)` in `server.go`, before the router's `SignatureAuth`): `idempotency.go`'s plain `ak:`-scoped branch is live — a signed request now gets a verified-`AK`-scoped key instead of falling back to the unverified `X-App-Key` header. The `ak_user_uuid:` combined branch and `rate_limit.go`'s `AK`/`Uid` reads are **not yet reachable** — idempotency runs before `TokenAuth` (`Uid` always empty there), and both `RateLimit` phases run before `SignatureAuth`/`TokenAuth` (`AK`/`Uid` always empty there, despite the `pre_auth`/`post_auth` phase names). Tracked separately as a middleware-ordering issue.
+
+A JWT can also carry its own `ak` claim; if `SignatureAuth` never ran, `TokenAuth` passes that value through unverified by the HMAC path (only the JWT's own signature backs it).
 
 ## Integration with Rule Center
 

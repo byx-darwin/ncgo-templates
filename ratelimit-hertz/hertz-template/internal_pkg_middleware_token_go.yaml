@@ -103,6 +103,13 @@ body: |-
     	return claims, nil
     }
 
+    // GetClaims returns the request's identity claims, if any middleware in the
+    // chain has set them. ok==true no longer implies a JWT was verified: since
+    // SignatureAuth also populates this context key (Claims.AK only, no Uid),
+    // a route with signature-but-no-JWT auth will observe ok==true here. Callers
+    // that mean "was this request JWT-authenticated" must also check
+    // claims.Uid != "" — a bare `if !ok` guard is only safe on routes gated
+    // behind TokenAuth (where JWT is mandatory).
     func GetClaims(c *app.RequestContext) (*Claims, bool) {
     	value, ok := c.Get(ContextKeyTokenClaims)
     	if !ok {

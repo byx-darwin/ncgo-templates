@@ -48,7 +48,7 @@ body: |
     	secret := "test-secret"
     	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
     		"uid": "user-123",
-    		"exp":  time.Now().Add(-time.Hour).Unix(),
+    		"exp": time.Now().Add(-time.Hour).Unix(),
     	{{ "}" }})
     	tokenStr, _ := token.SignedString([]byte(secret))
 

@@ -72,7 +72,7 @@ body: |
     			return
     		{{ "}" }}
 
-    		uuid, _ := claims["uid"].(string)
+    		uid, _ := claims["uid"].(string)
     		rolesRaw, _ := claims["roles"].([]interface{{ "{" }}{{ "}" }})
     		roles := make([]string, 0, len(rolesRaw))
     		for _, r := range rolesRaw {{ "{" }}
@@ -83,7 +83,7 @@ body: |
 
     		// Store claims in context using the existing Claims type
     		c.Set(ContextKeyTokenClaims, &Claims{{ "{" }}
-    			Uid:   uuid,
+    			Uid:   uid,
     			Roles: roles,
     		{{ "}" }})
 

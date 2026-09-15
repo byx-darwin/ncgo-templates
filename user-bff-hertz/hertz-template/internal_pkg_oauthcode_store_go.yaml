@@ -1,0 +1,66 @@
+# ncgo exported template — internal/pkg/oauthcode/store.go
+path: internal/pkg/oauthcode/store.go
+update_behavior:
+    type: cover
+body: |-
+    package oauthcode
+
+    import (
+    	"context"
+    	"errors"
+    	"time"
+
+    	"github.com/google/uuid"
+    	"github.com/redis/go-redis/v9"
+    )
+
+    // Store issues one-time codes that redeem a previously-issued JWT
+    // exactly once. Used to hand a JWT to the frontend after a browser
+    // OAuth redirect completes, without putting the JWT itself in a URL
+    // (URLs end up in browser history, Referrer headers, and server access
+    // logs). Independent of user-kitex's own OAuth CSRF StateStore — this
+    // store's codes flow BFF -> frontend, not BFF -> third-party provider.
+    type Store interface {{ "{" }}
+    	// Put stores jwt under a freshly generated code, valid for ttl, and
+    	// returns the code.
+    	Put(ctx context.Context, jwt string, ttl time.Duration) (code string, err error)
+    	// Consume reports whether code was valid and, if so, deletes it so
+    	// it cannot be redeemed twice, returning the jwt it was issued for.
+    	Consume(ctx context.Context, code string) (jwt string, ok bool, err error)
+    {{ "}" }}
+
+    const codeKeyPrefix = "oauthcode:"
+
+    // RedisStore stores one-time codes in Redis with a TTL and atomically
+    // deletes them on first consumption (GETDEL).
+    type RedisStore struct {{ "{" }}
+    	client *redis.Client
+    {{ "}" }}
+
+    // NewRedisStore wraps an existing Redis client.
+    func NewRedisStore(client *redis.Client) *RedisStore {{ "{" }}
+    	return &RedisStore{{ "{" }}client: client{{ "}" }}
+    {{ "}" }}
+
+    // Put generates a fresh code, stores jwt under it for ttl, and returns
+    // the code.
+    func (s *RedisStore) Put(ctx context.Context, jwt string, ttl time.Duration) (string, error) {{ "{" }}
+    	code := uuid.NewString()
+    	if err := s.client.Set(ctx, codeKeyPrefix+code, jwt, ttl).Err(); err != nil {{ "{" }}
+    		return "", err
+    	{{ "}" }}
+    	return code, nil
+    {{ "}" }}
+
+    // Consume reports whether code was valid and, if so, deletes it so it
+    // cannot be redeemed twice, returning the jwt it was issued for.
+    func (s *RedisStore) Consume(ctx context.Context, code string) (string, bool, error) {{ "{" }}
+    	jwt, err := s.client.GetDel(ctx, codeKeyPrefix+code).Result()
+    	if errors.Is(err, redis.Nil) {{ "{" }}
+    		return "", false, nil
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return "", false, err
+    	{{ "}" }}
+    	return jwt, true, nil
+    {{ "}" }}

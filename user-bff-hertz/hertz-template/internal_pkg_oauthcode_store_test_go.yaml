@@ -1,0 +1,81 @@
+# ncgo exported template — internal/pkg/oauthcode/store_test.go
+path: internal/pkg/oauthcode/store_test.go
+update_behavior:
+    type: cover
+body: |-
+    package oauthcode
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/alicebob/miniredis/v2"
+    	"github.com/redis/go-redis/v9"
+    )
+
+    func newTestRedis(t *testing.T) *redis.Client {{ "{" }}
+    	t.Helper()
+    	mr, err := miniredis.Run()
+    	if err != nil {{ "{" }}
+    		t.Fatalf("start miniredis: %v", err)
+    	{{ "}" }}
+    	t.Cleanup(mr.Close)
+    	return redis.NewClient(&redis.Options{{ "{" }}Addr: mr.Addr(){{ "}" }})
+    {{ "}" }}
+
+    func TestRedisStore_PutConsume(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := NewRedisStore(newTestRedis(t))
+
+    	code, err := store.Put(ctx, "signed-jwt-value", time.Minute)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("put: %v", err)
+    	{{ "}" }}
+    	if code == "" {{ "{" }}
+    		t.Fatal("expected a non-empty code")
+    	{{ "}" }}
+
+    	jwt, ok, err := store.Consume(ctx, code)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if !ok || jwt != "signed-jwt-value" {{ "{" }}
+    		t.Fatalf("expected to consume the jwt, got ok=%v jwt=%q", ok, jwt)
+    	{{ "}" }}
+
+    	_, ok, err = store.Consume(ctx, code)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume again: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("expected code to be gone after first consume (single use)")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRedisStore_UnknownCode(t *testing.T) {{ "{" }}
+    	store := NewRedisStore(newTestRedis(t))
+    	_, ok, err := store.Consume(context.Background(), "never-issued")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("consume: %v", err)
+    	{{ "}" }}
+    	if ok {{ "{" }}
+    		t.Fatal("expected unknown code to report not-found")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRedisStore_DistinctCodesPerCall(t *testing.T) {{ "{" }}
+    	ctx := context.Background()
+    	store := NewRedisStore(newTestRedis(t))
+    	code1, err := store.Put(ctx, "jwt-1", time.Minute)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("put 1: %v", err)
+    	{{ "}" }}
+    	code2, err := store.Put(ctx, "jwt-2", time.Minute)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("put 2: %v", err)
+    	{{ "}" }}
+    	if code1 == code2 {{ "{" }}
+    		t.Fatal("expected distinct codes for distinct Put calls")
+    	{{ "}" }}
+    {{ "}" }}

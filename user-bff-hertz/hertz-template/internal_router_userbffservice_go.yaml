@@ -42,10 +42,17 @@ body: |
     	oauth.GET("/:provider/callback", oauthHandler.Callback)
     	oauth.POST("/exchange", oauthHandler.Exchange)
 
-    	// Protected: bind flow requires an authenticated user
+    	// bind-callback is a browser redirect from the OAuth provider and
+    	// cannot carry an Authorization header; identity comes from the
+    	// OAuth state (embedded with uid at bind-start time), not from a
+    	// JWT here. It MUST stay outside the protected group below — same
+    	// reasoning as the login flow's own /:provider/callback above.
+    	oauth.GET("/:provider/bind-callback", oauthHandler.BindCallback)
+
+    	// Protected: bind-start and unbind require an authenticated user
+    	// (bind-callback does NOT — see above)
     	protected := oauth.Group("")
     	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
     	protected.GET("/:provider/bind-start", oauthHandler.BindStart)
-    	protected.GET("/:provider/bind-callback", oauthHandler.BindCallback)
     	protected.DELETE("/:provider/bind", oauthHandler.Unbind)
     {{ "}" }}

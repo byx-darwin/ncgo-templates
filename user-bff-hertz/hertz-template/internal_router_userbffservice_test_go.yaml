@@ -1,0 +1,142 @@
+# ncgo exported template — internal/router/userbffservice_test.go
+path: internal/router/userbffservice_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package router
+
+    import (
+    	"context"
+    	"errors"
+    	"os"
+    	"path/filepath"
+    	"testing"
+    	"time"
+
+    	"github.com/cloudwego/hertz/pkg/app/server"
+    	"github.com/cloudwego/hertz/pkg/common/ut"
+    	"github.com/cloudwego/hertz/pkg/protocol/consts"
+    	"github.com/cloudwego/hertz/pkg/route"
+    	"github.com/cloudwego/kitex/client/callopt"
+
+    	"{{.Module}}/internal/pkg/oauthcode"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    // testRouterConfYAML is a minimal conf.yaml satisfying conf.Config's
+    // Validate(): auth.token is enabled with a signing key so JWTAuth
+    // actually enforces 401s in this test, matching a real deployment
+    // (the package's own README documents auth.token.enabled: true as
+    // required config).
+    const testRouterConfYAML = `
+    env: test
+    rpc:
+      user_service:
+        service_name: "userservice"
+        host_ports:
+          - "127.0.0.1:8888"
+      rule_center:
+        service_name: "rulecenterservice"
+        host_ports:
+          - "127.0.0.1:8889"
+    auth:
+      token:
+        enabled: true
+        header: "Authorization"
+        signing_key: "router-test-secret"
+    oauth_redirect:
+      success_url: "http://localhost/success"
+      bind_success_url: "http://localhost/bind-success"
+      error_url: "http://localhost/error"
+    `
+
+    // TestMain points conf.Get()'s lazy singleton at a config with
+    // auth.token.enabled: true before any test in this package runs, since
+    // conf.Init() only loads once per process (sync.Once) and this package
+    // has no other test file that would race it.
+    func TestMain(m *testing.M) {{ "{" }}
+    	dir, err := os.MkdirTemp("", "userbffservice-router-test")
+    	if err != nil {{ "{" }}
+    		panic(err)
+    	{{ "}" }}
+    	path := filepath.Join(dir, "conf.yaml")
+    	if err := os.WriteFile(path, []byte(testRouterConfYAML), 0o644); err != nil {{ "{" }}
+    		panic(err)
+    	{{ "}" }}
+    	os.Setenv("CONFIG_PATH", path)
+    	code := m.Run()
+    	os.RemoveAll(dir)
+    	os.Exit(code)
+    {{ "}" }}
+
+    // fakeRouterUserClient only implements the methods this test's routes
+    // actually reach past JWTAuth (BindProvider, for the unauthenticated
+    // bind-callback route). Every other method panics via the nil embedded
+    // Client if called — which would itself indicate a test bug (a route
+    // that should have been blocked by JWTAuth wasn't).
+    type fakeRouterUserClient struct {{ "{" }}
+    	userservice.Client
+    {{ "}" }}
+
+    func (f *fakeRouterUserClient) BindProvider(ctx context.Context, req *userv1.BindProviderReq, callOptions ...callopt.Option) (*userv1.BindProviderResp, error) {{ "{" }}
+    	// Synthetic failure is expected here: a real provider redirect carries
+    	// state/code, but this test only asserts bind-callback is NOT blocked
+    	// by JWTAuth — it doesn't need BindProvider to succeed.
+    	return nil, errors.New("synthetic: no real rpc in router test")
+    {{ "}" }}
+
+    type noopRouterCodeStore struct{{ "{" }}{{ "}" }}
+
+    func (noopRouterCodeStore) Put(ctx context.Context, jwt string, ttl time.Duration) (string, error) {{ "{" }}
+    	return "", nil
+    {{ "}" }}
+
+    func (noopRouterCodeStore) Consume(ctx context.Context, code string) (string, bool, error) {{ "{" }}
+    	return "", false, nil
+    {{ "}" }}
+
+    var _ oauthcode.Store = noopRouterCodeStore{{ "{" }}{{ "}" }}
+
+    func newRouterTestEngine(t *testing.T) *route.Engine {{ "{" }}
+    	t.Helper()
+    	h := server.New()
+    	Register{{.ServiceName}}BffServiceRoutes(h, &fakeRouterUserClient{{ "{" }}{{ "}" }}, noopRouterCodeStore{{ "{" }}{{ "}" }}, nil)
+    	return h.Engine
+    {{ "}" }}
+
+    // TestBindCallback_NoAuthHeader_NotBlockedByJWTAuth is the fix-1 probe:
+    // a real OAuth-provider redirect to bind-callback carries no
+    // Authorization header (browsers don't attach custom headers to
+    // top-level navigations), so bind-callback must NOT sit behind JWTAuth.
+    // It should reach OAuthHandler.BindCallback (which then 302s to the
+    // error URL because the synthetic BindProvider call above fails) rather
+    // than being aborted with 401 by the auth middleware.
+    func TestBindCallback_NoAuthHeader_NotBlockedByJWTAuth(t *testing.T) {{ "{" }}
+    	engine := newRouterTestEngine(t)
+    	w := ut.PerformRequest(engine, "GET", "/auth/oauth/github/bind-callback?state=s&code=c", nil)
+    	resp := w.Result()
+    	if resp.StatusCode() == consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("bind-callback was blocked by JWTAuth (401) — it must be reachable without an Authorization header, since it's a browser redirect from the OAuth provider")
+    	{{ "}" }}
+    	if resp.StatusCode() != consts.StatusFound {{ "{" }}
+    		t.Fatalf("expected bind-callback to reach the handler and redirect (302), got %d", resp.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestBindStartAndUnbind_NoAuthHeader_StillBlocked is the regression
+    // check: bind-start and unbind must still require a JWT.
+    func TestBindStartAndUnbind_NoAuthHeader_StillBlocked(t *testing.T) {{ "{" }}
+    	engine := newRouterTestEngine(t)
+
+    	w := ut.PerformRequest(engine, "GET", "/auth/oauth/github/bind-start", nil)
+    	if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("bind-start: expected 401 without Authorization header, got %d", got)
+    	{{ "}" }}
+
+    	w = ut.PerformRequest(engine, "DELETE", "/auth/oauth/github/bind", nil)
+    	if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("unbind: expected 401 without Authorization header, got %d", got)
+    	{{ "}" }}
+    {{ "}" }}

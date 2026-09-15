@@ -15,10 +15,11 @@ body: |
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
     	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     // Register{{.ServiceName}}BffServiceRoutes registers all adminbffservice BFF routes
-    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client) {{ "{" }}
+    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client, userCli userservice.Client) {{ "{" }}
     	cfg := conf.Get()
 
     	authHandler := handler.NewAuthHandler(rbacAuthCli)
@@ -28,6 +29,7 @@ body: |
     	menuHandler := handler.NewMenuHandler(rbacCli)
     	currentUserHandler := handler.NewCurrentUserHandler(rbacCli)
     	rateLimitHandler := handler.NewRateLimitHandler(rulecenterCli)
+    	terminalUserHandler := handler.NewTerminalUserHandler(userCli)
 
     	api := h.Group("/api/v1")
 
@@ -99,4 +101,14 @@ body: |
     	rules.POST("", middleware.RequirePermission("rate_limit:create"), middleware.Authz(rbacCli), rateLimitHandler.Create)
     	rules.PUT("/:id", middleware.RequirePermission("rate_limit:update"), middleware.Authz(rbacCli), rateLimitHandler.Update)
     	rules.DELETE("/:id", middleware.RequirePermission("rate_limit:delete"), middleware.Authz(rbacCli), rateLimitHandler.Delete)
+
+    	// Terminal (end-user) management — distinct from /users (RBAC admin
+    	// accounts above): these call user-kitex, not rbacservice. See this
+    	// plan's design doc for the naming-collision rationale.
+    	terminalUsers := protected.Group("/terminal-users")
+    	terminalUsers.GET("", middleware.RequirePermission("terminal_user:list"), middleware.Authz(rbacCli), terminalUserHandler.List)
+    	terminalUsers.GET("/:uid", middleware.RequirePermission("terminal_user:read"), middleware.Authz(rbacCli), terminalUserHandler.Get)
+    	terminalUsers.POST("/:uid/ban", middleware.RequirePermission("terminal_user:ban"), middleware.Authz(rbacCli), terminalUserHandler.Ban)
+    	terminalUsers.POST("/:uid/unban", middleware.RequirePermission("terminal_user:unban"), middleware.Authz(rbacCli), terminalUserHandler.Unban)
+    	terminalUsers.DELETE("/:uid/identities/:provider", middleware.RequirePermission("terminal_user:unbind-identity"), middleware.Authz(rbacCli), terminalUserHandler.UnbindIdentity)
     {{ "}" }}

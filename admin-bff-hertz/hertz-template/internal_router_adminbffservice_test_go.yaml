@@ -21,9 +21,11 @@ body: |
     	"github.com/golang-jwt/jwt/v5"
 
     	rbacv1 "{{.Module}}/kitex_gen/api/rbac/v1"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
     	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     // testRouterConfYAML is a minimal conf.yaml satisfying conf.Config's
@@ -84,12 +86,28 @@ body: |
     	return &rbacv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
     {{ "}" }}
 
+    // fakeRouterUserClient is a minimal fake userservice.Client. It embeds
+    // the real interface (so any unexercised method panics via the nil
+    // embedded Client, itself indicating a test bug) and overrides only
+    // ListUsers, which TestTerminalUsersRoute_AllowedPermission_Returns200
+    // needs the real terminalUserHandler.List to reach once Authz allows
+    // the request through — mirroring fakeRouterRBACClient's ListUsers
+    // override for the analogous /users case.
+    type fakeRouterUserClient struct {{ "{" }}
+    	userservice.Client
+    {{ "}" }}
+
+    func (f *fakeRouterUserClient) ListUsers(ctx context.Context, req *userv1.ListUsersReq, callOptions ...callopt.Option) (*userv1.ListUsersResp, error) {{ "{" }}
+    	return &userv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
+    {{ "}" }}
+
     func newRouterTestEngine(t *testing.T, rbacCli rbacservice.Client) *route.Engine {{ "{" }}
     	t.Helper()
     	h := server.New()
     	var authCli authservice.Client
     	var ruleCli ruleservice.Client
-    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli)
+    	userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
+    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli)
     	return h.Engine
     {{ "}" }}
 
@@ -158,5 +176,40 @@ body: |
     	w := ut.PerformRequest(engine, "GET", "/api/v1/users", nil)
     	if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
     		t.Fatalf("expected 401 for GET /api/v1/users without an Authorization header, got %d", got)
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestTerminalUsersRoute_DeniedPermission_Returns403 proves the same
+    // property Task 3 proved for /users, now for the new /terminal-users
+    // routes added by this task: a JWT-authenticated but RBAC-denied
+    // request must get 403, confirming these new routes use the correct
+    // per-route RequirePermission+Authz pairing (not the buggy
+    // group-level registration Task 3 fixed).
+    func TestTerminalUsersRoute_DeniedPermission_Returns403(t *testing.T) {{ "{" }}
+    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }})
+    	jwtToken := newRouterTestJWT(t)
+
+    	w := ut.PerformRequest(engine, "GET", "/api/v1/terminal-users",
+    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+    	resp := w.Result()
+
+    	if resp.StatusCode() != consts.StatusForbidden {{ "{" }}
+    		t.Fatalf("expected 403 (permission denied) for a JWT-authenticated but RBAC-denied request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestTerminalUsersRoute_AllowedPermission_Returns200 is the companion
+    // positive case: an RBAC-allowed request to /terminal-users must still
+    // reach the real handler and succeed.
+    func TestTerminalUsersRoute_AllowedPermission_Returns200(t *testing.T) {{ "{" }}
+    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+    	jwtToken := newRouterTestJWT(t)
+
+    	w := ut.PerformRequest(engine, "GET", "/api/v1/terminal-users",
+    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+    	resp := w.Result()
+
+    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
+    		t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
     	{{ "}" }}
     {{ "}" }}

@@ -23,6 +23,7 @@ The registry URL defaults to this repository; override with `--registry <url>` o
 | `base-hertz` | Standard Hertz HTTP service (DDD layered layout + JWT + signature + idempotency) | ✅ `ncgo new --kind hertz --template base-hertz` |
 | `ratelimit-hertz` | Hertz HTTP service with rate limiting execution (two-phase: pre-auth + post-auth) | ✅ `ncgo new --kind hertz --template ratelimit-hertz` |
 | `admin-bff-hertz` | Admin BFF with RBAC authorization (JWT + Casbin + gRPC to authority) | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
+| `user-bff-hertz` | End-user HTTP gateway (local login + third-party OAuth login, one-time code JWT exchange, account bind/unbind) | ✅ `ncgo new --kind hertz --template user-bff-hertz` |
 
 ### RPC Services (Kitex)
 

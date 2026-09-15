@@ -13,8 +13,8 @@ body: |
     	"{{.Module}}/internal/handler"
     	"{{.Module}}/internal/pkg/middleware"
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
-    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 

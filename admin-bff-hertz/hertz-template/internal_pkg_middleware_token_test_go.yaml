@@ -10,6 +10,8 @@ body: |-
     	"testing"
     	"time"
 
+    	"github.com/cloudwego/hertz/pkg/app"
+    	"github.com/cloudwego/hertz/pkg/protocol"
     	"github.com/golang-jwt/jwt/v5"
 
     	"{{.Module}}/internal/base/conf"
@@ -40,5 +42,49 @@ body: |-
     	}
     	if claims.Uid != "user-123" {
     		t.Errorf("claims.Uid = %q, want %q", claims.Uid, "user-123")
+    	}
+    }
+
+    // TestTokenAuth_PreservesAK_SetBySignatureAuthEarlierInChain is the #72
+    // regression test for the merge-not-overwrite fix: on a route that runs
+    // SignatureAuth before TokenAuth (the real router wiring in this
+    // package), TokenAuth must not blindly replace the Claims SignatureAuth
+    // already set — it must carry the verified AK forward into the JWT
+    // claims. Before this fix, TokenAuth's c.Set(ContextKeyTokenClaims,
+    // claims) unconditionally overwrote the context with a fresh *Claims
+    // that had an empty AK, discarding SignatureAuth's work.
+    func TestTokenAuth_PreservesAK_SetBySignatureAuthEarlierInChain(t *testing.T) {
+    	secret := "test-secret"
+    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+    		"uid": "user-123",
+    		"exp": time.Now().Add(time.Hour).Unix(),
+    	})
+    	tokenStr, err := token.SignedString([]byte(secret))
+    	if err != nil {
+    		t.Fatalf("failed to sign test token: %v", err)
+    	}
+
+    	c := app.NewContext(0)
+    	req := protocol.NewRequest("GET", "/ping", nil)
+    	req.Header.Set("X-Authorization", "Bearer "+tokenStr)
+    	req.CopyTo(&c.Request)
+
+    	// Simulate SignatureAuth having already run earlier in the chain
+    	// (matches internal_router_adminbffservice_go.yaml's actual ordering).
+    	c.Set(ContextKeyTokenClaims, &Claims{AK: "app-1"})
+
+    	cfg := conf.TokenConfig{Enabled: true, SigningKey: secret}
+    	mw := TokenAuth(cfg, JWTVerifier{Config: cfg})
+    	mw(context.Background(), c)
+
+    	claims, ok := GetClaims(c)
+    	if !ok {
+    		t.Fatal("expected claims in context after TokenAuth")
+    	}
+    	if claims.Uid != "user-123" {
+    		t.Errorf("claims.Uid = %q, want %q", claims.Uid, "user-123")
+    	}
+    	if claims.AK != "app-1" {
+    		t.Errorf("claims.AK = %q, want %q — TokenAuth must preserve the AK SignatureAuth set earlier in the chain", claims.AK, "app-1")
     	}
     }

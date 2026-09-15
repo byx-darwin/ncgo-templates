@@ -63,6 +63,9 @@ body: |
     			abort(c, code)
     			return
     		{{ "}" }}
+    		if existing, ok := GetClaims(c); ok && existing.AK != "" {{ "{" }}
+    			claims.AK = existing.AK
+    		{{ "}" }}
     		c.Set(ContextKeyTokenClaims, claims)
     		c.Next(ctx)
     	{{ "}" }}

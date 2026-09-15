@@ -89,6 +89,10 @@ body: |-
     			abort(c, response.CodeSignatureInvalid)
     			return
     		}
+    		// Signature is cryptographically verified at this point — record the
+    		// caller's identity so downstream middleware (idempotency, rate
+    		// limit) can scope by it instead of silently seeing an empty AK.
+    		c.Set(ContextKeyTokenClaims, &Claims{AK: appKey})
     		if cfg.Nonce.Enabled {
     			ok, err := nonceStore.Mark(ctx, signatureNonceKey(cfg.Nonce.KeyPrefix, appKey, nonce), nonceTTL)
     			if err != nil {

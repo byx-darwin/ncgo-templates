@@ -17,7 +17,7 @@
 - The one-time OAuth code→JWT exchange store is **independent** of `user-kitex`'s own CSRF `StateStore` — different package, different Redis key prefix, different TTL (60s vs 10min), different purpose. Do not conflate them.
 - `BindProviderReq`'s `uid` field is being **removed** from `user-kitex`'s proto in Task 1 of this plan — after Task 1, the bind flow's identity comes exclusively from the OAuth state (Redis), never from a client-supplied field. `user-bff-hertz`'s bind-start handler is the only piece of code responsible for putting the authenticated user's `uid` into that state (via the extended `OAuthStart` RPC), and it MUST get that `uid` from the JWT middleware's verified claims, never from a request body/query param.
 - Rate limiting reuses `admin-bff-hertz`'s `rule-center`-backed dynamic rule middleware (not a self-contained limiter) — `user-bff-hertz` therefore has a gRPC dependency on `rule-center` in addition to `user-kitex`.
-- No proto/IDL is added for `user-bff-hertz` itself — its handlers are hand-authored Go (JSON request/response types declared directly in handler files), matching how `admin-bff-hertz`'s own handler files are written (not proto-generated). `admin-bff-hertz`'s `idl/app/*.proto` is out of scope to replicate; this is a deliberate scope decision, not an oversight.
+- **CORRECTED in Task 9 (see SDD ledger Ruling):** `user-bff-hertz` DOES carry its own `idl/user.proto` (copy of `user-kitex/idl/user.proto`) and `idl/rule_center.proto` (copy of `admin-bff-hertz/idl/rule_center.proto`) — this reverses the plan's original "no proto/IDL" constraint, which was an unverified assumption made during brainstorming. `user-bff-hertz`'s HTTP-facing handlers remain hand-authored Go (no `idl/app/*.proto`, no `hz`-generated handlers) — only the two *client-facing* RPC protos are added, exactly mirroring `admin-bff-hertz`'s own `idl/{auth,rbac,rule_center}.proto` precedent. Verified end-to-end against the real `ncgo` CLI: `ncgo new` renders these protos with `{{.Module}}` substituted; a post-scaffold `ncgo add kitex-client user --service UserService --idl idl/user.proto` (and the equivalent for `rule_center`) populates `kitex_gen/` and lets `go mod tidy`/`go build` succeed — this step must be documented in Task 10's README (mirroring the same undocumented gap that exists in `admin-bff-hertz`'s own README, now closed here instead of repeated).
 
 ---
 
@@ -1527,6 +1527,17 @@ git commit -m "feat(user-bff-hertz): add bind-start/bind-callback/unbind handler
 - Consumes: everything from Tasks 2-8.
 - Produces: a fully wired Hertz server — **this is the integration checkpoint for this plan**, analogous to `user-kitex`'s Task 14/15; a full `go build ./...` here proves Tasks 1-8 all compile together.
 
+- [ ] **Step 0: Add `idl/user.proto` and `idl/rule_center.proto`**
+
+Copy `user-kitex/idl/user.proto` verbatim to `user-bff-hertz/idl/user.proto`. Copy `admin-bff-hertz/idl/rule_center.proto` verbatim to `user-bff-hertz/idl/rule_center.proto`. Both files already use `{{.Module}}`/template-relative `go_package` conventions consistent with this repo's IDL corpus — no edits needed beyond the copy. This corrects the plan's original Global Constraint ("no proto/IDL added"), which was an unverified assumption; see the ledger Ruling before this task. `idl/api.proto` does NOT need to be added — `ncgo new --kind hertz` auto-injects it (confirmed via a real scratch render: `ncgo new` with zero `idl/` files still produces `idl/api.proto` identical to `ncgo`'s own built-in `bff-default` scaffold testdata).
+
+```bash
+cp user-kitex/idl/user.proto user-bff-hertz/idl/user.proto
+cp admin-bff-hertz/idl/rule_center.proto user-bff-hertz/idl/rule_center.proto
+git add user-bff-hertz/idl/user.proto user-bff-hertz/idl/rule_center.proto
+git commit -m "feat(user-bff-hertz): add idl/user.proto + idl/rule_center.proto for kitex client codegen"
+```
+
 - [ ] **Step 1: Write the router**
 
 ```yaml
@@ -1589,11 +1600,23 @@ Note: `cfg.RateLimit.Register`/`cfg.RateLimit.Login` are per-phase rate-limit co
 
 - [ ] **Step 2: Write server wiring**
 
-Mirror `admin-bff-hertz/hertz-template/internal_base_server_server_go.yaml`'s shape: load `conf.Get()`, construct a Redis client (shared for `OAuthCode` store and idempotency/rate-limit as applicable), construct `oauthcode.NewRedisStore(redisClient)`, construct the `user-kitex` RPC client via `userserviceclient.New(ctx, userserviceclient.Config{{ "{" }}...{{ "}" }})` (mapping from `cfg.RPC.UserService`), construct the `rule-center` RPC client the same way `admin-bff-hertz` does (for `ratelimit.Resolver`), build the `ratelimit.Resolver`, call `router.RegisterUserBffServiceRoutes(h, userCli, codeStore, resolver)`, then `h.Spin()`.
+Mirror `admin-bff-hertz/hertz-template/internal_base_server_server_go.yaml`'s shape exactly (its actual code, verified by reading the real rendered file — not the `userserviceclient` wrapper name used loosely elsewhere in this plan's earlier draft text): load `conf.Get()`, construct a Redis client (shared for `OAuthCode` store and idempotency/rate-limit as applicable), construct `oauthcode.NewRedisStore(redisClient)`, construct the `user-kitex` RPC client directly from the locally-generated `kitex_gen/api/user/v1/userservice` package (added via Step 0 + `ncgo add kitex-client`) using `userservice.NewClient(cfg.RPC.UserService.ServiceName, client.WithHostPorts(cfg.RPC.UserService.HostPorts[0]))` — same pattern `admin-bff-hertz`'s server.go uses for `authservice.NewClient`/`rbacservice.NewClient` — construct the `rule-center` RPC client the same way via `kitex_gen/api/ratelimit/v1/ruleservice`, build the `ratelimit.Resolver`, call `router.RegisterUserBffServiceRoutes(h, userCli, codeStore, resolver)`, then `h.Spin()`.
 
 - [ ] **Step 3: Full render + build + test**
 
-Render `user-bff-hertz` AND `user-kitex` into the same scratch Go module (since `user-bff-hertz` imports `user-kitex`'s generated `kitex_gen` package and `pkg/client/userservice` — check how this repo's tooling handles a BFF-template's dependency on another template's generated output; `micro-admin`'s workspace-composition pattern, or `ncgo add rpc`-style dependency wiring, is the established precedent to follow here — read `micro-admin/README.md`'s "Add Services" section before assuming a mechanism). Then `go build ./...`, `go vet ./...`, `go test ./...`, `go test -race ./...`. All must pass.
+`user-bff-hertz` generates its OWN local `kitex_gen/` from its own `idl/user.proto`/`idl/rule_center.proto` (added in Step 0) — it does NOT import `user-kitex`'s generated package directly; this mirrors `admin-bff-hertz`'s own precedent exactly (its `idl/auth.proto`/`idl/rbac.proto`/`idl/rule_center.proto` are its own local copies too, not imports from `admin-services-kitex`'s generated output). Render with real `ncgo`:
+
+```bash
+ncgo new userbffvalidate --kind hertz --module github.com/example/userbffvalidate \
+  --template-dir <repo>/user-bff-hertz --dir /tmp/userbff-validate
+cd /tmp/userbff-validate
+ncgo add kitex-client user --service UserService --idl idl/user.proto --module github.com/example/userbffvalidate
+ncgo add kitex-client rulecenter --service RuleService --idl idl/rule_center.proto --module github.com/example/userbffvalidate
+go mod tidy
+go build ./... && go vet ./... && go test ./... && go test -race ./...
+```
+
+All must pass. (For tasks 6-8's earlier handler-only tests, the cross-render-copy technique was a validation shortcut; Task 9 must use the real `ncgo add kitex-client` mechanism since it's the actual production wiring path.)
 
 - [ ] **Step 4: Commit**
 

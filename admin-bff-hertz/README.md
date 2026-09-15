@@ -360,6 +360,8 @@ type Claims struct {
 }
 ```
 
+`Uid` comes from a verified JWT (`TokenAuth`); `AK` comes from a verified HMAC signature (`SignatureAuth`, `X-App-Key`/`X-Signature` headers) — a separate, non-JWT open-API auth path. `TokenAuth` preserves any `AK` `SignatureAuth` already set earlier in the chain instead of overwriting it, so a request that carries both (signed + JWT-authenticated) ends up with both fields populated (see `idempotency.go`'s `ak_user_uuid`-scoped branch for a consumer of that combination).
+
 ## Login Flow
 
 ```bash

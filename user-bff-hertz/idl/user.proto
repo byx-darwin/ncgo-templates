@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package api.user.v1;
+
+option go_package = "{{.Module}}/kitex_gen/api/user/v1";
+
+message RegisterReq {
+  string username = 1;
+  string password = 2;
+}
+message RegisterResp {
+  string uid = 1;
+}
+
+message LoginReq {
+  string username = 1;
+  string password = 2;
+}
+message LoginResp {
+  string uid = 1;
+  string token = 2;
+}
+
+message OAuthStartReq {
+  string provider = 1;
+  // purpose distinguishes a login-flow start ("login") from a bind-flow
+  // start ("bind"); the resulting state token is tagged with it and the
+  // matching callback (OAuthCallback for "login", BindProvider for "bind")
+  // rejects the state if the purpose (or provider) doesn't match. Defaults
+  // to "login" when empty.
+  string purpose = 2;
+  // uid is the already-authenticated user starting a bind flow. Required
+  // when purpose == "bind" (OAuthStart rejects a bind request with an
+  // empty uid); ignored when purpose == "login". The caller (a BFF/gateway)
+  // MUST populate this only from a verified JWT, never from unauthenticated
+  // client input.
+  string uid = 3;
+}
+message OAuthStartResp {
+  string redirect_url = 1;
+}
+
+message OAuthCallbackReq {
+  string provider = 1;
+  string state = 2;
+  string code = 3;
+}
+message OAuthCallbackResp {
+  string uid = 1;
+  string token = 2;
+}
+
+message BindProviderReq {
+  reserved 1;
+  reserved "uid";
+  // provider/state/code identify the OAuth callback being completed. The
+  // user being bound is NOT taken from this message — it comes from the
+  // uid embedded in the OAuth state (see OAuthStartReq.uid), which was set
+  // when the bind flow was started by an already-authenticated caller.
+  // This RPC no longer trusts a client-supplied uid.
+  string provider = 2;
+  string state = 3;
+  string code = 4;
+}
+message BindProviderResp {}
+
+message UnbindProviderReq {
+  // uid MUST be extracted from the caller's verified JWT by the invoking
+  // BFF/gateway — see BindProviderReq.uid's comment; the same trust
+  // boundary and authorization-bypass risk applies here.
+  string uid = 1;
+  string provider = 2;
+}
+message UnbindProviderResp {}
+
+message ListUsersReq {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+message UserItem {
+  string uid = 1;
+  string username = 2;
+  string nickname = 3;
+  int32 status = 4;
+}
+message ListUsersResp {
+  repeated UserItem users = 1;
+  int64 total = 2;
+}
+
+message BanUserReq {
+  string uid = 1;
+}
+message BanUserResp {}
+
+message UnbanUserReq {
+  string uid = 1;
+}
+message UnbanUserResp {}
+
+message ForceLogoutReq {
+  string uid = 1;
+}
+message ForceLogoutResp {}
+
+message ListUserIdentitiesReq {
+  string uid = 1;
+}
+message IdentityItem {
+  string provider = 1;
+  string provider_user_id = 2;
+}
+message ListUserIdentitiesResp {
+  repeated IdentityItem identities = 1;
+}
+
+service UserService {
+  rpc Register(RegisterReq) returns (RegisterResp);
+  rpc Login(LoginReq) returns (LoginResp);
+  rpc OAuthStart(OAuthStartReq) returns (OAuthStartResp);
+  rpc OAuthCallback(OAuthCallbackReq) returns (OAuthCallbackResp);
+  rpc BindProvider(BindProviderReq) returns (BindProviderResp);
+  rpc UnbindProvider(UnbindProviderReq) returns (UnbindProviderResp);
+
+  rpc ListUsers(ListUsersReq) returns (ListUsersResp);
+  rpc BanUser(BanUserReq) returns (BanUserResp);
+  rpc UnbanUser(UnbanUserReq) returns (UnbanUserResp);
+  rpc ForceLogout(ForceLogoutReq) returns (ForceLogoutResp);
+  rpc ListUserIdentities(ListUserIdentitiesReq) returns (ListUserIdentitiesResp);
+}

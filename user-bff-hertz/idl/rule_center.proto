@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package api.ratelimit.v1;
+
+option go_package = "{{.Module}}/kitex_gen/api/ratelimit/v1;ratelimitv1";
+
+import "api.proto";
+
+// RuleService handles rate limit rule management
+service RuleService {
+  rpc ListRules(ListRulesReq) returns (ListRulesResp);
+  rpc CreateRule(CreateRuleReq) returns (CreateRuleResp);
+  rpc UpdateRule(UpdateRuleReq) returns (UpdateRuleResp);
+  rpc DeleteRule(DeleteRuleReq) returns (DeleteRuleResp);
+}
+
+message RateLimitRule {
+  string id = 1;
+  string name = 2;
+  string path_pattern = 3;
+  string method = 4;
+  int64 limit = 5;
+  int64 window_seconds = 6;
+  string strategy = 7;
+  bool enabled = 8;
+}
+
+message ListRulesReq {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListRulesResp {
+  repeated RateLimitRule rules = 1;
+  int32 total = 2;
+}
+
+message CreateRuleReq {
+  string name = 1;
+  string path_pattern = 2;
+  string method = 3;
+  int64 limit = 4;
+  int64 window_seconds = 5;
+  string strategy = 6;
+  bool enabled = 7;
+}
+
+message CreateRuleResp {
+  RateLimitRule rule = 1;
+}
+
+message UpdateRuleReq {
+  string id = 1;
+  string name = 2;
+  string path_pattern = 3;
+  string method = 4;
+  int64 limit = 5;
+  int64 window_seconds = 6;
+  string strategy = 7;
+  bool enabled = 8;
+}
+
+message UpdateRuleResp {
+  RateLimitRule rule = 1;
+}
+
+message DeleteRuleReq {
+  string id = 1;
+}
+
+message DeleteRuleResp {
+  bool success = 1;
+}

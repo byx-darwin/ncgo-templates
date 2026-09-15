@@ -94,7 +94,7 @@ body: |
     func rateLimitUserUUID(c *app.RequestContext) string {{ "{" }}
     	claims, hasClaims := GetClaims(c)
     	if hasClaims {{ "{" }}
-    		return strings.TrimSpace(claims.UUID)
+    		return strings.TrimSpace(claims.Uid)
     	{{ "}" }}
     	return ""
     {{ "}" }}

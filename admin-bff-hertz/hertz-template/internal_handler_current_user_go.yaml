@@ -33,7 +33,7 @@ body: |
     	{{ "}" }}
 
     	resp, err := h.rbacCli.GetUserMenuTree(ctx, &api.GetUserMenuTreeReq{{ "{" }}
-    		UserId: claims.UserID,
+    		UserId: claims.Uid,
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
@@ -51,7 +51,7 @@ body: |
     	{{ "}" }}
 
     	resp, err := h.rbacCli.GetUserPermCodes(ctx, &api.GetUserPermCodesReq{{ "{" }}
-    		UserId: claims.UserID,
+    		UserId: claims.Uid,
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)

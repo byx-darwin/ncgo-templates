@@ -75,10 +75,12 @@ body: |
     // reaching an RPC it shouldn't).
     type fakeRouterRBACClient struct {{ "{" }}
     	rbacservice.Client
-    	allowed bool
+    	allowed        bool
+    	lastEnforceUid string
     {{ "}" }}
 
     func (f *fakeRouterRBACClient) Enforce(ctx context.Context, req *rbacv1.EnforceReq, callOptions ...callopt.Option) (*rbacv1.EnforceResp, error) {{ "{" }}
+    	f.lastEnforceUid = req.Uid
     	return &rbacv1.EnforceResp{{ "{" }}Allowed: f.allowed{{ "}" }}, nil
     {{ "}" }}
 
@@ -116,8 +118,8 @@ body: |
     func newRouterTestJWT(t *testing.T) string {{ "{" }}
     	t.Helper()
     	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
-    		"uuid": "user-123",
-    		"exp":  time.Now().Add(time.Hour).Unix(),
+    		"uid": "user-123",
+    		"exp": time.Now().Add(time.Hour).Unix(),
     	{{ "}" }})
     	signed, err := token.SignedString([]byte("router-test-secret"))
     	if err != nil {{ "{" }}
@@ -162,6 +164,32 @@ body: |
 
     	if resp.StatusCode() != consts.StatusOK {{ "{" }}
     		t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/users, got %d", resp.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestAuthz_UsesRealJWTIdentity_PropagatesUidToRBAC is the AC #3
+    // cross-service integration test for the Claims-uid-unification fix: a
+    // JWT signed with the same claim shape rbac-kitex/user-kitex actually
+    // issue (only a "uid" claim, via newRouterTestJWT) must thread its
+    // identity, unmodified, all the way from JWTAuth's parse through Authz
+    // into the RBAC Enforce call. Before this fix, Claims had no Uid field
+    // (UUID/UserID only, neither ever set by a real issuer), so
+    // fakeRouterRBACClient.lastEnforceUid would have observed "" here
+    // instead of "user-123".
+    func TestAuthz_UsesRealJWTIdentity_PropagatesUidToRBAC(t *testing.T) {{ "{" }}
+    	rbacCli := &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }}
+    	engine := newRouterTestEngine(t, rbacCli)
+    	jwtToken := newRouterTestJWT(t)
+
+    	w := ut.PerformRequest(engine, "GET", "/api/v1/users",
+    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+    	resp := w.Result()
+
+    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
+    		t.Fatalf("expected 200, got %d", resp.StatusCode())
+    	{{ "}" }}
+    	if rbacCli.lastEnforceUid != "user-123" {{ "{" }}
+    		t.Errorf("rbacCli.lastEnforceUid = %q, want %q — JWT identity did not propagate to RBAC Enforce", rbacCli.lastEnforceUid, "user-123")
     	{{ "}" }}
     {{ "}" }}
 

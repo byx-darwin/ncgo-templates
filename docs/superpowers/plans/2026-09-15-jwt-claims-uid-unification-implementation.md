@@ -18,6 +18,7 @@
 - `admin-bff-hertz/internal/pkg/ratelimit`'s `Lookup.UserUUID` field (in `internal_pkg_ratelimit_resolver_go.yaml` / `internal_pkg_ratelimit_store_go.yaml` / `internal_pkg_ratelimit_store_test_go.yaml`) is a separate internal struct unrelated to `middleware.Claims` — it is populated by `rateLimitUserUUID(c)`, which this plan fixes to read `claims.Uid`. The `Lookup.UserUUID` field name itself, and the `"ak_user_uuid"`/`"user_uuid"` cache-key-scope string literals in `idempotency.go` and `ratelimit/store.go`, are cosmetic labels only (never fed back into consumers as data) and are explicitly OUT OF SCOPE — renaming them is unrelated churn with no bug-fix value.
 - Every task must render the WHOLE package via the real `ncgo new --template-dir` pipeline (never a cross-render-copy shortcut) and run `go build/vet/test/race`, per the lesson carried forward from every prior plan in this registry — a task that only builds the files it touched has repeatedly missed real breakage.
 - `admin-bff-hertz` additionally depends on `kitex_gen` (rbac/rule_center/auth/user RPC clients) to build `internal/router`/`internal/pkg/middleware` in isolation — Task 2's final verification uses the existing `admin-bff-hertz/test/e2e_test.sh` script (already handles the full codegen pipeline: `ncgo new` → `ncgo add kitex-client` (user.proto) → `kitex` CLI (auth/rbac/rule_center.proto) → `go build`/`go test`) instead of reinventing that pipeline by hand.
+- **Added after final whole-branch review discovered it (Task 3 below):** `ratelimit-hertz` is a third, formally published `hertz` template package (own `template.yaml`, `kind: hertz`, described as "JWT + signature + idempotency + rate limiting middleware") carrying the byte-for-byte identical bug — its `Claims` struct, `jwt.go`, `idempotency.go`, `rate_limit.go`, and `jwt_test.go` are near-identical copies of `base-hertz`'s pre-fix versions. The original design doc's root-cause survey never scanned this package. Task 3 closes that gap in the same branch (user decision, recorded 2026-09-15) rather than deferring to a follow-up issue.
 
 ---
 
@@ -624,4 +625,272 @@ git add admin-bff-hertz/hertz-template/internal_pkg_middleware_token_go.yaml \
         admin-bff-hertz/hertz-template/internal_handler_auth_go.yaml \
         admin-bff-hertz/hertz-template/internal_router_adminbffservice_test_go.yaml
 git commit -m "fix(admin-bff-hertz): unify JWT Claims to a single Uid field, propagate through all consumers"
+```
+
+---
+
+### Task 3: `ratelimit-hertz` — unify Claims to a single `Uid` field (discovered during final review, same bug as Task 1/2)
+
+**Files:**
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_token_go.yaml`
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_jwt_go.yaml`
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_jwt_test_go.yaml`
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_idempotency_go.yaml`
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_idempotency_test_go.yaml`
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml`
+- Modify: `ratelimit-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml`
+- Modify: `ratelimit-hertz/README.md`
+- Test (new): `ratelimit-hertz/hertz-template/internal_pkg_middleware_token_test_go.yaml`
+
+**Interfaces:**
+- Consumes: same `Claims{Uid, AK, Roles, jwt.RegisteredClaims}` shape Task 1/2 established.
+- Produces: nothing consumed by a later task.
+
+**Impact note:** `ratelimit-hertz`'s entire value proposition is rate limiting. `internal_pkg_ratelimit_store_go.yaml`'s `"ak_user_uuid"`/`"user_uuid"` key-by branches silently fall through to a fallback key when `claims.UUID` is empty — meaning any deployment configuring "rate limit by user" currently degrades silently to a shared IP/global bucket for every authenticated user. This task does not touch `ratelimit/store.go`'s key-by branch logic itself (out of scope, unchanged), only the `claims.UUID` read that feeds it — same boundary Task 2 drew for `admin-bff-hertz`.
+
+- [ ] **Step 1: Write a failing regression test proving the bug (mirrors Task 1 Step 1)**
+
+`ratelimit-hertz` has no `token_test.go` today either. Create `ratelimit-hertz/hertz-template/internal_pkg_middleware_token_test_go.yaml`:
+
+```yaml
+# ncgo exported template — internal/pkg/middleware/token_test.go
+path: internal/pkg/middleware/token_test.go
+update_behavior:
+    type: cover
+body: |-
+    package middleware
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/golang-jwt/jwt/v5"
+
+    	"{{.Module}}/internal/base/conf"
+    )
+
+    // TestVerifyToken_RealIssuerShapedToken_PopulatesUid signs a token with
+    // the exact claim shape rbac-kitex/admin-services-kitex/user-kitex
+    // actually issue (only a "uid" claim) and proves VerifyToken recovers a
+    // non-empty, correct Uid. Before this task's fix, rateLimitUserUUID(c)
+    // (rate_limit.go) always read an empty claims.UUID from a real token,
+    // silently degrading "rate limit by user" to a shared bucket.
+    func TestVerifyToken_RealIssuerShapedToken_PopulatesUid(t *testing.T) {
+    	secret := "test-secret"
+    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+    		"uid":   "user-123",
+    		"roles": []interface{}{"member"},
+    		"exp":   time.Now().Add(time.Hour).Unix(),
+    	})
+    	tokenStr, err := token.SignedString([]byte(secret))
+    	if err != nil {
+    		t.Fatalf("failed to sign test token: %v", err)
+    	}
+
+    	verifier := JWTVerifier{Config: conf.TokenConfig{Enabled: true, SigningKey: secret}}
+    	claims, err := verifier.VerifyToken(context.Background(), tokenStr)
+    	if err != nil {
+    		t.Fatalf("VerifyToken() error = %v, want nil", err)
+    	}
+    	if claims.Uid != "user-123" {
+    		t.Errorf("claims.Uid = %q, want %q", claims.Uid, "user-123")
+    	}
+    }
+```
+
+Run: `go build ./internal/pkg/middleware/...` (against a fresh render — see Step 8) — expect the same RED compile failure as Task 1/2 Step 1.
+
+- [ ] **Step 2: Rename `Claims` fields in `token.go`**
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_token_go.yaml`. Change:
+
+```go
+type Claims struct {
+	UserID string   `json:"user_id"`
+	UUID   string   `json:"uuid"`
+	AK     string   `json:"ak"`
+	Roles  []string `json:"roles,omitempty"`
+	jwt.RegisteredClaims
+}
+```
+
+to:
+
+```go
+type Claims struct {
+	Uid   string   `json:"uid"`
+	AK    string   `json:"ak"`
+	Roles []string `json:"roles,omitempty"`
+	jwt.RegisteredClaims
+}
+```
+
+- [ ] **Step 3: Fix the unused-but-must-compile `JWT()` function and its test**
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_jwt_go.yaml` (uses `{{ "{" }}`/`{{ "}" }}` escaping — confirm before editing). Change:
+
+```go
+		uuid, _ := claims["uuid"].(string)
+```
+to:
+```go
+		uid, _ := claims["uid"].(string)
+```
+
+and change:
+
+```go
+		c.Set(ContextKeyTokenClaims, &Claims{{ "{" }}
+			UUID:  uuid,
+			Roles: roles,
+		{{ "}" }})
+```
+to:
+```go
+		c.Set(ContextKeyTokenClaims, &Claims{{ "{" }}
+			Uid:   uid,
+			Roles: roles,
+		{{ "}" }})
+```
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_jwt_test_go.yaml` (this file is byte-identical to `base-hertz`'s copy) — apply the identical changes Task 1 Step 3 made: both `jwt.MapClaims` literals' `"uuid"` key → `"uid"`, and the `claims.UUID`/`"expected UUID..."` assertion → `claims.Uid`/`"expected Uid..."` in `TestJWT_ValidToken_SetsClaims`; the signed claim key `"uuid"` → `"uid"` in `TestJWT_ExpiredToken_Aborts`.
+
+- [ ] **Step 4: Fix `idempotency.go`'s identity scoping and its test**
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_idempotency_go.yaml`. Change:
+
+```go
+    	switch {
+    	case claims.AK != "" && claims.UUID != "":
+    		scope = "ak_user_uuid:" + claims.AK + ":" + claims.UUID
+    	case claims.UUID != "":
+    		scope = "user_uuid:" + claims.UUID
+    	case claims.AK != "":
+    		scope = "ak:" + claims.AK
+    	}
+```
+to:
+```go
+    	switch {
+    	case claims.AK != "" && claims.Uid != "":
+    		scope = "ak_user_uuid:" + claims.AK + ":" + claims.Uid
+    	case claims.Uid != "":
+    		scope = "user_uuid:" + claims.Uid
+    	case claims.AK != "":
+    		scope = "ak:" + claims.AK
+    	}
+```
+
+(Confirm this file's actual brace style before editing — Task 1's `base-hertz` copy is plain-brace; verify `ratelimit-hertz`'s copy matches before applying.)
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_idempotency_test_go.yaml`. Change:
+
+```go
+	c.Set(ContextKeyTokenClaims, &Claims{AK: "verified-ak", UUID: "user-1"})
+```
+to:
+```go
+	c.Set(ContextKeyTokenClaims, &Claims{AK: "verified-ak", Uid: "user-1"})
+```
+
+- [ ] **Step 5: Fix `rate_limit.go`'s identity resolver and its test**
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml`. Change:
+
+```go
+    func rateLimitUserUUID(c *app.RequestContext) string {
+    	claims, hasClaims := GetClaims(c)
+    	if hasClaims {
+    		return strings.TrimSpace(claims.UUID)
+    	}
+    	return ""
+    }
+```
+to:
+```go
+    func rateLimitUserUUID(c *app.RequestContext) string {
+    	claims, hasClaims := GetClaims(c)
+    	if hasClaims {
+    		return strings.TrimSpace(claims.Uid)
+    	}
+    	return ""
+    }
+```
+
+(`rateLimitUserUUID`'s own function name is left as-is, out of scope — same boundary as Task 2 Step 5.)
+
+Edit `ratelimit-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml`. Change both:
+```go
+	first.Set(ContextKeyTokenClaims, &Claims{UUID: "user-1"})
+```
+```go
+	second.Set(ContextKeyTokenClaims, &Claims{UUID: "user-1"})
+```
+to:
+```go
+	first.Set(ContextKeyTokenClaims, &Claims{Uid: "user-1"})
+```
+```go
+	second.Set(ContextKeyTokenClaims, &Claims{Uid: "user-1"})
+```
+(Match this file's actual brace style — confirm plain vs. `{{ "{" }}` before editing.)
+
+- [ ] **Step 6: Update `README.md`'s documented `Claims` struct**
+
+Edit `ratelimit-hertz/README.md`. In the "JWT Claims" section, change:
+
+```go
+type Claims struct {
+    UserID string   `json:"user_id"`
+    UUID   string   `json:"uuid"`
+    AK     string   `json:"ak"`
+    Roles  []string `json:"roles,omitempty"`
+    jwt.RegisteredClaims
+}
+```
+to:
+```go
+type Claims struct {
+    Uid    string   `json:"uid"`
+    AK     string   `json:"ak"`
+    Roles  []string `json:"roles,omitempty"`
+    jwt.RegisteredClaims
+}
+```
+
+- [ ] **Step 7: Full render + build + test via the existing e2e script**
+
+```bash
+<repo>/ratelimit-hertz/test/e2e_test.sh
+```
+
+Must exit 0. This script's hermetic (memory backend) baseline is required to pass; redis/postgres variants are gated on tool availability per the script's own logic — do not treat a `skipped: <reason>` line for those as a failure.
+
+Then, for a faster focused check while iterating:
+
+```bash
+rm -rf /tmp/ratelimithertz-task3-validate
+ncgo new ratelimithertztask3 --kind hertz --module github.com/example/ratelimithertztask3 \
+  --template-dir <repo>/ratelimit-hertz --dir /tmp/ratelimithertz-task3-validate
+cd /tmp/ratelimithertz-task3-validate
+go mod tidy
+go build ./... && go vet ./... && go test ./... && go test -race ./...
+```
+
+All must pass, including the new `TestVerifyToken_RealIssuerShapedToken_PopulatesUid`. Confirm via `grep -n "UUID\|UserID" internal/pkg/middleware/*.go` that zero references to the old field names remain, and `grep -rn '{{ "{' internal/pkg/middleware/*.go` returns zero matches.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add ratelimit-hertz/hertz-template/internal_pkg_middleware_token_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_token_test_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_jwt_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_jwt_test_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_idempotency_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_idempotency_test_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml \
+        ratelimit-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml \
+        ratelimit-hertz/README.md
+git commit -m "fix(ratelimit-hertz): unify JWT Claims to a single Uid field matching issuer schema"
 ```

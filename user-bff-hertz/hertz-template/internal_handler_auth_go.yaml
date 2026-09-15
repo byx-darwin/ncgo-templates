@@ -1,0 +1,64 @@
+# ncgo exported template — internal/handler/auth.go
+path: internal/handler/auth.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+    	"context"
+    	"encoding/json"
+
+    	"github.com/cloudwego/hertz/pkg/app"
+
+    	"{{.Module}}/internal/pkg/response"
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    type AuthHandler struct {{ "{" }}
+    	userCli userservice.Client
+    {{ "}" }}
+
+    func NewAuthHandler(userCli userservice.Client) *AuthHandler {{ "{" }}
+    	return &AuthHandler{{ "{" }}userCli: userCli{{ "}" }}
+    {{ "}" }}
+
+    type registerReq struct {{ "{" }}
+    	Username string `json:"username"`
+    	Password string `json:"password"`
+    {{ "}" }}
+
+    func (h *AuthHandler) Register(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	var req registerReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	resp, err := h.userCli.Register(ctx, &userv1.RegisterReq{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"uid": resp.Uid{{ "}" }})
+    {{ "}" }}
+
+    type loginReq struct {{ "{" }}
+    	Username string `json:"username"`
+    	Password string `json:"password"`
+    {{ "}" }}
+
+    func (h *AuthHandler) Login(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	var req loginReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	resp, err := h.userCli.Login(ctx, &userv1.LoginReq{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	if err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"uid": resp.Uid, "token": resp.Token{{ "}" }})
+    {{ "}" }}

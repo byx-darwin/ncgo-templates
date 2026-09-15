@@ -1,0 +1,76 @@
+# ncgo exported template — internal/handler/auth_test.go
+path: internal/handler/auth_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+    	"context"
+    	"testing"
+
+    	"github.com/cloudwego/hertz/pkg/app"
+    	"github.com/cloudwego/hertz/pkg/protocol"
+    	"github.com/cloudwego/kitex/client/callopt"
+
+    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
+    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+    )
+
+    type fakeUserClient struct {{ "{" }}
+    	userservice.Client
+    	registerFn func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error)
+    	loginFn    func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error)
+    {{ "}" }}
+
+    func (f *fakeUserClient) Register(ctx context.Context, req *userv1.RegisterReq, callOptions ...callopt.Option) (*userv1.RegisterResp, error) {{ "{" }}
+    	return f.registerFn(ctx, req)
+    {{ "}" }}
+    func (f *fakeUserClient) Login(ctx context.Context, req *userv1.LoginReq, callOptions ...callopt.Option) (*userv1.LoginResp, error) {{ "{" }}
+    	return f.loginFn(ctx, req)
+    {{ "}" }}
+
+    func newTestContext(method, path, body string) *app.RequestContext {{ "{" }}
+    	c := app.NewContext(0)
+    	req := protocol.NewRequest(method, path, nil)
+    	req.SetBody([]byte(body))
+    	req.CopyTo(&c.Request)
+    	return c
+    {{ "}" }}
+
+    func TestAuthHandler_Register_Success(t *testing.T) {{ "{" }}
+    	cli := &fakeUserClient{{ "{" }}registerFn: func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {{ "{" }}
+    		if req.Username != "alice" || req.Password != "hunter22" {{ "{" }}
+    			t.Fatalf("unexpected request: %+v", req)
+    		{{ "}" }}
+    		return &userv1.RegisterResp{{ "{" }}Uid: "uid-1"{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewAuthHandler(cli)
+    	c := newTestContext("POST", "/auth/register", `{{ "{" }}"username":"alice","password":"hunter22"{{ "}" }}`)
+    	h.Register(context.Background(), c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestAuthHandler_Login_Success(t *testing.T) {{ "{" }}
+    	cli := &fakeUserClient{{ "{" }}loginFn: func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {{ "{" }}
+    		return &userv1.LoginResp{{ "{" }}Uid: "uid-1", Token: "jwt-token"{{ "}" }}, nil
+    	{{ "}" }}{{ "}" }}
+    	h := NewAuthHandler(cli)
+    	c := newTestContext("POST", "/auth/login", `{{ "{" }}"username":"alice","password":"hunter22"{{ "}" }}`)
+    	h.Login(context.Background(), c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestAuthHandler_Register_InvalidJSON(t *testing.T) {{ "{" }}
+    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }})
+    	c := newTestContext("POST", "/auth/register", `not-json`)
+    	h.Register(context.Background(), c)
+    	if c.Response.StatusCode() == 200 {{ "{" }}
+    		t.Fatal("expected non-200 for invalid JSON body")
+    	{{ "}" }}
+    {{ "}" }}

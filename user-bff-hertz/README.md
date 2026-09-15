@@ -42,6 +42,15 @@ cd user-api
 ncgo add kitex-client user --service UserService --idl idl/user.proto
 ncgo add kitex-client rulecenter --service RuleService --idl idl/rule_center.proto
 
+# NOTE: the FIRST `ncgo add kitex-client` above prints a
+# `go mod tidy failed: ... Repository not found` error. This is expected and
+# harmless — internal/base/server/server.go imports BOTH generated client
+# packages from the moment the template is rendered, so the internal tidy that
+# runs after the first command cannot resolve the second package yet. The user
+# client is still written correctly (check kitex_gen/api/user/v1/ and
+# pkg/client/user/). Only the second command's exit status, and step 3's
+# `go mod tidy`, actually indicate success or failure.
+
 # 3. Resolve module dependencies pulled in by the generated clients
 go mod tidy
 
@@ -107,6 +116,8 @@ oauth_redirect:
 \* `bind-callback` itself carries no `Authorization` header (it's a browser redirect from the OAuth provider) — the identity being bound is recovered from the OAuth `state` value that `bind-start` minted from the caller's JWT `uid`, not from anything supplied in the callback request itself.
 
 `POST /auth/register` also runs through the `Idempotency` middleware when `idempotency.enabled: true`; both `/auth/register` and `/auth/login` run through `RateLimit` (`pre_auth` / `post_auth` phases respectively).
+
+> **Client contract:** while `idempotency.enabled: true` (the shipped `conf/dev/conf.yaml` default), every `POST /auth/register` request **must** carry an `X-Idempotency-Key` header — the middleware rejects a request without one with `400 {"code":10203,"msg":"idempotency_key_missing"}` before the handler runs. Set `idempotency.enabled: false`, or add `/auth/register` to `idempotency.skip_paths`, if you do not want that requirement.
 
 ## Seams
 

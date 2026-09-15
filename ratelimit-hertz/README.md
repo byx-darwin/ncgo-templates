@@ -258,9 +258,9 @@ The `Claims` struct includes a `Roles` field for permission-based access control
 
 ```go
 type Claims struct {
-    Uid    string   `json:"uid"`
-    AK     string   `json:"ak"`
-    Roles  []string `json:"roles,omitempty"`
+    Uid   string   `json:"uid"`
+    AK    string   `json:"ak"`
+    Roles []string `json:"roles,omitempty"`
     jwt.RegisteredClaims
 }
 ```

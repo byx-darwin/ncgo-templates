@@ -1,0 +1,4 @@
+name: user-bff-hertz
+kind: hertz
+description: "Official end-user HTTP gateway for user-kitex (local + third-party OAuth2/OIDC login, one-time code JWT exchange, account binding)"
+version: "1"

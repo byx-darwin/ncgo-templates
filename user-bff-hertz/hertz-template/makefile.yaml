@@ -1,0 +1,37 @@
+# ncgo exported template — Makefile
+# Generates a Makefile at the project root with build/run/dev/lint/test targets.
+# user-bff-hertz has no database of its own (all state lives in user-kitex or
+# Redis) and no hz-IDL-driven codegen (handlers are hand-authored), so this
+# Makefile omits the migrate-*/sqlc/update/swagger/i18n targets that
+# admin-bff-hertz's Makefile has for its own DB/IDL-backed setup.
+path: Makefile
+update_behavior:
+  type: cover
+body: |
+  APP_NAME = {{.ServiceName | ToLower}}-http
+  MODULE   = {{.Module}}
+
+  .PHONY: build run dev lint test check clean install-tools tidy
+
+  # ── Build ────────────────────────────────────────────────────────────────
+  build: ; @echo "Building $(APP_NAME)..."; mkdir -p output/bin; go build -o output/bin/$(APP_NAME) .; echo "Build complete → output/bin/$(APP_NAME)"
+
+  run: build ; @./output/bin/$(APP_NAME)
+
+  dev: ; @which air > /dev/null 2>&1 && air || go run .
+
+  # ── Quality ──────────────────────────────────────────────────────────────
+  lint: ; @golangci-lint run ./...
+
+  test: ; @go test -race -count=1 ./...
+
+  check: lint test
+
+  # ── Dependencies ─────────────────────────────────────────────────────────
+  tidy: ; @go mod tidy
+
+  # ── Install tools ────────────────────────────────────────────────────────
+  install-tools: ; @echo "Installing development tools..."; go install github.com/air-verse/air@latest; go install golang.org/x/tools/cmd/goimports@latest; echo "Install complete"
+
+  # ── Cleanup ──────────────────────────────────────────────────────────────
+  clean: ; @rm -rf output/

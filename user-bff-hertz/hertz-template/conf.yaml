@@ -1,0 +1,610 @@
+# Hertz custom template — base/conf.go
+# Generates configuration loading using go-framework/config.
+# Trimmed from admin-bff-hertz's conf.go: no ConfigCenter/Swagger/Security/
+# Database/Release/legacy-JWT/legacy-GRPC sections (this package has no
+# database of its own and no config-center/release-canary features), no
+# Auth.Signature (API-signature middleware is explicitly out of scope for
+# this package). Adds RPC{UserService,RuleCenter} client configs,
+# OAuthCode (one-time code exchange store TTL/Redis), and OAuthRedirect
+# (frontend URLs the OAuth callbacks 302 back to).
+path: internal/base/conf/conf.go
+update_behavior:
+  type: cover
+body: |-
+  package conf
+
+  import (
+      "os"
+      "sync"
+      "time"
+
+      goerror "github.com/byx-darwin/go-tools/go-common/error"
+      frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+      "github.com/byx-darwin/go-tools/go-framework/config"
+      hertzconfig "github.com/byx-darwin/go-tools/go-framework/config/hertz"
+      mwredis "github.com/byx-darwin/go-tools/go-middleware/redis"
+  )
+
+  var (
+      current *Config
+      once    sync.Once
+      initErr error
+  )
+
+  type Config struct {
+      Env           string              `yaml:"env"`
+      Debug         bool                `yaml:"debug"`
+      Server        hertzconfig.ServerConfig `yaml:"server"`
+      RPC           RPCConfig           `yaml:"rpc"`
+      Redis         RedisConfig         `yaml:"redis"`
+      CORS          CORSConfig          `yaml:"cors"`
+      RateLimit     RateLimitConfig     `yaml:"rate_limit"`
+      Idempotency   IdempotencyConfig   `yaml:"idempotency"`
+      Auth          AuthConfig          `yaml:"auth"`
+      OAuthCode     OAuthCodeConfig     `yaml:"oauth_code"`
+      OAuthRedirect OAuthRedirectConfig `yaml:"oauth_redirect"`
+      Log           LogConfig           `yaml:"log"`
+  }
+
+  // RPCConfig groups the two Kitex RPC clients this gateway depends on:
+  // user-kitex (the account/auth authority) and rule-center (dynamic
+  // rate-limit rules, reused from admin-bff-hertz's pattern).
+  type RPCConfig struct {
+      UserService RPCClientConfig `yaml:"user_service"`
+      RuleCenter  RPCClientConfig `yaml:"rule_center"`
+  }
+
+  // RPCClientConfig mirrors user-kitex's own pkg/client Config shape field
+  // for field, so server wiring can construct a userserviceclient.Config
+  // (or the rule-center client's equivalent) directly from this.
+  type RPCClientConfig struct {
+      ServiceName                string            `yaml:"service_name"`
+      CallerService               string           `yaml:"caller_service"`
+      HostPorts                  []string           `yaml:"host_ports"`
+      RPCTimeoutSeconds          int                `yaml:"rpc_timeout_seconds"`
+      ConnectTimeoutMilliseconds int                `yaml:"connect_timeout_milliseconds"`
+      EnableMetaInfo             bool               `yaml:"enable_metainfo"`
+      Retry                      RPCRetryConfig     `yaml:"retry"`
+  }
+
+  type RPCRetryConfig struct {
+      Enabled                      bool    `yaml:"enabled"`
+      MaxRetryTimes                int     `yaml:"max_retry_times"`
+      MaxDurationMilliseconds      int     `yaml:"max_duration_milliseconds"`
+      Backoff                      string  `yaml:"backoff"`
+      FixedBackoffMilliseconds     int     `yaml:"fixed_backoff_milliseconds"`
+      RandomBackoffMinMilliseconds int     `yaml:"random_backoff_min_milliseconds"`
+      RandomBackoffMaxMilliseconds int     `yaml:"random_backoff_max_milliseconds"`
+      CircuitBreakerErrorRate      float64 `yaml:"circuit_breaker_error_rate"`
+      RetrySameNode                bool    `yaml:"retry_same_node"`
+  }
+
+  type LogConfig struct {
+      Level  string `yaml:"level"`
+      Format string `yaml:"format"`
+      Mode   string `yaml:"mode"`
+  }
+
+  type CORSConfig struct {
+      Enabled          bool            `yaml:"enabled"`
+      AllowOrigins     []string        `yaml:"allow_origins"`
+      AllowMethods     []string        `yaml:"allow_methods"`
+      AllowHeaders     []string        `yaml:"allow_headers"`
+      ExposeHeaders    []string        `yaml:"expose_headers"`
+      AllowCredentials bool            `yaml:"allow_credentials"`
+      MaxAgeSeconds    config.Duration `yaml:"max_age_seconds"`
+  }
+
+  // RateLimitConfig mirrors admin-bff-hertz's shape exactly (Static/Source/
+  // GRPC/RuleCenter/Database/Backend/FailOpen/KeyPrefix/AppKeyHeader/
+  // SkipPaths/Memory/Redis) since internal/pkg/middleware/rate_limit.go and
+  // internal/pkg/ratelimit/resolver.go are reused verbatim from
+  // admin-bff-hertz and read these fields directly. The two rate-limited
+  // endpoints in this package are Register and Login (not the generic
+  // PreAuth/PostAuth admin-bff-hertz uses) — router.go passes each as its
+  // own phase label + RateLimitPhaseConfig to middleware.RateLimit(), which
+  // takes both as explicit parameters, so this rename requires no change to
+  // the copied middleware/resolver files.
+  type RateLimitConfig struct {
+      Enabled      bool                    `yaml:"enabled"`
+      Mode         string                  `yaml:"mode"`
+      Static       StaticLimitConfig       `yaml:"static"`
+      Source       RateLimitSourceConfig   `yaml:"source"`
+      GRPC         RateLimitGRPCConfig     `yaml:"grpc"`
+      RuleCenter   RateLimitDatabaseConfig `yaml:"rule_center"`
+      Database     RateLimitDatabaseConfig `yaml:"database"`
+      Backend      string                  `yaml:"backend"`
+      FailOpen     bool                    `yaml:"fail_open"`
+      KeyPrefix    string                  `yaml:"key_prefix"`
+      AppKeyHeader string                  `yaml:"app_key_header"`
+      SkipPaths    []string                `yaml:"skip_paths"`
+      Register     RateLimitPhaseConfig    `yaml:"register"`
+      Login        RateLimitPhaseConfig    `yaml:"login"`
+      Memory       MemoryCacheConfig       `yaml:"memory"`
+      Redis        RedisConfig             `yaml:"redis"`
+  }
+
+  type StaticLimitConfig struct {
+      MaxQPS         int `yaml:"max_qps"`
+      MaxConnections int `yaml:"max_connections"`
+  }
+
+  type RateLimitSourceConfig struct {
+      Type            string          `yaml:"type"`
+      CacheTTLSeconds config.Duration `yaml:"cache_ttl_seconds"`
+      FallbackOnError bool            `yaml:"fallback_on_error"`
+  }
+
+  type RateLimitGRPCConfig struct {
+      Target              string          `yaml:"target"`
+      TimeoutMilliseconds config.Duration `yaml:"timeout_milliseconds"`
+      AuthHeader          string          `yaml:"auth_header"`
+      AuthToken           string          `yaml:"auth_token"`
+      ServiceName         string          `yaml:"service_name"`
+  }
+
+  type RateLimitDatabaseConfig struct {
+      QueryTimeoutMilliseconds config.Duration `yaml:"query_timeout_milliseconds"`
+  }
+
+  type RateLimitPhaseConfig struct {
+      Enabled     bool                   `yaml:"enabled"`
+      DefaultRule RateLimitRuleConfig    `yaml:"default_rule"`
+      Rules       []RateLimitMatchConfig `yaml:"rules"`
+  }
+
+  type RateLimitMatchConfig struct {
+      AppKey      string              `yaml:"app_key"`
+      Method      string              `yaml:"method"`
+      MatchKind   string              `yaml:"match_kind"`
+      Path        string              `yaml:"path"`
+      PathPattern string              `yaml:"path_pattern"`
+      PathPrefix  string              `yaml:"path_prefix"`
+      Priority    int                 `yaml:"priority"`
+      Rule        RateLimitRuleConfig `yaml:"rule"`
+  }
+
+  type RateLimitRuleConfig struct {
+      Enabled           bool            `yaml:"enabled"`
+      KeyBy             []string        `yaml:"key_by"`
+      Strategy          string          `yaml:"strategy"`
+      WindowSeconds     config.Duration `yaml:"window_seconds"`
+      MaxRequests       int             `yaml:"max_requests"`
+      RequestsPerSecond float64         `yaml:"requests_per_second"`
+      Burst             int             `yaml:"burst"`
+      ClientTTLSeconds  config.Duration `yaml:"client_ttl_seconds"`
+  }
+
+  type RedisConfig struct {
+      Addrs              []string        `yaml:"addrs"`
+      Username           string          `yaml:"username"`
+      Password           string          `yaml:"password"`
+      DB                 int             `yaml:"db"`
+      MasterName         string          `yaml:"master_name"`
+      SentinelUsername   string          `yaml:"sentinel_username"`
+      SentinelPassword   string          `yaml:"sentinel_password"`
+      Protocol           int             `yaml:"protocol"`
+      ClientName         string          `yaml:"client_name"`
+      PoolSize           int             `yaml:"pool_size"`
+      MinIdleConns       int             `yaml:"min_idle_conns"`
+      DialTimeout        config.Duration `yaml:"dial_timeout"`
+      ReadTimeout        config.Duration `yaml:"read_timeout"`
+      WriteTimeout       config.Duration `yaml:"write_timeout"`
+      PoolTimeout        config.Duration `yaml:"pool_timeout"`
+      ConnMaxIdleTime    config.Duration `yaml:"conn_max_idle_time"`
+      ConnMaxLifetime    config.Duration `yaml:"conn_max_lifetime"`
+      IdleCheckFrequency config.Duration `yaml:"idle_check_frequency"`
+      MaxRetries         int             `yaml:"max_retries"`
+      MinRetryBackoff    config.Duration `yaml:"min_retry_backoff"`
+      MaxRetryBackoff    config.Duration `yaml:"max_retry_backoff"`
+  }
+
+  func (c RedisConfig) ToMiddlewareConfig() *mwredis.Config {
+      return &mwredis.Config{
+          Addrs:              c.Addrs,
+          Username:           c.Username,
+          Password:           c.Password,
+          DB:                 c.DB,
+          MasterName:         c.MasterName,
+          SentinelUsername:   c.SentinelUsername,
+          SentinelPassword:   c.SentinelPassword,
+          Protocol:           c.Protocol,
+          ClientName:         c.ClientName,
+          PoolSize:           c.PoolSize,
+          MinIdleConns:       c.MinIdleConns,
+          DialTimeout:        c.DialTimeout.Duration,
+          ReadTimeout:        c.ReadTimeout.Duration,
+          WriteTimeout:       c.WriteTimeout.Duration,
+          PoolTimeout:        c.PoolTimeout.Duration,
+          ConnMaxIdleTime:    c.ConnMaxIdleTime.Duration,
+          ConnMaxLifetime:    c.ConnMaxLifetime.Duration,
+          IdleCheckFrequency: c.IdleCheckFrequency.Duration,
+          MaxRetries:         c.MaxRetries,
+          MinRetryBackoff:    c.MinRetryBackoff.Duration,
+          MaxRetryBackoff:    c.MaxRetryBackoff.Duration,
+      }
+  }
+
+  type MemoryCacheConfig struct {
+      MaxEntries int `yaml:"max_entries"`
+  }
+
+  type IdempotencyConfig struct {
+      Enabled      bool              `yaml:"enabled"`
+      Backend      string            `yaml:"backend"`
+      FailOpen     bool              `yaml:"fail_open"`
+      Header       string            `yaml:"header"`
+      AppKeyHeader string            `yaml:"app_key_header"`
+      KeyPrefix    string            `yaml:"key_prefix"`
+      TTLSeconds   config.Duration   `yaml:"ttl_seconds"`
+      MaxBodyBytes int               `yaml:"max_body_bytes"`
+      Methods      []string          `yaml:"methods"`
+      SkipPaths    []string          `yaml:"skip_paths"`
+      Memory       MemoryCacheConfig `yaml:"memory"`
+      Redis        RedisConfig       `yaml:"redis"`
+  }
+
+  // AuthConfig has only Token (JWT) — no Signature section, matching this
+  // package's deliberate scope decision (no API-signature middleware).
+  type AuthConfig struct {
+      Token TokenConfig `yaml:"token"`
+  }
+
+  type TokenConfig struct {
+      Enabled        bool            `yaml:"enabled"`
+      Header         string          `yaml:"header"`
+      Issuer         string          `yaml:"issuer"`
+      SigningKey     string          `yaml:"signing_key"`
+      BufferSeconds  config.Duration `yaml:"buffer_seconds"`
+      ExpiresSeconds config.Duration `yaml:"expires_seconds"`
+  }
+
+  // OAuthCodeConfig configures the one-time code->JWT exchange store
+  // (internal/pkg/oauthcode) — independent of user-kitex's own OAuth CSRF
+  // state store. If Redis is unset, the top-level Redis config is used.
+  type OAuthCodeConfig struct {
+      Redis      RedisConfig     `yaml:"redis"`
+      TTLSeconds config.Duration `yaml:"ttl_seconds"`
+  }
+
+  // OAuthRedirectConfig holds the frontend URLs the OAuth handlers 302 back
+  // to. No defaults — Validate() requires all three non-empty since a
+  // consumer MUST point these at their actual frontend.
+  type OAuthRedirectConfig struct {
+      SuccessURL     string `yaml:"success_url"`
+      BindSuccessURL string `yaml:"bind_success_url"`
+      ErrorURL       string `yaml:"error_url"`
+  }
+
+  func Init() error {
+      once.Do(func() { current, initErr = Load("") })
+      return initErr
+  }
+
+  func Get() *Config {
+      if current == nil {
+          _ = Init()
+      }
+      return current
+  }
+
+  func Load(path string) (*Config, error) {
+      cfg := Default()
+      if path == "" {
+          path = os.Getenv("CONFIG_PATH")
+      }
+      configPathFromEnv := path != ""
+      if path == "" {
+          path = "conf/" + Env() + "/conf.yaml"
+      }
+      loaded, err := config.LoadYAML[Config](path)
+      if err != nil {
+          if os.IsNotExist(err) && !configPathFromEnv {
+              return cfg, nil
+          }
+          return nil, goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").Wrap(err)
+      }
+      *cfg = *loaded
+      if err := cfg.Validate(); err != nil {
+          return nil, err
+      }
+      return cfg, nil
+  }
+
+  func Default() *Config {
+      return &Config{
+          Env:   Env(),
+          Debug: Env() != "prod",
+          Redis: defaultRedisConfig(),
+          Server: hertzconfig.ServerConfig{
+              Registry: config.RegistryOption{
+                  Name: "{{ToLower .ServiceName}}",
+              },
+              Jaeger: &config.JaegerOption{Enable: false, Endpoint: "127.0.0.1:4317"},
+          },
+          RPC: RPCConfig{
+              UserService: RPCClientConfig{
+                  ServiceName:                "userservice",
+                  RPCTimeoutSeconds:          3,
+                  ConnectTimeoutMilliseconds: 100,
+                  EnableMetaInfo:             true,
+                  Retry:                      RPCRetryConfig{Enabled: false, MaxRetryTimes: 1, Backoff: "none", CircuitBreakerErrorRate: 0.1},
+              },
+              RuleCenter: RPCClientConfig{
+                  ServiceName:                "rulecenterservice",
+                  RPCTimeoutSeconds:          3,
+                  ConnectTimeoutMilliseconds: 100,
+                  EnableMetaInfo:             true,
+                  Retry:                      RPCRetryConfig{Enabled: false, MaxRetryTimes: 1, Backoff: "none", CircuitBreakerErrorRate: 0.1},
+              },
+          },
+          CORS: CORSConfig{
+              AllowOrigins:  []string{"*"},
+              AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+              AllowHeaders:  []string{"Content-Type", "Authorization", "X-Request-ID", "X-Idempotency-Key"},
+              ExposeHeaders: []string{"X-Request-ID"},
+              MaxAgeSeconds: config.Duration{Duration: 600 * time.Second},
+          },
+          RateLimit: RateLimitConfig{
+              Source: RateLimitSourceConfig{
+                  Type:            "config",
+                  CacheTTLSeconds: config.Duration{Duration: 60 * time.Second},
+                  FallbackOnError: true,
+              },
+              GRPC: RateLimitGRPCConfig{
+                  TimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond},
+                  AuthHeader:          "Authorization",
+              },
+              Database: RateLimitDatabaseConfig{
+                  QueryTimeoutMilliseconds: config.Duration{Duration: 200 * time.Millisecond},
+              },
+              Backend:      "memory",
+              KeyPrefix:    "rate_limit",
+              AppKeyHeader: "X-App-Key",
+              Memory:       MemoryCacheConfig{MaxEntries: 100000},
+              SkipPaths:    []string{"/healthz", "/readyz"},
+              Register: RateLimitPhaseConfig{
+                  Enabled: true,
+                  DefaultRule: RateLimitRuleConfig{
+                      Enabled:          true,
+                      KeyBy:            []string{"ip"},
+                      Strategy:         "fixed_window",
+                      WindowSeconds:    config.Duration{Duration: 60 * time.Second},
+                      MaxRequests:      10,
+                      ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
+                  },
+              },
+              Login: RateLimitPhaseConfig{
+                  Enabled: true,
+                  DefaultRule: RateLimitRuleConfig{
+                      Enabled:          true,
+                      KeyBy:            []string{"ip"},
+                      Strategy:         "fixed_window",
+                      WindowSeconds:    config.Duration{Duration: 60 * time.Second},
+                      MaxRequests:      20,
+                      ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
+                  },
+              },
+          },
+          Idempotency: IdempotencyConfig{
+              Backend:      "memory",
+              Header:       "X-Idempotency-Key",
+              AppKeyHeader: "X-App-Key",
+              KeyPrefix:    "idempotency",
+              TTLSeconds:   config.Duration{Duration: 86400 * time.Second},
+              MaxBodyBytes: 1048576,
+              Memory:       MemoryCacheConfig{MaxEntries: 100000},
+              Methods:      []string{"POST"},
+              SkipPaths:    []string{"/healthz", "/readyz"},
+          },
+          Auth: AuthConfig{
+              Token: TokenConfig{
+                  Header:         "Authorization",
+                  BufferSeconds:  config.Duration{Duration: 300 * time.Second},
+                  ExpiresSeconds: config.Duration{Duration: 7200 * time.Second},
+              },
+          },
+          OAuthCode: OAuthCodeConfig{
+              TTLSeconds: config.Duration{Duration: 60 * time.Second},
+          },
+          Log: LogConfig{
+              Level:  "info",
+              Format: "json",
+              Mode:   "both",
+          },
+      }
+  }
+
+  func defaultRedisConfig() RedisConfig {
+      return RedisConfig{
+          Addrs:           []string{"127.0.0.1:6379"},
+          Protocol:        3,
+          MaxRetries:      3,
+          MinRetryBackoff: config.Duration{Duration: 8 * time.Millisecond},
+          MaxRetryBackoff: config.Duration{Duration: 512 * time.Millisecond},
+          DialTimeout:     config.Duration{Duration: 5 * time.Second},
+          ReadTimeout:     config.Duration{Duration: 3 * time.Second},
+          WriteTimeout:    config.Duration{Duration: 3 * time.Second},
+          PoolSize:        10,
+          MinIdleConns:    2,
+          PoolTimeout:     config.Duration{Duration: 4 * time.Second},
+          ConnMaxIdleTime: config.Duration{Duration: 300 * time.Second},
+          ConnMaxLifetime: config.Duration{Duration: 1800 * time.Second},
+      }
+  }
+
+  func Env() string {
+      if env := os.Getenv("GO_ENV"); env != "" {
+          return env
+      }
+      return "dev"
+  }
+
+  func (c *Config) applyRedisFallbacks() {
+      if c == nil {
+          return
+      }
+      c.Redis = mergeRedisConfig(c.Redis, defaultRedisConfig())
+      c.RateLimit.Redis = mergeRedisConfig(c.RateLimit.Redis, c.Redis)
+      c.Idempotency.Redis = mergeRedisConfig(c.Idempotency.Redis, c.Redis)
+      c.OAuthCode.Redis = mergeRedisConfig(c.OAuthCode.Redis, c.Redis)
+  }
+
+  func mergeRedisConfig(primary, fallback RedisConfig) RedisConfig {
+      if len(primary.Addrs) == 0 && len(fallback.Addrs) > 0 {
+          primary.Addrs = append([]string(nil), fallback.Addrs...)
+      }
+      if primary.ClientName == "" {
+          primary.ClientName = fallback.ClientName
+      }
+      if primary.Username == "" {
+          primary.Username = fallback.Username
+      }
+      if primary.Password == "" {
+          primary.Password = fallback.Password
+      }
+      if primary.DB == 0 {
+          primary.DB = fallback.DB
+      }
+      if primary.MasterName == "" {
+          primary.MasterName = fallback.MasterName
+      }
+      if primary.SentinelUsername == "" {
+          primary.SentinelUsername = fallback.SentinelUsername
+      }
+      if primary.SentinelPassword == "" {
+          primary.SentinelPassword = fallback.SentinelPassword
+      }
+      if primary.Protocol == 0 {
+          primary.Protocol = fallback.Protocol
+      }
+      if primary.MaxRetries == 0 {
+          primary.MaxRetries = fallback.MaxRetries
+      }
+      if primary.MinRetryBackoff.Duration == 0 {
+          primary.MinRetryBackoff = fallback.MinRetryBackoff
+      }
+      if primary.MaxRetryBackoff.Duration == 0 {
+          primary.MaxRetryBackoff = fallback.MaxRetryBackoff
+      }
+      if primary.DialTimeout.Duration == 0 {
+          primary.DialTimeout = fallback.DialTimeout
+      }
+      if primary.ReadTimeout.Duration == 0 {
+          primary.ReadTimeout = fallback.ReadTimeout
+      }
+      if primary.WriteTimeout.Duration == 0 {
+          primary.WriteTimeout = fallback.WriteTimeout
+      }
+      if primary.PoolSize == 0 {
+          primary.PoolSize = fallback.PoolSize
+      }
+      if primary.MinIdleConns == 0 {
+          primary.MinIdleConns = fallback.MinIdleConns
+      }
+      if primary.PoolTimeout.Duration == 0 {
+          primary.PoolTimeout = fallback.PoolTimeout
+      }
+      if primary.ConnMaxIdleTime.Duration == 0 {
+          primary.ConnMaxIdleTime = fallback.ConnMaxIdleTime
+      }
+      if primary.ConnMaxLifetime.Duration == 0 {
+          primary.ConnMaxLifetime = fallback.ConnMaxLifetime
+      }
+      if primary.IdleCheckFrequency.Duration == 0 {
+          primary.IdleCheckFrequency = fallback.IdleCheckFrequency
+      }
+      return primary
+  }
+
+  func (c *Config) Validate() error {
+      if c == nil {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("config is nil")
+      }
+      c.applyRedisFallbacks()
+      if c.Server.Registry.Name == "" {
+          c.Server.Registry.Name = c.Env
+      }
+      if c.RPC.UserService.ServiceName == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rpc.user_service.service_name is empty")
+      }
+      if c.Auth.Token.Enabled && c.Auth.Token.SigningKey == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.token.signing_key is empty")
+      }
+      if c.CORS.Enabled && c.CORS.AllowCredentials && hasWildcard(c.CORS.AllowOrigins) {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("cors.allow_credentials cannot be true when allow_origins contains *")
+      }
+      if c.RateLimit.Enabled {
+          switch c.RateLimit.Source.Type {
+          case "", "config", "grpc", "database", "rule_center":
+          default:
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.source.type must be config, grpc, database, or rule_center")
+          }
+          if c.RateLimit.Source.Type == "grpc" && c.RateLimit.GRPC.TimeoutMilliseconds.Duration <= 0 {
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.grpc.timeout_milliseconds must be positive")
+          }
+          switch c.RateLimit.Backend {
+          case "", "memory", "redis":
+          default:
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.backend must be memory or redis")
+          }
+          if c.RateLimit.Backend == "redis" && len(c.RateLimit.Redis.Addrs) == 0 {
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.redis.addrs is empty")
+          }
+          if !c.RateLimit.Register.Enabled && !c.RateLimit.Login.Enabled {
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("at least one rate_limit phase (register/login) must be enabled")
+          }
+          if err := validateRateLimitPhase("rate_limit.register", c.RateLimit.Register); err != nil {
+              return err
+          }
+          if err := validateRateLimitPhase("rate_limit.login", c.RateLimit.Login); err != nil {
+              return err
+          }
+      }
+      if c.Idempotency.Enabled {
+          switch c.Idempotency.Backend {
+          case "", "memory", "redis":
+          default:
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.backend must be memory or redis")
+          }
+          if c.Idempotency.Backend == "redis" && len(c.Idempotency.Redis.Addrs) == 0 {
+              return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("idempotency.redis.addrs is empty")
+          }
+      }
+      if c.OAuthRedirect.SuccessURL == "" || c.OAuthRedirect.BindSuccessURL == "" || c.OAuthRedirect.ErrorURL == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("oauth_redirect.success_url, bind_success_url, and error_url must all be set")
+      }
+      return nil
+  }
+
+  func validateRateLimitPhase(name string, phase RateLimitPhaseConfig) error {
+      if !phase.Enabled {
+          return nil
+      }
+      if err := validateRateLimitRule(name+".default_rule", phase.DefaultRule); err != nil {
+          return err
+      }
+      return nil
+  }
+
+  func validateRateLimitRule(name string, rule RateLimitRuleConfig) error {
+      if !rule.Enabled {
+          return nil
+      }
+      if len(rule.KeyBy) == 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + ".key_by must not be empty")
+      }
+      if rule.WindowSeconds.Duration <= 0 && rule.MaxRequests <= 0 && rule.RequestsPerSecond <= 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New(name + " must specify window_seconds/max_requests or requests_per_second")
+      }
+      return nil
+  }
+
+  func hasWildcard(origins []string) bool {
+      for _, o := range origins {
+          if o == "*" {
+              return true
+          }
+      }
+      return false
+  }

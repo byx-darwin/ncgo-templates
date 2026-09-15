@@ -1,0 +1,108 @@
+# ncgo exported template — conf/dev/conf.yaml
+path: conf/dev/conf.yaml
+update_behavior:
+    type: cover
+body: |
+    # 本地开发环境配置（默认由 GO_ENV=dev 加载）
+    env: dev
+    debug: true
+    server:
+      http:
+        port: "8080"
+        network: "tcp"
+        mode: 0
+      registry:
+        name: "{{ToLower .ServiceName}}"
+      jaeger:
+        enable: false
+        endpoint: "127.0.0.1:4317"
+    # user-kitex RPC 客户端（终端用户账号/OAuth 权威服务）
+    rpc:
+      user_service:
+        service_name: "userservice"
+        caller_service: "{{ToLower .ServiceName}}"
+        host_ports:
+          - "127.0.0.1:8888"
+        rpc_timeout_seconds: 3
+        connect_timeout_milliseconds: 100
+        enable_metainfo: true
+      # rule-center RPC 客户端（限流规则中心，供 rate_limit 中间件按 source.type=rule_center 查询）
+      rule_center:
+        service_name: "rulecenterservice"
+        caller_service: "{{ToLower .ServiceName}}"
+        host_ports:
+          - "127.0.0.1:8889"
+        rpc_timeout_seconds: 3
+        connect_timeout_milliseconds: 100
+        enable_metainfo: true
+    redis:
+      addrs:
+        - 127.0.0.1:6379
+      protocol: 3
+      pool_size: 10
+      min_idle_conns: 2
+      dial_timeout: "5s"
+      read_timeout: "3s"
+      write_timeout: "3s"
+      pool_timeout: "4s"
+      conn_max_idle_time: "300s"
+      conn_max_lifetime: "1800s"
+      max_retries: 3
+      min_retry_backoff: "8ms"
+      max_retry_backoff: "512ms"
+    log:
+      level: "info"
+      format: "json"
+      mode: "both"
+    cors:
+      enabled: true
+      allow_origins:
+        - "*"
+    rate_limit:
+      enabled: true
+      backend: "memory"
+      register:
+        enabled: true
+        default_rule:
+          enabled: true
+          key_by: ["ip"]
+          strategy: "fixed_window"
+          window_seconds: "60s"
+          max_requests: 10
+      login:
+        enabled: true
+        default_rule:
+          enabled: true
+          key_by: ["ip"]
+          strategy: "fixed_window"
+          window_seconds: "60s"
+          max_requests: 20
+    idempotency:
+      enabled: true
+      backend: "memory"
+      fail_open: true
+      header: "X-Idempotency-Key"
+      key_prefix: "idempotency:"
+      ttl_seconds: "86400s"
+      methods:
+        - POST
+      memory:
+        max_entries: 10000
+    # auth.token.signing_key MUST match user-kitex's own conf_dev.yaml
+    # auth.jwt_secret exactly — user-bff-hertz verifies JWTs issued by
+    # user-kitex, both must sign/verify with the same HS256 secret.
+    auth:
+      token:
+        enabled: true
+        header: "Authorization"
+        signing_key: "dev-secret-change-me"
+        buffer_seconds: "300s"
+        expires_seconds: "7200s"
+    # 一次性 code -> JWT 兑换（独立于 user-kitex 自己的 OAuth CSRF state）
+    oauth_code:
+      ttl_seconds: "60s"
+    # OAuth 回调完成后 302 回前端的地址；生产环境必须替换成真实前端域名
+    oauth_redirect:
+      success_url: "http://localhost:3000/auth/callback"
+      bind_success_url: "http://localhost:3000/settings/connections"
+      error_url: "http://localhost:3000/auth/error"

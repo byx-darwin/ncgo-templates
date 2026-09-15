@@ -67,7 +67,7 @@ auth:
 - `10019` (403) - Invalid signature
 - `10023` (403) - Invalid AppKey
 
-**`Claims.AK`:** a verified signature (above) sets `Claims.AK` to the caller's app key, alongside JWT's own `Claims.Uid`; `TokenAuth` preserves it instead of overwriting it. Only `idempotency.go`'s plain `ak:`-scoped branch actually consumes it today — the combined `ak_user_uuid:` branch is unreachable because idempotency's key is computed before JWT runs, so `Uid` is always empty at that point.
+**`Claims.AK`:** a verified signature (above) sets `Claims.AK` to the caller's app key, alongside JWT's own `Claims.Uid`; `TokenAuth` preserves it instead of overwriting it. Only `idempotency.go`'s plain `ak:`-scoped branch actually consumes it today — the combined `ak_user_uuid:` branch is unreachable because idempotency's key is computed before JWT runs, so `Uid` is always empty at that point (tracked as issue #73).
 
 ### 3. Idempotency (Optional)
 

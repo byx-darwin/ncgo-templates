@@ -1,10 +1,10 @@
 # ncgo exported template — internal/base/conf/conf_test.go
-# Overrides ncgo's built-in default hertz conf_test.go, which assumes
-# AuthConfig.Signature exists — this package's Config has no Signature
-# section (see conf.go's comment), so the default test doesn't compile
-# against it. Adapted to test the fields this Config actually has,
-# including the OAuthCode.Redis fallback the default test doesn't know
-# about.
+# Overrides ncgo's built-in default hertz conf_test.go, which asserts on
+# fields (and a Redis-fallback set) this package's trimmed Config doesn't
+# have in the same shape (no Database, different OAuth-specific sections).
+# Adapted to test the fields this Config actually has, including the
+# OAuthCode.Redis fallback the default test doesn't know about, and a
+# negative test for the rpc.user_service.service_name requirement.
 path: internal/base/conf/conf_test.go
 update_behavior:
     type: cover
@@ -72,3 +72,13 @@ body: |-
     		t.Fatal("expected error when auth.token.enabled but signing_key is empty")
     	{{ "}" }}
     {{ "}" }}
+
+    func TestValidate_RequiresUserServiceName(t *testing.T) {{ "{" }}
+    	cfg := Default()
+    	cfg.RPC.UserService.ServiceName = ""
+    	cfg.OAuthRedirect = OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost/cb", BindSuccessURL: "http://localhost/bind", ErrorURL: "http://localhost/err"{{ "}" }}
+    	if err := cfg.Validate(); err == nil {{ "{" }}
+    		t.Fatal("expected error when rpc.user_service.service_name is empty")
+    	{{ "}" }}
+    {{ "}" }}
+

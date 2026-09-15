@@ -2,11 +2,13 @@
 # Generates configuration loading using go-framework/config.
 # Trimmed from admin-bff-hertz's conf.go: no ConfigCenter/Swagger/Security/
 # Database/Release/legacy-JWT/legacy-GRPC sections (this package has no
-# database of its own and no config-center/release-canary features), no
-# Auth.Signature (API-signature middleware is explicitly out of scope for
-# this package). Adds RPC{UserService,RuleCenter} client configs,
-# OAuthCode (one-time code exchange store TTL/Redis), and OAuthRedirect
-# (frontend URLs the OAuth callbacks 302 back to).
+# database of its own and no config-center/release-canary features).
+# Auth.Signature stays present (see AuthConfig's doc comment below — it's
+# required for ncgo's built-in default signature.go fragment to compile,
+# even though this package's router never wires SignatureAuth up). Adds
+# RPC{UserService,RuleCenter} client configs, OAuthCode (one-time code
+# exchange store TTL/Redis), and OAuthRedirect (frontend URLs the OAuth
+# callbacks 302 back to).
 path: internal/base/conf/conf.go
 update_behavior:
   type: cover
@@ -95,16 +97,18 @@ body: |-
       MaxAgeSeconds    config.Duration `yaml:"max_age_seconds"`
   }
 
-  // RateLimitConfig mirrors admin-bff-hertz's shape exactly (Static/Source/
-  // GRPC/RuleCenter/Database/Backend/FailOpen/KeyPrefix/AppKeyHeader/
-  // SkipPaths/Memory/Redis) since internal/pkg/middleware/rate_limit.go and
-  // internal/pkg/ratelimit/resolver.go are reused verbatim from
-  // admin-bff-hertz and read these fields directly. The two rate-limited
-  // endpoints in this package are Register and Login (not the generic
-  // PreAuth/PostAuth admin-bff-hertz uses) — router.go passes each as its
-  // own phase label + RateLimitPhaseConfig to middleware.RateLimit(), which
-  // takes both as explicit parameters, so this rename requires no change to
-  // the copied middleware/resolver files.
+  // RateLimitConfig mirrors admin-bff-hertz's shape exactly, INCLUDING the
+  // Go field names PreAuth/PostAuth (not renamed) — ncgo's built-in
+  // hertz-kind default template ships internal/pkg/ratelimit/resolver.go
+  // with a phaseConfig() method that hardcodes r.cfg.PreAuth/r.cfg.PostAuth
+  // directly (not passed as a parameter), so renaming these Go field names
+  // breaks that default fragment's compile even before Task 5 copies
+  // admin-bff-hertz's own resolver.go over it. The on-disk YAML keys ARE
+  // renamed to `register`/`login` (via the yaml tags below) for a clearer
+  // config file, while router.go (Task 9) reads `cfg.RateLimit.PreAuth` for
+  // the register endpoint and `cfg.RateLimit.PostAuth` for the login
+  // endpoint — a naming mismatch confined to source comments, not a build
+  // risk.
   type RateLimitConfig struct {
       Enabled      bool                    `yaml:"enabled"`
       Mode         string                  `yaml:"mode"`
@@ -118,8 +122,11 @@ body: |-
       KeyPrefix    string                  `yaml:"key_prefix"`
       AppKeyHeader string                  `yaml:"app_key_header"`
       SkipPaths    []string                `yaml:"skip_paths"`
-      Register     RateLimitPhaseConfig    `yaml:"register"`
-      Login        RateLimitPhaseConfig    `yaml:"login"`
+      // PreAuth backs the `register` config key (Go field name fixed by
+      // ncgo's built-in resolver.go, see comment above).
+      PreAuth      RateLimitPhaseConfig    `yaml:"register"`
+      // PostAuth backs the `login` config key.
+      PostAuth     RateLimitPhaseConfig    `yaml:"login"`
       Memory       MemoryCacheConfig       `yaml:"memory"`
       Redis        RedisConfig             `yaml:"redis"`
   }
@@ -244,10 +251,41 @@ body: |-
       Redis        RedisConfig       `yaml:"redis"`
   }
 
-  // AuthConfig has only Token (JWT) — no Signature section, matching this
-  // package's deliberate scope decision (no API-signature middleware).
+  // AuthConfig has Token (JWT, actually wired up by router.go) plus a
+  // Signature section that is NEVER wired into this package's router —
+  // it exists only because ncgo's built-in hertz-kind default template
+  // ships internal/pkg/middleware/signature.go, which references
+  // conf.SignatureConfig/conf.SignatureNonceConfig unconditionally. Kept
+  // present (Enabled: false by default) rather than excluded via a
+  // skip_default_templates entry, since this package doesn't otherwise
+  // need to override that default fragment's naming convention and the
+  // unused config surface is harmless. See the design doc / plan for the
+  // "no API-signature middleware" scope decision — that decision is about
+  // behavior (no middleware wired up), not about this struct's existence.
   type AuthConfig struct {
-      Token TokenConfig `yaml:"token"`
+      Signature SignatureConfig `yaml:"signature"`
+      Token     TokenConfig     `yaml:"token"`
+  }
+
+  type SignatureConfig struct {
+      Enabled             bool                 `yaml:"enabled"`
+      HeaderAppKey        string               `yaml:"header_app_key"`
+      HeaderTimestamp     string               `yaml:"header_timestamp"`
+      HeaderNonce         string               `yaml:"header_nonce"`
+      HeaderSignature     string               `yaml:"header_signature"`
+      StaticSecret        string               `yaml:"static_secret"`
+      MaxClockSkewSeconds config.Duration      `yaml:"max_clock_skew_seconds"`
+      Nonce               SignatureNonceConfig `yaml:"nonce"`
+  }
+
+  type SignatureNonceConfig struct {
+      Enabled    bool              `yaml:"enabled"`
+      Backend    string            `yaml:"backend"`
+      FailOpen   bool              `yaml:"fail_open"`
+      KeyPrefix  string            `yaml:"key_prefix"`
+      TTLSeconds config.Duration   `yaml:"ttl_seconds"`
+      Memory     MemoryCacheConfig `yaml:"memory"`
+      Redis      RedisConfig       `yaml:"redis"`
   }
 
   type TokenConfig struct {
@@ -363,7 +401,7 @@ body: |-
               AppKeyHeader: "X-App-Key",
               Memory:       MemoryCacheConfig{MaxEntries: 100000},
               SkipPaths:    []string{"/healthz", "/readyz"},
-              Register: RateLimitPhaseConfig{
+              PreAuth: RateLimitPhaseConfig{
                   Enabled: true,
                   DefaultRule: RateLimitRuleConfig{
                       Enabled:          true,
@@ -374,7 +412,7 @@ body: |-
                       ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
                   },
               },
-              Login: RateLimitPhaseConfig{
+              PostAuth: RateLimitPhaseConfig{
                   Enabled: true,
                   DefaultRule: RateLimitRuleConfig{
                       Enabled:          true,
@@ -385,8 +423,7 @@ body: |-
                       ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
                   },
               },
-          },
-          Idempotency: IdempotencyConfig{
+          },          Idempotency: IdempotencyConfig{
               Backend:      "memory",
               Header:       "X-Idempotency-Key",
               AppKeyHeader: "X-App-Key",
@@ -448,6 +485,7 @@ body: |-
       c.RateLimit.Redis = mergeRedisConfig(c.RateLimit.Redis, c.Redis)
       c.Idempotency.Redis = mergeRedisConfig(c.Idempotency.Redis, c.Redis)
       c.OAuthCode.Redis = mergeRedisConfig(c.OAuthCode.Redis, c.Redis)
+      c.Auth.Signature.Nonce.Redis = mergeRedisConfig(c.Auth.Signature.Nonce.Redis, c.Redis)
   }
 
   func mergeRedisConfig(primary, fallback RedisConfig) RedisConfig {
@@ -531,6 +569,9 @@ body: |-
       if c.Auth.Token.Enabled && c.Auth.Token.SigningKey == "" {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.token.signing_key is empty")
       }
+      if c.Auth.Signature.Enabled && c.Auth.Signature.StaticSecret == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("auth.signature.static_secret is empty")
+      }
       if c.CORS.Enabled && c.CORS.AllowCredentials && hasWildcard(c.CORS.AllowOrigins) {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("cors.allow_credentials cannot be true when allow_origins contains *")
       }
@@ -551,13 +592,13 @@ body: |-
           if c.RateLimit.Backend == "redis" && len(c.RateLimit.Redis.Addrs) == 0 {
               return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.redis.addrs is empty")
           }
-          if !c.RateLimit.Register.Enabled && !c.RateLimit.Login.Enabled {
+          if !c.RateLimit.PreAuth.Enabled && !c.RateLimit.PostAuth.Enabled {
               return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("at least one rate_limit phase (register/login) must be enabled")
           }
-          if err := validateRateLimitPhase("rate_limit.register", c.RateLimit.Register); err != nil {
+          if err := validateRateLimitPhase("rate_limit.register", c.RateLimit.PreAuth); err != nil {
               return err
           }
-          if err := validateRateLimitPhase("rate_limit.login", c.RateLimit.Login); err != nil {
+          if err := validateRateLimitPhase("rate_limit.login", c.RateLimit.PostAuth); err != nil {
               return err
           }
       }

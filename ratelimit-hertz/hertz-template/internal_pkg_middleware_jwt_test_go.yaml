@@ -19,7 +19,7 @@ body: |
     func TestJWT_ValidToken_SetsClaims(t *testing.T) {{ "{" }}
     	secret := "test-secret"
     	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
-    		"uuid":  "user-123",
+    		"uid":   "user-123",
     		"roles": []interface{{ "{" }}{{ "}" }}{{ "{" }}"{{ToLower .ServiceName}}"{{ "}" }},
     		"exp":   time.Now().Add(time.Hour).Unix(),
     	{{ "}" }})
@@ -39,16 +39,16 @@ body: |
     	if !ok {{ "{" }}
     		t.Fatal("expected claims in context")
     	{{ "}" }}
-    	if claims.UUID != "user-123" {{ "{" }}
-    		t.Errorf("expected UUID user-123, got %s", claims.UUID)
+    	if claims.Uid != "user-123" {{ "{" }}
+    		t.Errorf("expected Uid user-123, got %s", claims.Uid)
     	{{ "}" }}
     {{ "}" }}
 
     func TestJWT_ExpiredToken_Aborts(t *testing.T) {{ "{" }}
     	secret := "test-secret"
     	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
-    		"uuid": "user-123",
-    		"exp":  time.Now().Add(-time.Hour).Unix(),
+    		"uid": "user-123",
+    		"exp": time.Now().Add(-time.Hour).Unix(),
     	{{ "}" }})
     	tokenStr, _ := token.SignedString([]byte(secret))
 

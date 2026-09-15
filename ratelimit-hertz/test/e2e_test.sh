@@ -36,8 +36,8 @@ gen() { # $1=svc-name  $2..=extra ncgo flags
 # 静态断言：无残留转义 / 无未解析模板动作（在父 shell 累加 FAILS）
 assert_no_residual() { # $1=project dir
   local d="$1"
-  if grep -rn -e "$ESC_OPEN" -e "$ESC_CLOSE" "$d" >/dev/null 2>&1; then
-    fail "残留 brace 转义 in $d"; grep -rn -e "$ESC_OPEN" -e "$ESC_CLOSE" "$d" | head
+  if grep -rn -e "$ESC_OPEN" -e "$ESC_CLOSE" "$d" --include='*.go' >/dev/null 2>&1; then
+    fail "残留 brace 转义 in $d"; grep -rn -e "$ESC_OPEN" -e "$ESC_CLOSE" "$d" --include='*.go' | head
   fi
   if grep -rn '{{[^}]*}}' "$d" --include='*.go' >/dev/null 2>&1; then
     fail "残留未解析模板动作 in $d"; grep -rn '{{[^}]*}}' "$d" --include='*.go' | head

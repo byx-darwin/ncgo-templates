@@ -1,0 +1,44 @@
+# ncgo exported template — internal/pkg/middleware/token_test.go
+path: internal/pkg/middleware/token_test.go
+update_behavior:
+    type: cover
+body: |-
+    package middleware
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/golang-jwt/jwt/v5"
+
+    	"{{.Module}}/internal/base/conf"
+    )
+
+    // TestVerifyToken_RealIssuerShapedToken_PopulatesUid signs a token with
+    // the exact claim shape rbac-kitex/admin-services-kitex/user-kitex
+    // actually issue (only a "uid" claim) and proves VerifyToken recovers a
+    // non-empty, correct Uid — the live path (internal_router_adminbffservice_go.yaml
+    // wires middleware.JWTAuth, which calls this) previously always got an
+    // empty identity from a real token.
+    func TestVerifyToken_RealIssuerShapedToken_PopulatesUid(t *testing.T) {
+    	secret := "test-secret"
+    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+    		"uid":   "user-123",
+    		"roles": []interface{}{"admin"},
+    		"exp":   time.Now().Add(time.Hour).Unix(),
+    	})
+    	tokenStr, err := token.SignedString([]byte(secret))
+    	if err != nil {
+    		t.Fatalf("failed to sign test token: %v", err)
+    	}
+
+    	verifier := JWTVerifier{Config: conf.TokenConfig{Enabled: true, SigningKey: secret}}
+    	claims, err := verifier.VerifyToken(context.Background(), tokenStr)
+    	if err != nil {
+    		t.Fatalf("VerifyToken() error = %v, want nil", err)
+    	}
+    	if claims.Uid != "user-123" {
+    		t.Errorf("claims.Uid = %q, want %q", claims.Uid, "user-123")
+    	}
+    }

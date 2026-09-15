@@ -57,7 +57,7 @@ body: |
     		{{ "}" }}
 
     		resp, err := rbacCli.Enforce(ctx, &api.EnforceReq{{ "{" }}
-    			Uid: claims.UUID,
+    			Uid: claims.Uid,
     			Obj: perm,
     			Act: "execute",
     		{{ "}" }})

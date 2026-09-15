@@ -99,14 +99,14 @@ body: |
     	mw := RateLimit("post_auth", cfg, post, nil)
 
     	first := newRateLimitContext("/orders")
-    	first.Set(ContextKeyTokenClaims, &Claims{{ "{" }}UUID: "user-1"{{ "}" }})
+    	first.Set(ContextKeyTokenClaims, &Claims{{ "{" }}Uid: "user-1"{{ "}" }})
     	mw(context.Background(), first)
     	if first.Response.StatusCode() == consts.StatusTooManyRequests {{ "{" }}
     		t.Fatalf("first post_auth request was rate limited")
     	{{ "}" }}
 
     	second := newRateLimitContext("/orders")
-    	second.Set(ContextKeyTokenClaims, &Claims{{ "{" }}UUID: "user-1"{{ "}" }})
+    	second.Set(ContextKeyTokenClaims, &Claims{{ "{" }}Uid: "user-1"{{ "}" }})
     	mw(context.Background(), second)
     	if second.Response.StatusCode() != consts.StatusTooManyRequests {{ "{" }}
     		t.Fatalf("status = %d, want %d; expected post_auth phase rule to apply", second.Response.StatusCode(), consts.StatusTooManyRequests)

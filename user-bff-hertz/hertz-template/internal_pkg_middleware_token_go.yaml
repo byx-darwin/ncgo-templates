@@ -21,10 +21,11 @@ body: |
   const ContextKeyTokenClaims = "tokenClaims"
 
   // Claims matches exactly what user-kitex (reusing rbac-kitex's JWT
-  // issuance) signs: Uid + Roles, json key "uid" not "uuid". Do NOT copy
-  // admin-bff-hertz's Claims{UserID, UUID, AK, Roles} shape here — it
-  // decodes an empty identity from a real user-kitex-issued token (see
-  // Issue #66). This mismatch is deliberate and package-local.
+  // issuance) signs: Uid + Roles, json key "uid" not "uuid". admin-bff-hertz
+  // and base-hertz previously had a different, buggy Claims{UserID, UUID,
+  // AK, Roles} shape that decoded an empty identity from a real
+  // user-kitex-issued token (Issue #66) — fixed in both packages to match
+  // this same Uid-based shape.
   type Claims struct {{ "{" }}
   	Uid   string   `json:"uid"`
   	Roles []string `json:"roles"`

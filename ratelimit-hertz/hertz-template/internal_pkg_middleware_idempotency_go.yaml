@@ -234,10 +234,10 @@ body: |-
     	scope := "ip:" + requestIP(c)
     	if claims, ok := GetClaims(c); ok {
     		switch {
-    		case claims.AK != "" && claims.UUID != "":
-    			scope = "ak_user_uuid:" + claims.AK + ":" + claims.UUID
-    		case claims.UUID != "":
-    			scope = "user_uuid:" + claims.UUID
+    		case claims.AK != "" && claims.Uid != "":
+    			scope = "ak_user_uuid:" + claims.AK + ":" + claims.Uid
+    		case claims.Uid != "":
+    			scope = "user_uuid:" + claims.Uid
     		case claims.AK != "":
     			scope = "ak:" + claims.AK
     		}

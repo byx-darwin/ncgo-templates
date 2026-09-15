@@ -74,7 +74,7 @@ body: |-
     func TestIdempotencyKeyUsesVerifiedClaims(t *testing.T) {
     	c := newIdempotencyContext("POST", "/orders")
     	c.Request.Header.Set("X-App-Key", "raw-ak")
-    	c.Set(ContextKeyTokenClaims, &Claims{AK: "verified-ak", UUID: "user-1"})
+    	c.Set(ContextKeyTokenClaims, &Claims{AK: "verified-ak", Uid: "user-1"})
     	cfg := conf.IdempotencyConfig{KeyPrefix: "test", AppKeyHeader: "X-App-Key"}
     	if got, want := idempotencyKey(c, cfg, "idem-1"), "test:ak_user_uuid_verified-ak_user-1:POST:/orders:idem-1"; got != want {
     		t.Fatalf("key = %q, want %q", got, want)

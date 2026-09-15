@@ -141,6 +141,12 @@ body: |
         service_name: "authority"
         host_ports:
           - "127.0.0.1:8888"
+      terminal_user:
+        service_name: "userservice"
+        host_ports:
+          - "127.0.0.1:8890"
+        rpc_timeout_seconds: 3
+        connect_timeout_milliseconds: 100
 
     # JWT 配置（与 rbac 一致）
     jwt:

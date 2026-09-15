@@ -121,7 +121,7 @@ oauth_redirect:
 
 ## Seams
 
-- **Issue #66 — JWT `Claims` field mismatch.** `base-hertz`/`admin-bff-hertz` define `Claims{UserID, UUID, AK, Roles}`. `user-kitex` (reusing `rbac-kitex`'s JWT issuance) signs tokens with `{uid, roles}` claims instead. This package's own `internal/pkg/middleware/token.go` therefore defines its **own** `Claims{Uid, Roles}` shape and does *not* reuse `admin-bff-hertz`'s `Claims` type — copying that shape here would silently decode an empty identity (`UUID`/`AK` both blank) from every real `user-kitex`-issued token. This mismatch is deliberate and package-local to `user-bff-hertz`; it is not yet reconciled across the template registry (tracked as Issue #66).
+- **Issue #66 — JWT `Claims` field mismatch (resolved).** `base-hertz`/`admin-bff-hertz`/`ratelimit-hertz` previously defined `Claims{UserID, UUID, AK, Roles}`, decoding an empty identity from every real `user-kitex`/`rbac-kitex`-issued token (which only ever signs `{uid, roles}`). All three packages have since been fixed to use `Claims{Uid, AK, Roles}`, matching the issuer schema. This package's own `internal/pkg/middleware/token.go` still defines its **own** `Claims{Uid, Roles}` shape rather than reusing `admin-bff-hertz`'s `Claims` type — that remains a package-local choice (no `AK`/API-key path here), not a bug workaround.
 - **`admin-bff-hertz` terminal-user-management integration is out of scope here.** Giving admin operators the ability to manage end-user accounts (the ones this package's `user-kitex` backend owns) through `admin-bff-hertz` is a separate, not-yet-started body of work (Plan 3). `user-bff-hertz` and `admin-bff-hertz` do not currently share code or wiring beyond both being ncgo Hertz templates.
 
 ## Related Templates

@@ -8,12 +8,14 @@ body: |-
     import (
     	"context"
     	"errors"
+    	"fmt"
     	"log"
     	"time"
 
     	"github.com/google/uuid"
 
     	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
     	"{{.Module}}/internal/infrastructure/auth"
     	"{{.Module}}/internal/pkg/oauth"
     )
@@ -47,6 +49,15 @@ body: |-
     	providers  oauth.Registry
     	stateStore oauth.StateStore
     	tokenTTL   time.Duration
+    	audit      audit.Writer
+    	blacklist  Blacklist
+    {{ "}" }}
+
+    // Blacklist revokes a JWT before its natural expiry. Mirrors
+    // useradminsvc.Blacklist's shape exactly — server.go wires the same
+    // concrete redisBlacklist/noopBlacklist instance into both services.
+    type Blacklist interface {{ "{" }}
+    	Revoke(ctx context.Context, uid string) error
     {{ "}" }}
 
     // New constructs a Service. providers may be a partial registry (only
@@ -55,8 +66,8 @@ body: |-
     // BindProvider) — those methods call it unconditionally and will panic
     // on a nil stateStore. Unit tests that only exercise Register/Login may
     // safely pass nil, since those methods never touch it.
-    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration) *Service {{ "{" }}
-    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL{{ "}" }}
+    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration, auditWriter audit.Writer, blacklist Blacklist) *Service {{ "{" }}
+    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL, audit: auditWriter, blacklist: blacklist{{ "}" }}
     {{ "}" }}
 
     func parseUID(uid string) (user.ID, error) {{ "{" }}
@@ -102,26 +113,31 @@ body: |-
     		// Run a dummy verification so this path costs about as much time
     		// as the real-user path below, closing the timing side-channel.
     		_, _ = auth.VerifyPassword(in.Password, dummyPasswordHash)
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"user_not_found"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.PasswordHash == nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"no_local_password"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	ok, err := auth.VerifyPassword(in.Password, *u.PasswordHash)
     	if err != nil || !ok {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"bad_password"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
-    	return s.issueToken(u)
+    	return s.issueToken(ctx, u)
     {{ "}" }}
 
-    func (s *Service) issueToken(u *user.User) (LoginOutput, error) {{ "{" }}
+    func (s *Service) issueToken(ctx context.Context, u *user.User) (LoginOutput, error) {{ "{" }}
     	token, err := s.jwt.Sign(u.ID.String(), []string{{ "{" }}"user"{{ "}" }}, s.tokenTTL)
     	if err != nil {{ "{" }}
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.success"{{ "}" }})
     	return LoginOutput{{ "{" }}Uid: u.ID.String(), Token: token{{ "}" }}, nil
     {{ "}" }}
 
@@ -158,23 +174,28 @@ body: |-
     func (s *Service) OAuthCallback(ctx context.Context, in OAuthCallbackInput) (LoginOutput, error) {{ "{" }}
     	provider, purpose, _, ok, err := s.stateStore.Consume(ctx, in.State)
     	if err != nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_state_error","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	if !ok || provider != in.Provider || purpose != oauthPurposeLogin {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_state_invalid","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: oauth state invalid or expired")
     	{{ "}" }}
 
     	p, ok := s.providers.Get(in.Provider)
     	if !ok {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"provider_not_enabled","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: provider not enabled")
     	{{ "}" }}
 
     	tok, err := p.ExchangeCode(ctx, in.Code)
     	if err != nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_exchange_failed","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	info, err := p.FetchUserInfo(ctx, tok)
     	if err != nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_fetch_userinfo_failed","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
 
@@ -195,7 +216,7 @@ body: |-
     		if err := s.repo.CreateIdentity(ctx, newIdentity); err != nil {{ "{" }}
     			return LoginOutput{{ "{" }}{{ "}" }}, err
     		{{ "}" }}
-    		return s.issueToken(u)
+    		return s.issueToken(ctx, u)
     	{{ "}" }}
     	if err != nil {{ "{" }}
     		return LoginOutput{{ "{" }}{{ "}" }}, err
@@ -206,9 +227,10 @@ body: |-
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
-    	return s.issueToken(u)
+    	return s.issueToken(ctx, u)
     {{ "}" }}
 
     // BindProvider links a third-party identity to an already-authenticated
@@ -252,7 +274,11 @@ body: |-
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	return s.repo.CreateIdentity(ctx, identity)
+    	if err := s.repo.CreateIdentity(ctx, identity); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "identity.bind", Target: in.Provider{{ "}" }})
+    	return nil
     {{ "}" }}
 
     // UnbindProvider removes a third-party identity from uid. uid MUST come
@@ -289,5 +315,60 @@ body: |-
     			return errors.New("user: cannot unbind your only authentication method")
     		{{ "}" }}
     	{{ "}" }}
-    	return s.repo.DeleteIdentity(ctx, id, providerName)
+    	if err := s.repo.DeleteIdentity(ctx, id, providerName); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "identity.unbind", Target: providerName{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // ChangePassword lets an already-authenticated end-user change their own
+    // password after verifying the current one.
+    func (s *Service) ChangePassword(ctx context.Context, uid, oldPassword, newPassword string) error {{ "{" }}
+    	return s.setPassword(ctx, uid, &oldPassword, newPassword, "user.password_change")
+    {{ "}" }}
+
+    // setPassword is the shared implementation behind ChangePassword (self-
+    // service, oldPassword required) and useradminsvc.ResetPassword (admin-
+    // forced, oldPassword nil — see server.go wiring, which passes this same
+    // Service to construct useradminsvc.Service's password-reset path).
+    func (s *Service) setPassword(ctx context.Context, uid string, oldPassword *string, newPassword, auditAction string) error {{ "{" }}
+    	if len(newPassword) < minPasswordLength {{ "{" }}
+    		return errors.New("user: password must be at least 8 characters")
+    	{{ "}" }}
+    	id, err := parseUID(uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	u, err := s.repo.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if oldPassword != nil {{ "{" }}
+    		if u.PasswordHash == nil {{ "{" }}
+    			return errors.New("user: account has no local password set")
+    		{{ "}" }}
+    		ok, err := auth.VerifyPassword(*oldPassword, *u.PasswordHash)
+    		if err != nil || !ok {{ "{" }}
+    			return errors.New("user: old password is incorrect")
+    		{{ "}" }}
+    	{{ "}" }}
+    	newHash, err := auth.HashPassword(newPassword)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err := s.repo.UpdatePassword(ctx, id, newHash); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.blacklist.Revoke(ctx, uid)
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: auditAction{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // SetPasswordForAdmin is called by useradminsvc.ResetPassword to reuse
+    // setPassword's shared logic without exporting setPassword itself
+    // (keeps the no-old-password path explicit at the call site rather than
+    // letting any caller pass a nil oldPassword to the unexported helper).
+    func (s *Service) SetPasswordForAdmin(ctx context.Context, uid, newPassword string) error {{ "{" }}
+    	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset")
     {{ "}" }}

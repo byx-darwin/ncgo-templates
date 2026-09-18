@@ -11,9 +11,19 @@ body: |-
     	"time"
 
     	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
     	"{{.Module}}/internal/infrastructure/auth"
     	"{{.Module}}/internal/pkg/oauth"
     )
+
+    type fakeBlacklist struct {{ "{" }}
+    	revoked []string
+    {{ "}" }}
+
+    func (b *fakeBlacklist) Revoke(ctx context.Context, uid string) error {{ "{" }}
+    	b.revoked = append(b.revoked, uid)
+    	return nil
+    {{ "}" }}
 
     type fakeRepo struct {{ "{" }}
     	byUsername map[string]*user.User
@@ -55,7 +65,7 @@ body: |-
     func (r *fakeRepo) DeleteIdentity(ctx context.Context, userID user.ID, provider string) error {{ "{" }} return nil {{ "}" }}
 
     func newTestService() *Service {{ "{" }}
-    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour)
+    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour, audit.NewMemoryWriter(), &fakeBlacklist{{ "{" }}{{ "}" }})
     {{ "}" }}
 
     // fakeStateStore is a minimal oauth.StateStore stub for exercising
@@ -137,11 +147,63 @@ body: |-
     {{ "}" }}
 
     func TestBindProvider_RejectsEmptyUidState(t *testing.T) {{ "{" }}
-    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, &fakeStateStore{{ "{" }}provider: "github", purpose: oauthPurposeBind, uid: "", ok: true{{ "}" }}, time.Hour)
+    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, &fakeStateStore{{ "{" }}provider: "github", purpose: oauthPurposeBind, uid: "", ok: true{{ "}" }}, time.Hour, audit.NewMemoryWriter(), &fakeBlacklist{{ "{" }}{{ "}" }})
     	ctx := context.Background()
 
     	err := svc.BindProvider(ctx, BindProviderInput{{ "{" }}Provider: "github", State: "state-1", Code: "code-1"{{ "}" }})
     	if err == nil {{ "{" }}
     		t.Fatal("expected error when consumed state has an empty uid")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestChangePassword_WrongOldPassword_Rejected(t *testing.T) {{ "{" }}
+    	repo := newFakeRepo()
+    	hash, _ := auth.HashPassword("correct-horse")
+    	u, _ := user.NewLocal("alice", hash)
+    	_ = repo.Create(context.Background(), u)
+
+    	aw := audit.NewMemoryWriter()
+    	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+
+    	err := svc.ChangePassword(context.Background(), u.ID.String(), "wrong-password", "new-password-1")
+    	if err == nil {{ "{" }}
+    		t.Fatal("expected error for wrong old password, got nil")
+    	{{ "}" }}
+    	if len(aw.Entries()) != 0 {{ "{" }}
+    		t.Fatalf("expected no audit entry on failed change, got %d", len(aw.Entries()))
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestChangePassword_Success_UpdatesHashRevokesAndAudits(t *testing.T) {{ "{" }}
+    	repo := newFakeRepo()
+    	hash, _ := auth.HashPassword("correct-horse")
+    	u, _ := user.NewLocal("alice", hash)
+    	_ = repo.Create(context.Background(), u)
+
+    	aw := audit.NewMemoryWriter()
+    	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+
+    	err := svc.ChangePassword(context.Background(), u.ID.String(), "correct-horse", "new-password-1")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("expected success, got error: %v", err)
+    	{{ "}" }}
+
+    	updated, err := repo.GetByID(context.Background(), u.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID failed: %v", err)
+    	{{ "}" }}
+    	if ok, _ := auth.VerifyPassword("new-password-1", *updated.PasswordHash); !ok {{ "{" }}
+    		t.Fatal("password hash was not updated to the new password")
+    	{{ "}" }}
+
+    	if len(bl.revoked) != 1 || bl.revoked[0] != u.ID.String() {{ "{" }}
+    		t.Fatalf("expected blacklist.Revoke called once with uid %q, got %v", u.ID.String(), bl.revoked)
+    	{{ "}" }}
+
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "user.password_change" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action user.password_change, got %+v", entries)
     	{{ "}" }}
     {{ "}" }}

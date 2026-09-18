@@ -1,0 +1,76 @@
+# ncgo exported template — internal/base/conf/conf_test.go
+# Overrides ncgo's built-in default hertz conf_test.go to add negative tests
+# for grpc.authority.service_name/host_ports (Issue #68 — guards against the
+# server.go rbacAddr/ruleAddr host_ports[0] panic on startup, symmetric with
+# the existing grpc.terminal_user guard).
+path: internal/base/conf/conf_test.go
+update_behavior:
+    type: cover
+body: |
+    package conf
+
+    import "testing"
+
+    func TestApplyRedisFallbacksUsesTopLevelRedis(t *testing.T) {{ "{" }}
+    	cfg := &Config{{ "{" }}
+    		Redis:       RedisConfig{{ "{" }}Addrs: []string{{ "{" }}"redis-shared:6379"{{ "}" }}, PoolSize: 20, ClientName: "shared"{{ "}" }},
+    		RateLimit:   RateLimitConfig{{ "{" }}Backend: "redis"{{ "}" }},
+    		Idempotency: IdempotencyConfig{{ "{" }}Backend: "redis"{{ "}" }},
+    		Auth:        AuthConfig{{ "{" }}Signature: SignatureConfig{{ "{" }}Nonce: SignatureNonceConfig{{ "{" }}Enabled: true, Backend: "redis"{{ "}" }}{{ "}" }}{{ "}" }},
+    	{{ "}" }}
+    	cfg.applyRedisFallbacks()
+    	for name, got := range map[string]RedisConfig{{ "{" }}
+    		"rate_limit":      cfg.RateLimit.Redis,
+    		"idempotency":     cfg.Idempotency.Redis,
+    		"signature_nonce": cfg.Auth.Signature.Nonce.Redis,
+    	{{ "}" }} {{ "{" }}
+    		if len(got.Addrs) != 1 || got.Addrs[0] != "redis-shared:6379" {{ "{" }}
+    			t.Fatalf("%s addrs = %v, want shared redis", name, got.Addrs)
+    		{{ "}" }}
+    		if got.PoolSize != 20 || got.ClientName != "shared" {{ "{" }}
+    			t.Fatalf("%s redis fallback = %+v", name, got)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestValidateAppliesRedisFallbacks(t *testing.T) {{ "{" }}
+    	cfg := Default()
+    	cfg.Redis.Addrs = []string{{ "{" }}"redis-top:6379"{{ "}" }}
+    	cfg.Redis.PoolSize = 32
+    	cfg.RateLimit.Enabled = true
+    	cfg.RateLimit.Backend = "redis"
+    	cfg.RateLimit.Redis = RedisConfig{{ "{" }}Addrs: []string{{ "{" }}"redis-rate:6379"{{ "}" }}{{ "}" }}
+    	if err := cfg.Validate(); err != nil {{ "{" }}
+    		t.Fatalf("Validate: %v", err)
+    	{{ "}" }}
+    	if len(cfg.RateLimit.Redis.Addrs) != 1 || cfg.RateLimit.Redis.Addrs[0] != "redis-rate:6379" {{ "{" }}
+    		t.Fatalf("rate_limit addrs = %v, want module override", cfg.RateLimit.Redis.Addrs)
+    	{{ "}" }}
+    	if cfg.RateLimit.Redis.PoolSize != 32 {{ "{" }}
+    		t.Fatalf("rate_limit pool_size = %d, want inherited top-level pool size", cfg.RateLimit.Redis.PoolSize)
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestValidate_RequiresAuthorityServiceName and
+    // TestValidate_RequiresAuthorityHostPorts are the #68 regression tests:
+    // before this fix, an empty grpc.authority.service_name/host_ports
+    // passed Validate() and only panicked later in server.go's
+    // cfg.GRPC.Authority.HostPorts[0] indexing, matching the guard style
+    // already used for grpc.terminal_user.
+    func TestValidate_RequiresAuthorityServiceName(t *testing.T) {{ "{" }}
+    	cfg := Default()
+    	cfg.GRPC.Authority.ServiceName = ""
+    	cfg.GRPC.Authority.HostPorts = []string{{ "{" }}"127.0.0.1:8888"{{ "}" }}
+    	if err := cfg.Validate(); err == nil {{ "{" }}
+    		t.Fatal("expected error when grpc.authority.service_name is empty")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestValidate_RequiresAuthorityHostPorts(t *testing.T) {{ "{" }}
+    	cfg := Default()
+    	cfg.GRPC.Authority.ServiceName = "authority"
+    	cfg.GRPC.Authority.HostPorts = nil
+    	if err := cfg.Validate(); err == nil {{ "{" }}
+    		t.Fatal("expected error when grpc.authority.host_ports is empty, not a later panic")
+    	{{ "}" }}
+    {{ "}" }}

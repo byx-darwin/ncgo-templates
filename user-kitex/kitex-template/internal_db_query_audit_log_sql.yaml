@@ -9,14 +9,14 @@ body: |-
     -- name: ListAuditLog :many
     SELECT * FROM audit_log
     WHERE actor_uid = $1
-      AND ($2::text IS NULL OR action = $2)
-      AND ($3::timestamptz IS NULL OR created_at >= $3)
-      AND ($4::timestamptz IS NULL OR created_at <= $4)
+      AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
+      AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
+      AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'))
     ORDER BY created_at DESC
     LIMIT $5 OFFSET $6;
     -- name: CountAuditLog :one
     SELECT count(*) FROM audit_log
     WHERE actor_uid = $1
-      AND ($2::text IS NULL OR action = $2)
-      AND ($3::timestamptz IS NULL OR created_at >= $3)
-      AND ($4::timestamptz IS NULL OR created_at <= $4);
+      AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
+      AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
+      AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'));

@@ -120,10 +120,14 @@ body: |
     {{ "}" }}
 
     func (r *Resolver) phaseConfig(phase string) conf.RateLimitPhaseConfig {{ "{" }}
-    	if strings.EqualFold(strings.TrimSpace(phase), "post_auth") {{ "{" }}
+    	switch strings.ToLower(strings.TrimSpace(phase)) {{ "{" }}
+    	case "post_auth":
     		return r.cfg.PostAuth
+    	case "password_change":
+    		return r.cfg.PasswordChange
+    	default:
+    		return r.cfg.PreAuth
     	{{ "}" }}
-    	return r.cfg.PreAuth
     {{ "}" }}
 
     func NormalizeConfig(cfg conf.RateLimitConfig) conf.RateLimitConfig {{ "{" }}

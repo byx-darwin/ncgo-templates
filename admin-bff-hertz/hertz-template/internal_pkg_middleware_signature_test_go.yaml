@@ -78,6 +78,29 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
+    // TestSignatureAuth_ValidRequest_SetsClaimsAK is the #72 regression test:
+    // before this fix, a cryptographically-verified signature request never
+    // recorded its app key anywhere, so idempotency.go/rate_limit.go's
+    // claims.AK-scoped branches were unreachable dead code outside test
+    // fixtures — every real signature-authenticated request silently fell
+    // back to per-IP or header-trusted (unverified) scoping.
+    func TestSignatureAuth_ValidRequest_SetsClaimsAK(t *testing.T) {{ "{" }}
+    	cfg := conf.SignatureConfig{{ "{" }}Enabled: true, StaticSecret: "secret"{{ "}" }}
+    	mw := SignatureAuth(cfg, StaticSecretResolver{{ "{" }}SecretValue: "secret"{{ "}" }})
+    	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+    	c := newSignedSignatureContext(t, "secret", "app-1", "nonce-1", timestamp)
+    	mw(context.Background(), c)
+
+    	claims, ok := GetClaims(c)
+    	if !ok {{ "{" }}
+    		t.Fatal("expected claims in context after a valid signed request")
+    	{{ "}" }}
+    	if claims.AK != "app-1" {{ "{" }}
+    		t.Errorf("claims.AK = %q, want %q", claims.AK, "app-1")
+    	{{ "}" }}
+    {{ "}" }}
+
     func newSignedSignatureContext(t *testing.T, secret, appKey, nonce, timestamp string) *app.RequestContext {{ "{" }}
     	t.Helper()
     	c := app.NewContext(0)

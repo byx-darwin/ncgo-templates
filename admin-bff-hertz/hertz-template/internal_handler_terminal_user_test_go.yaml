@@ -9,6 +9,7 @@ body: |
     import (
     	"context"
     	"encoding/json"
+    	"strings"
     	"testing"
 
     	"github.com/cloudwego/hertz/pkg/app"
@@ -24,6 +25,7 @@ body: |
     type fakeTerminalUserClient struct {{ "{" }}
     	userservice.Client
     	banErr, unbanErr, logoutErr, unbindErr error
+    	resetPasswordErr, listAuditLogsErr     error
     	forceLogoutCalled                      bool
     {{ "}" }}
 
@@ -54,6 +56,20 @@ body: |
 
     func (f *fakeTerminalUserClient) AdminUnbindProvider(ctx context.Context, req *userv1.AdminUnbindProviderReq, callOptions ...callopt.Option) (*userv1.AdminUnbindProviderResp, error) {{ "{" }}
     	return &userv1.AdminUnbindProviderResp{{ "{" }}{{ "}" }}, f.unbindErr
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) ResetPassword(ctx context.Context, req *userv1.ResetPasswordReq, callOptions ...callopt.Option) (*userv1.ResetPasswordResp, error) {{ "{" }}
+    	return &userv1.ResetPasswordResp{{ "{" }}{{ "}" }}, f.resetPasswordErr
+    {{ "}" }}
+
+    func (f *fakeTerminalUserClient) ListAuditLogs(ctx context.Context, req *userv1.ListAuditLogsReq, callOptions ...callopt.Option) (*userv1.ListAuditLogsResp, error) {{ "{" }}
+    	return &userv1.ListAuditLogsResp{{ "{" }}
+    		Entries: []*userv1.AuditLogItem{{ "{" }}
+    			{{ "{" }}ActorUid: req.ActorUid, Action: "ban", CreatedAt: "2026-09-01T00:00:00Z"{{ "}" }},
+    			{{ "{" }}ActorUid: req.ActorUid, Action: "reset_password", CreatedAt: "2026-09-02T00:00:00Z"{{ "}" }},
+    		{{ "}" }},
+    		Total: 2,
+    	{{ "}" }}, f.listAuditLogsErr
     {{ "}" }}
 
     func newTerminalUserTestCtx() (context.Context, *app.RequestContext) {{ "{" }}
@@ -176,4 +192,64 @@ body: |
     	ctx, c := newTerminalUserTestCtx()
     	h.Unban(ctx, c)
     	assertParamInvalid(t, c)
+    {{ "}" }}
+
+    func TestTerminalUserHandler_ResetPassword_Success(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	req := protocol.NewRequest("POST", "/terminal-users/u1/reset-password", nil)
+    	req.SetBody([]byte(`{{ "{" }}"new_password":"newpassword123"{{ "}" }}`))
+    	req.CopyTo(&c.Request)
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.ResetPassword(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200: %s", c.Response.StatusCode(), c.Response.Body())
+    	{{ "}" }}
+    	var body struct {{ "{" }}
+    		Data struct {{ "{" }}
+    			Status string `json:"status"`
+    		{{ "}" }} `json:"data"`
+    	{{ "}" }}
+    	if err := json.Unmarshal(c.Response.Body(), &body); err != nil {{ "{" }}
+    		t.Fatalf("failed to unmarshal response body %q: %v", c.Response.Body(), err)
+    	{{ "}" }}
+    	if body.Data.Status != "password_reset" {{ "{" }}
+    		t.Fatalf("status = %q, want %q", body.Data.Status, "password_reset")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_ResetPassword_MissingUID_BadRequest(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	h.ResetPassword(ctx, c)
+    	assertParamInvalid(t, c)
+    {{ "}" }}
+
+    func TestTerminalUserHandler_ListAuditLogs_Success(t *testing.T) {{ "{" }}
+    	h := NewTerminalUserHandler(&fakeTerminalUserClient{{ "{" }}{{ "}" }})
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.ListAuditLogs(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200: %s", c.Response.StatusCode(), c.Response.Body())
+    	{{ "}" }}
+    	// The response envelope may be produced either via plain encoding/json
+    	// (map/struct data) or via protojson (when data is a proto.Message, as
+    	// ListAuditLogsResp is) — protojson renders int64 fields as JSON strings.
+    	// json.RawMessage tolerates either shape without over-asserting on it.
+    	var body struct {{ "{" }}
+    		Data struct {{ "{" }}
+    			Entries []json.RawMessage `json:"entries"`
+    			Total   json.RawMessage   `json:"total"`
+    		{{ "}" }} `json:"data"`
+    	{{ "}" }}
+    	if err := json.Unmarshal(c.Response.Body(), &body); err != nil {{ "{" }}
+    		t.Fatalf("failed to unmarshal response body %q: %v", c.Response.Body(), err)
+    	{{ "}" }}
+    	if len(body.Data.Entries) != 2 {{ "{" }}
+    		t.Fatalf("entries len = %d, want 2 (body: %s)", len(body.Data.Entries), c.Response.Body())
+    	{{ "}" }}
+    	if !strings.Contains(string(body.Data.Total), "2") {{ "{" }}
+    		t.Fatalf("total = %s, want to contain 2", body.Data.Total)
+    	{{ "}" }}
     {{ "}" }}

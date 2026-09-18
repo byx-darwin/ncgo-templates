@@ -350,6 +350,9 @@ body: |-
     		{{ "}" }}
     		ok, err := auth.VerifyPassword(*oldPassword, *u.PasswordHash)
     		if err != nil || !ok {{ "{" }}
+    			// Record the failed verification so brute-force attempts are
+    			// visible in the audit trail (mirrors auth.login.failure).
+    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.password_change.failure"{{ "}" }})
     			return errors.New("user: old password is incorrect")
     		{{ "}" }}
     	{{ "}" }}

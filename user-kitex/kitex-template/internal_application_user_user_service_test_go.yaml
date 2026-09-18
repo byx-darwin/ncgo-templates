@@ -170,8 +170,8 @@ body: |-
     	if err == nil {{ "{" }}
     		t.Fatal("expected error for wrong old password, got nil")
     	{{ "}" }}
-    	if len(aw.Entries()) != 0 {{ "{" }}
-    		t.Fatalf("expected no audit entry on failed change, got %d", len(aw.Entries()))
+    	if len(aw.Entries()) != 1 || aw.Entries()[0].Action != "user.password_change.failure" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action user.password_change.failure, got %+v", aw.Entries())
     	{{ "}" }}
     {{ "}" }}
 

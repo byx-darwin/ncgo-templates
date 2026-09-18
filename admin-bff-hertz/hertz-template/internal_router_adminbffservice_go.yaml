@@ -12,6 +12,7 @@ body: |
     	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/handler"
     	"{{.Module}}/internal/pkg/middleware"
+    	"{{.Module}}/internal/pkg/ratelimit"
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
     	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
@@ -19,7 +20,7 @@ body: |
     )
 
     // Register{{.ServiceName}}BffServiceRoutes registers all adminbffservice BFF routes
-    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client, userCli userservice.Client) {{ "{" }}
+    func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client, userCli userservice.Client, resolver *ratelimit.Resolver) {{ "{" }}
     	cfg := conf.Get()
 
     	authHandler := handler.NewAuthHandler(rbacAuthCli)
@@ -111,4 +112,6 @@ body: |
     	terminalUsers.POST("/:uid/ban", middleware.RequirePermission("terminal_user:ban"), middleware.Authz(rbacCli), terminalUserHandler.Ban)
     	terminalUsers.POST("/:uid/unban", middleware.RequirePermission("terminal_user:unban"), middleware.Authz(rbacCli), terminalUserHandler.Unban)
     	terminalUsers.DELETE("/:uid/identities/:provider", middleware.RequirePermission("terminal_user:unbind-identity"), middleware.Authz(rbacCli), terminalUserHandler.UnbindIdentity)
+    	terminalUsers.POST("/:uid/reset-password", middleware.RateLimit("password_change", cfg.RateLimit, cfg.RateLimit.PasswordChange, resolver), middleware.RequirePermission("terminal_user:password-reset"), middleware.Authz(rbacCli), terminalUserHandler.ResetPassword)
+    	terminalUsers.GET("/:uid/audit-logs", middleware.RequirePermission("terminal_user:audit-log:read"), middleware.Authz(rbacCli), terminalUserHandler.ListAuditLogs)
     {{ "}" }}

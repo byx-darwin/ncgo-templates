@@ -128,3 +128,59 @@ body: |
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "unbound"{{ "}" }})
     {{ "}" }}
+
+    type ResetPasswordRequest struct {{ "{" }}
+    	NewPassword string `json:"new_password" binding:"required,min=8"`
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) ResetPassword(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	uid := c.Param("uid")
+    	if uid == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	var req ResetPasswordRequest
+    	if err := c.BindJSON(&req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	if _, err := h.userCli.ResetPassword(ctx, &userv1.ResetPasswordReq{{ "{" }}Uid: uid, NewPassword: req.NewPassword{{ "}" }}); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
+    {{ "}" }}
+
+    func (h *TerminalUserHandler) ListAuditLogs(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	uid := c.Param("uid")
+    	if uid == "" {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	limit := int32(20)
+    	offset := int32(0)
+    	if v := string(c.Query("limit")); v != "" {{ "{" }}
+    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+    			limit = int32(n)
+    		{{ "}" }}
+    	{{ "}" }}
+    	if v := string(c.Query("offset")); v != "" {{ "{" }}
+    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+    			offset = int32(n)
+    		{{ "}" }}
+    	{{ "}" }}
+    	req := &userv1.ListAuditLogsReq{{ "{" }}
+    		ActorUid:  uid,
+    		Action:    string(c.Query("action")),
+    		StartTime: string(c.Query("start_time")),
+    		EndTime:   string(c.Query("end_time")),
+    		Limit:     limit,
+    		Offset:    offset,
+    	{{ "}" }}
+    	resp, err := h.userCli.ListAuditLogs(ctx, req)
+    	if err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeInternalError)
+    		return
+    	{{ "}" }}
+    	response.OK(c, resp)
+    {{ "}" }}

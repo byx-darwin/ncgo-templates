@@ -8,6 +8,8 @@ body: |
     import (
         "context"
         "log"
+        "strings"
+        "time"
 
         "github.com/cloudwego/kitex/client"
 
@@ -17,10 +19,12 @@ body: |
 
         "{{.Module}}/internal/base/conf"
         "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/ratelimit"
         "{{.Module}}/internal/pkg/response"
         "{{.Module}}/internal/router"
         authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
         rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
+        ratelimitv1 "{{.Module}}/kitex_gen/api/ratelimit/v1"
         ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
         userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
@@ -113,9 +117,49 @@ body: |
             log.Fatalf("create terminal-user client: %v", err)
         {{ "}" }}
 
+        // Rate-limit resolver — reads local (config-defined) rules by
+        // default; when rate_limit.source.type is set to "rule_center" it
+        // instead resolves rules dynamically via the rule-center RPC client
+        // above (ListRules, matched by method/path_pattern). Used by the
+        // password-reset route's middleware.RateLimit("password_change", ...).
+        resolver := ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{{ "{" }}
+            RuleCenter: ratelimitResolveFunc(ruleCli),
+        {{ "}" }})
+
         // Register routes
-        router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli, userCli)
+        router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli, userCli, resolver)
 
         // Start server
         h.Spin()
+    {{ "}" }}
+
+    // ratelimitResolveFunc adapts the rule-center RPC client's ListRules
+    // call to ratelimit.GRPCClient, matching returned rules by method and
+    // path_pattern (exact match, or prefix when the pattern doesn't equal
+    // the request path).
+    func ratelimitResolveFunc(ruleCli ruleservice.Client) ratelimit.ResolveFunc {{ "{" }}
+        return func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
+            resp, err := ruleCli.ListRules(ctx, &ratelimitv1.ListRulesReq{{ "{" }}Page: 1, PageSize: 200{{ "}" }})
+            if err != nil {{ "{" }}
+                return nil, false, err
+            {{ "}" }}
+            for _, rule := range resp.Rules {{ "{" }}
+                if rule == nil || !rule.Enabled {{ "{" }}
+                    continue
+                {{ "}" }}
+                if rule.Method != "" && !strings.EqualFold(rule.Method, lookup.Method) {{ "{" }}
+                    continue
+                {{ "}" }}
+                if rule.PathPattern != "" && rule.PathPattern != lookup.Path && !strings.HasPrefix(lookup.Path, rule.PathPattern) {{ "{" }}
+                    continue
+                {{ "}" }}
+                return &conf.RateLimitRuleConfig{{ "{" }}
+                    Enabled:       rule.Enabled,
+                    Strategy:      rule.Strategy,
+                    WindowSeconds: gfconfig.Duration{{ "{" }}Duration: time.Duration(rule.WindowSeconds) * time.Second{{ "}" }},
+                    MaxRequests:   int(rule.Limit),
+                {{ "}" }}, true, nil
+            {{ "}" }}
+            return nil, false, nil
+        {{ "}" }}
     {{ "}" }}

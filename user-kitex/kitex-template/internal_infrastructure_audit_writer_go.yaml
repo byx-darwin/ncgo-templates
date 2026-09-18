@@ -1,0 +1,93 @@
+# ncgo exported template — internal/infrastructure/audit/writer.go
+path: internal/infrastructure/audit/writer.go
+update_behavior:
+    type: cover
+body: |-
+    package audit
+
+    import (
+    	"context"
+    	"sync"
+    	"time"
+
+    	"{{.Module}}/internal/db/gen"
+    )
+
+    // Entry is a single audit log line.
+    type Entry struct {{ "{" }}
+    	ActorUID   string
+    	Action     string
+    	Target     string
+    	IPAddress  string
+    	UserAgent  string
+    	DetailJSON string
+    	CreatedAt  time.Time
+    {{ "}" }}
+
+    // Writer records user-kitex mutations for audit.
+    type Writer interface {{ "{" }}
+    	Write(ctx context.Context, e Entry) error
+    {{ "}" }}
+
+    // SQLWriter persists audit entries via sqlc.
+    type SQLWriter struct {{ "{" }}
+    	q *gen.Queries
+    {{ "}" }}
+
+    // NewSQLWriter creates an audit writer backed by the audit_log table.
+    func NewSQLWriter(q *gen.Queries) *SQLWriter {{ "{" }}
+    	return &SQLWriter{{ "{" }}q: q{{ "}" }}
+    {{ "}" }}
+
+    func (w *SQLWriter) Write(ctx context.Context, e Entry) error {{ "{" }}
+    	var actor *string
+    	if e.ActorUID != "" {{ "{" }}
+    		v := e.ActorUID
+    		actor = &v
+    	{{ "}" }}
+    	detail := e.DetailJSON
+    	if detail == "" {{ "{" }}
+    		detail = "{{ "{" }}{{ "}" }}"
+    	{{ "}" }}
+    	_, err := w.q.InsertAuditLog(ctx, &gen.InsertAuditLogParams{{ "{" }}
+    		ActorUid:   actor,
+    		Action:     e.Action,
+    		Target:     e.Target,
+    		IpAddress:  e.IPAddress,
+    		UserAgent:  e.UserAgent,
+    		DetailJson: detail,
+    	{{ "}" }})
+    	return err
+    {{ "}" }}
+
+    // MemoryWriter is a test-only in-memory audit writer, shared with
+    // MemoryReader (see reader.go) so tests can write then query in one
+    // hermetic slice without a database.
+    type MemoryWriter struct {{ "{" }}
+    	mu      sync.Mutex
+    	entries []Entry
+    {{ "}" }}
+
+    // NewMemoryWriter creates an in-memory audit writer.
+    func NewMemoryWriter() *MemoryWriter {{ "{" }}
+    	return &MemoryWriter{{ "{" }}{{ "}" }}
+    {{ "}" }}
+
+    func (w *MemoryWriter) Write(ctx context.Context, e Entry) error {{ "{" }}
+    	w.mu.Lock()
+    	defer w.mu.Unlock()
+    	if e.CreatedAt.IsZero() {{ "{" }}
+    		e.CreatedAt = time.Now()
+    	{{ "}" }}
+    	w.entries = append(w.entries, e)
+    	return nil
+    {{ "}" }}
+
+    // Entries returns a copy of the recorded audit entries.
+    func (w *MemoryWriter) Entries() []Entry {{ "{" }}
+    	w.mu.Lock()
+    	defer w.mu.Unlock()
+    	out := make([]Entry, len(w.entries))
+    	copy(out, w.entries)
+    	return out
+    {{ "}" }}

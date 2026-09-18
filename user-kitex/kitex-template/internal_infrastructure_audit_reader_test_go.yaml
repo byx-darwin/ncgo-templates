@@ -1,0 +1,67 @@
+# ncgo exported template — internal/infrastructure/audit/reader_test.go
+path: internal/infrastructure/audit/reader_test.go
+update_behavior:
+    type: cover
+body: |-
+    package audit_test
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"{{.Module}}/internal/infrastructure/audit"
+    )
+
+    func TestMemoryReader_List_FiltersByActorAndAction(t *testing.T) {{ "{" }}
+    	w := audit.NewMemoryWriter()
+    	r := audit.NewMemoryReader(w)
+    	ctx := context.Background()
+
+    	_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "u1", Action: "auth.login.success", CreatedAt: time.Now(){{ "}" }})
+    	_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "u1", Action: "user.password_change", CreatedAt: time.Now(){{ "}" }})
+    	_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "u2", Action: "auth.login.success", CreatedAt: time.Now(){{ "}" }})
+
+    	entries, total, err := r.List(ctx, audit.ListFilter{{ "{" }}ActorUID: "u1", Limit: 10{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("List returned error: %v", err)
+    	{{ "}" }}
+    	if total != 2 {{ "{" }}
+    		t.Fatalf("expected total=2, got %d", total)
+    	{{ "}" }}
+    	if len(entries) != 2 {{ "{" }}
+    		t.Fatalf("expected 2 entries, got %d", len(entries))
+    	{{ "}" }}
+
+    	action := "user.password_change"
+    	entries, total, err = r.List(ctx, audit.ListFilter{{ "{" }}ActorUID: "u1", Action: &action, Limit: 10{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("List with action filter returned error: %v", err)
+    	{{ "}" }}
+    	if total != 1 || len(entries) != 1 {{ "{" }}
+    		t.Fatalf("expected 1 filtered entry, got total=%d len=%d", total, len(entries))
+    	{{ "}" }}
+    	if entries[0].Action != action {{ "{" }}
+    		t.Fatalf("expected action %q, got %q", action, entries[0].Action)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestMemoryReader_List_Pagination(t *testing.T) {{ "{" }}
+    	w := audit.NewMemoryWriter()
+    	r := audit.NewMemoryReader(w)
+    	ctx := context.Background()
+    	for i := 0; i < 5; i++ {{ "{" }}
+    		_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "u1", Action: "auth.login.success", CreatedAt: time.Now(){{ "}" }})
+    	{{ "}" }}
+
+    	entries, total, err := r.List(ctx, audit.ListFilter{{ "{" }}ActorUID: "u1", Limit: 2, Offset: 1{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("List returned error: %v", err)
+    	{{ "}" }}
+    	if total != 5 {{ "{" }}
+    		t.Fatalf("expected total=5, got %d", total)
+    	{{ "}" }}
+    	if len(entries) != 2 {{ "{" }}
+    		t.Fatalf("expected 2 entries (page size), got %d", len(entries))
+    	{{ "}" }}
+    {{ "}" }}

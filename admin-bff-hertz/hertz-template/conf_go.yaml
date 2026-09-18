@@ -503,6 +503,10 @@ body: |-
               InternalCIDRs: []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10"},
           },
           GRPC: GRPCConfig{
+              Authority: ClientConfig{
+                  ServiceName: "authority",
+                  HostPorts:   []string{"127.0.0.1:8888"},
+              },
               TerminalUser: ClientConfig{
                   ServiceName: "userservice",
                   HostPorts:   []string{"127.0.0.1:8890"},
@@ -747,6 +751,12 @@ body: |-
       }
       if err := validateServer(c.Server); err != nil {
           return err
+      }
+      if c.GRPC.Authority.ServiceName == "" {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("grpc.authority.service_name is empty")
+      }
+      if len(c.GRPC.Authority.HostPorts) == 0 {
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("grpc.authority.host_ports is empty")
       }
       if c.GRPC.TerminalUser.ServiceName == "" {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("grpc.terminal_user.service_name is empty")

@@ -131,3 +131,13 @@ body: |-
     	err := h.self.UnbindProvider(ctx, req.Uid, req.Provider)
     	return &userv1.AdminUnbindProviderResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) ChangePassword(ctx context.Context, req *userv1.ChangePasswordReq) (*userv1.ChangePasswordResp, error) {{ "{" }}
+    	err := h.self.ChangePassword(ctx, req.Uid, req.OldPassword, req.NewPassword)
+    	return &userv1.ChangePasswordResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) ResetPassword(ctx context.Context, req *userv1.ResetPasswordReq) (*userv1.ResetPasswordResp, error) {{ "{" }}
+    	err := h.admin.ResetPassword(ctx, req.Uid, req.NewPassword)
+    	return &userv1.ResetPasswordResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}

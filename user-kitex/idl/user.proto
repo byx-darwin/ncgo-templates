@@ -136,6 +136,47 @@ message AdminUnbindProviderReq {
 }
 message AdminUnbindProviderResp {}
 
+message ChangePasswordReq {
+  // uid MUST be extracted from the caller's verified JWT by the invoking
+  // BFF — same trust boundary as UnbindProviderReq.uid.
+  string uid = 1;
+  string old_password = 2;
+  string new_password = 3;
+}
+message ChangePasswordResp {}
+
+message ResetPasswordReq {
+  // uid is the target end-user, specified by an admin operator via
+  // admin-bff-hertz. Trust boundary matches AdminUnbindProviderReq: the
+  // calling BFF's RBAC check ("terminal_user:password-reset" permission)
+  // gates this call, user-kitex does not re-verify caller identity.
+  string uid = 1;
+  string new_password = 2;
+}
+message ResetPasswordResp {}
+
+message ListAuditLogsReq {
+  string actor_uid = 1;
+  string action = 2;      // optional filter, empty = no filter
+  string start_time = 3;  // optional, RFC3339
+  string end_time = 4;    // optional, RFC3339
+  int32 limit = 5;
+  int32 offset = 6;
+}
+message AuditLogItem {
+  string actor_uid = 1;
+  string action = 2;
+  string target = 3;
+  string ip_address = 4;
+  string user_agent = 5;
+  string detail_json = 6;
+  string created_at = 7;  // RFC3339
+}
+message ListAuditLogsResp {
+  repeated AuditLogItem entries = 1;
+  int64 total = 2;
+}
+
 service UserService {
   rpc Register(RegisterReq) returns (RegisterResp);
   rpc Login(LoginReq) returns (LoginResp);
@@ -152,4 +193,7 @@ service UserService {
 
   rpc GetUser(GetUserReq) returns (GetUserResp);
   rpc AdminUnbindProvider(AdminUnbindProviderReq) returns (AdminUnbindProviderResp);
+  rpc ChangePassword(ChangePasswordReq) returns (ChangePasswordResp);
+  rpc ResetPassword(ResetPasswordReq) returns (ResetPasswordResp);
+  rpc ListAuditLogs(ListAuditLogsReq) returns (ListAuditLogsResp);
 }

@@ -56,11 +56,12 @@ body: |-
     	// instead. StartTime/EndTime below are placeholders for readability;
     	// confirm and adjust these field names once `make sqlc` has actually
     	// been run against internal/db/query/audit_log.sql.
+    	actorUID := f.ActorUID
     	rows, err := r.q.ListAuditLog(ctx, &gen.ListAuditLogParams{{ "{" }}
-    		ActorUid:  &f.ActorUID,
-    		Action:    f.Action,
-    		StartTime: f.StartTime,
-    		EndTime:   f.EndTime,
+    		ActorUid:  toPgText(&actorUID),
+    		Action:    toPgText(f.Action),
+    		StartTime: toPgTimestamptz(f.StartTime),
+    		EndTime:   toPgTimestamptz(f.EndTime),
     		Limit:     int32(limit),
     		Offset:    int32(f.Offset),
     	{{ "}" }})
@@ -68,10 +69,10 @@ body: |-
     		return nil, 0, err
     	{{ "}" }}
     	total, err := r.q.CountAuditLog(ctx, &gen.CountAuditLogParams{{ "{" }}
-    		ActorUid:  &f.ActorUID,
-    		Action:    f.Action,
-    		StartTime: f.StartTime,
-    		EndTime:   f.EndTime,
+    		ActorUid:  toPgText(&actorUID),
+    		Action:    toPgText(f.Action),
+    		StartTime: toPgTimestamptz(f.StartTime),
+    		EndTime:   toPgTimestamptz(f.EndTime),
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		return nil, 0, err
@@ -79,8 +80,8 @@ body: |-
     	out := make([]Entry, 0, len(rows))
     	for _, row := range rows {{ "{" }}
     		actor := ""
-    		if row.ActorUid != nil {{ "{" }}
-    			actor = *row.ActorUid
+    		if v := fromPgText(row.ActorUid); v != nil {{ "{" }}
+    			actor = *v
     		{{ "}" }}
     		out = append(out, Entry{{ "{" }}
     			ActorUID:   actor,
@@ -89,7 +90,7 @@ body: |-
     			IPAddress:  row.IpAddress,
     			UserAgent:  row.UserAgent,
     			DetailJSON: row.DetailJson,
-    			CreatedAt:  row.CreatedAt.Time,
+    			CreatedAt:  fromPgTimestamptz(row.CreatedAt),
     		{{ "}" }})
     	{{ "}" }}
     	return out, total, nil

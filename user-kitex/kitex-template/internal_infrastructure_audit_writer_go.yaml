@@ -10,6 +10,8 @@ body: |-
     	"sync"
     	"time"
 
+    	"github.com/jackc/pgx/v5/pgtype"
+
     	"{{.Module}}/internal/db/gen"
     )
 
@@ -27,6 +29,37 @@ body: |-
     // Writer records user-kitex mutations for audit.
     type Writer interface {{ "{" }}
     	Write(ctx context.Context, e Entry) error
+    {{ "}" }}
+
+    // toPgText/fromPgText mirror internal/repository/user/repo.go's helpers.
+    // Duplicated locally (rather than imported) so the audit package does not
+    // take on a dependency on the user repository package.
+    func toPgText(s *string) pgtype.Text {{ "{" }}
+    	if s == nil {{ "{" }}
+    		return pgtype.Text{{ "{" }}{{ "}" }}
+    	{{ "}" }}
+    	return pgtype.Text{{ "{" }}String: *s, Valid: true{{ "}" }}
+    {{ "}" }}
+
+    func fromPgText(t pgtype.Text) *string {{ "{" }}
+    	if !t.Valid {{ "{" }}
+    		return nil
+    	{{ "}" }}
+    	v := t.String
+    	return &v
+    {{ "}" }}
+
+    // toPgTimestamptz/fromPgTimestamptz are the timestamptz equivalent of
+    // toPgText/fromPgText, for nullable timestamptz sqlc params/columns.
+    func toPgTimestamptz(t *time.Time) pgtype.Timestamptz {{ "{" }}
+    	if t == nil {{ "{" }}
+    		return pgtype.Timestamptz{{ "{" }}{{ "}" }}
+    	{{ "}" }}
+    	return pgtype.Timestamptz{{ "{" }}Time: *t, Valid: true{{ "}" }}
+    {{ "}" }}
+
+    func fromPgTimestamptz(t pgtype.Timestamptz) time.Time {{ "{" }}
+    	return t.Time
     {{ "}" }}
 
     // SQLWriter persists audit entries via sqlc.
@@ -50,7 +83,7 @@ body: |-
     		detail = "{{ "{" }}{{ "}" }}"
     	{{ "}" }}
     	_, err := w.q.InsertAuditLog(ctx, &gen.InsertAuditLogParams{{ "{" }}
-    		ActorUid:   actor,
+    		ActorUid:   toPgText(actor),
     		Action:     e.Action,
     		Target:     e.Target,
     		IpAddress:  e.IPAddress,

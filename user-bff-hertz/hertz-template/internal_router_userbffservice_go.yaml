@@ -36,6 +36,11 @@ body: |
     	{{ "}" }}
     	auth.POST("/login", middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, resolver), authHandler.Login)
 
+    	// Protected: self-service password change
+    	authProtected := auth.Group("")
+    	authProtected.Use(middleware.JWTAuth(cfg.Auth.Token))
+    	authProtected.POST("/change-password", middleware.RateLimit("password_change", cfg.RateLimit, cfg.RateLimit.PasswordChange, resolver), authHandler.ChangePassword)
+
     	// Public: OAuth login flow
     	oauth := auth.Group("/oauth")
     	oauth.GET("/:provider/start", oauthHandler.Start)

@@ -12,6 +12,7 @@ body: |
 
     	"github.com/cloudwego/hertz/pkg/app"
 
+    	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
@@ -61,4 +62,27 @@ body: |
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"uid": resp.Uid, "token": resp.Token{{ "}" }})
+    {{ "}" }}
+
+    type changePasswordReq struct {{ "{" }}
+    	OldPassword string `json:"old_password"`
+    	NewPassword string `json:"new_password"`
+    {{ "}" }}
+
+    func (h *AuthHandler) ChangePassword(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	claims, ok := middleware.GetClaims(c)
+    	if !ok {{ "{" }}
+    		response.ErrorCode(c, response.CodeTokenInvalid)
+    		return
+    	{{ "}" }}
+    	var req changePasswordReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	if _, err := h.userCli.ChangePassword(ctx, &userv1.ChangePasswordReq{{ "{" }}Uid: claims.Uid, OldPassword: req.OldPassword, NewPassword: req.NewPassword{{ "}" }}); err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "password_changed"{{ "}" }})
     {{ "}" }}

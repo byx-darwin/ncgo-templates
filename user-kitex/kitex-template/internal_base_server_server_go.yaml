@@ -30,6 +30,7 @@ body: |
     	"{{.Module}}/internal/base/data"
     	"{{.Module}}/internal/db/gen"
     	"{{.Module}}/internal/handler"
+    	"{{.Module}}/internal/infrastructure/audit"
     	authinfra "{{.Module}}/internal/infrastructure/auth"
     	"{{.Module}}/internal/pkg/interceptor"
     	"{{.Module}}/internal/pkg/oauth"
@@ -102,12 +103,23 @@ body: |
 
     	providers := buildOAuthRegistry(cfg.OAuth)
 
+    	var auditWriter audit.Writer
+    	var auditReader audit.Reader
+    	if cfg.Database.Enabled {{ "{" }}
+    		auditWriter = audit.NewSQLWriter(q)
+    		auditReader = audit.NewSQLReader(q)
+    	{{ "}" }} else {{ "{" }}
+    		mw := audit.NewMemoryWriter()
+    		auditWriter = mw
+    		auditReader = audit.NewMemoryReader(mw)
+    	{{ "}" }}
+
     	jwtMgr := authinfra.NewJWTManager(cfg.Auth.JWTSecret)
     	tokenTTL := time.Duration(cfg.Auth.AccessTTLSeconds) * time.Second
 
-    	userSvc := usersvc.New(userRepo, jwtMgr, providers, stateStore, tokenTTL)
-    	adminSvc := useradminsvc.New(userRepo, blacklist)
-    	userHandler := handler.NewUserServiceHandlerImpl(userSvc, adminSvc)
+    	userSvc := usersvc.New(userRepo, jwtMgr, providers, stateStore, tokenTTL, auditWriter, blacklist)
+    	adminSvc := useradminsvc.New(userRepo, blacklist, auditWriter, userSvc)
+    	userHandler := handler.NewUserServiceHandlerImpl(userSvc, adminSvc, auditReader)
 
     	addr, err := net.ResolveTCPAddr("tcp", cfg.Server.RPC.Port)
     	if err != nil {{ "{" }}

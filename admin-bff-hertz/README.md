@@ -368,7 +368,7 @@ type Claims struct {
 
 `Uid` comes from a verified JWT (`TokenAuth`); `AK` comes from a verified HMAC signature (`SignatureAuth`, `X-App-Key`/`X-Signature` headers) — a separate, non-JWT open-API auth path. `TokenAuth` preserves any `AK` `SignatureAuth` already set earlier in the chain instead of overwriting it.
 
-**Registration order limits what's actually reachable today** (`signature → idempotency → JWT`, with rate limiting registered engine-level even earlier): `idempotency.go`'s plain `ak:`-scoped branch is live — a signed request now gets a verified-`AK`-scoped key instead of falling back to the unverified `X-App-Key` header. The `ak_user_uuid:` combined branch and `rate_limit.go`'s `AK` read are **not yet reachable**, because idempotency runs before `TokenAuth` (so `Uid` is always empty there) and rate limiting runs before `SignatureAuth` (so `AK` is always empty there). Tracked separately as issue #73.
+`idempotency.go` is registered once per route group: on the public `auth` group (`/auth/login`, `/auth/refresh` — `ak:`/`ip:` scope only, no `Uid` before authentication) and on the `protected` group after `JWTAuth` (full `ak_user_uuid:`/`user_uuid:`/`ak:`/`ip:` precedence). This package's only `rate_limit.go` call site is the `password_change` phase on the password-reset route, already correctly positioned inside `protected` after `JWTAuth` (issue #73).
 
 A JWT can also carry its own `ak` claim; if `SignatureAuth` never ran, `TokenAuth` passes that value through unverified by the HMAC path (only the JWT's own signature backs it).
 

@@ -67,7 +67,7 @@ auth:
 - `10019` (403) - Invalid signature
 - `10023` (403) - Invalid AppKey
 
-**`Claims.AK`:** a verified signature (above) sets `Claims.AK` to the caller's app key, alongside JWT's own `Claims.Uid`; `TokenAuth` preserves it instead of overwriting it. Only `idempotency.go`'s plain `ak:`-scoped branch actually consumes it today — the combined `ak_user_uuid:` branch is unreachable because idempotency's key is computed before JWT runs, so `Uid` is always empty at that point (tracked as issue #73).
+**`Claims.AK`:** a verified signature (above) sets `Claims.AK` to the caller's app key, alongside JWT's own `Claims.Uid`; `TokenAuth` preserves it instead of overwriting it. `idempotency.go` now runs once, inside the JWT-protected route group (after both `SignatureAuth` and `JWTAuth` have run), so it reaches the full precedence — `ak_user_uuid:` when both are set, otherwise `user_uuid:`/`ak:`/`ip:` (issue #73). This template still has no user-facing rate limiting (see `ratelimit-hertz` for that); it does ship a `RateLimit` middleware and `RateLimitConfig`/`PreAuth`/`PostAuth` types that are never wired into `server.go` or the router — they exist only to satisfy a compile-time dependency from `ncgo`'s built-in default DB-repository scaffold (`internal/repository/rate_limit_rule.go`, generated regardless of this template's own files), not because this template offers rate limiting itself.
 
 ### 3. Idempotency (Optional)
 

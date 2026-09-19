@@ -545,6 +545,24 @@ body: |-
     	{{ "}" }}
     {{ "}" }}
 
+    func TestConfirmPasswordReset_EmailChannel_PhoneIgnored_Succeeds(t *testing.T) {{ "{" }}
+    	svc, _, es, _, _ := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "heidi", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Email = "heidi@example.com"
+    	_ = svc.RequestPasswordReset(ctx, "heidi@example.com", "email")
+    	token := extractTokenFromLink(t, es.Sent()[0].Link)
+
+    	// A non-empty phone that does not match any account must still be
+    	// ignored for an email-channel token — the phone check only applies
+    	// when tok.Channel == "sms".
+    	if err := svc.ConfirmPasswordReset(ctx, token, "+15559998888", "brand-new-password-1"); err != nil {{ "{" }}
+    		t.Fatalf("ConfirmPasswordReset: expected email-channel token to ignore phone, got error: %v", err)
+    	{{ "}" }}
+    {{ "}" }}
+
     // extractTokenFromLink pulls the ?token= query value out of a reset link
     // produced by RequestPasswordReset, for tests that need the raw credential
     // to exercise ConfirmPasswordReset (which only ever receives the raw value

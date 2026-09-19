@@ -195,6 +195,9 @@ body: |
     		{{ "}" }}
     	{{ "}" }}
     	req := &userv1.ListAuditLogsReq{{ "{" }}
+    		// The path uid is the SUBJECT of the query, not strictly the actor:
+    		// user-kitex matches it against actor_uid OR target, so this returns
+    		// both the user's own actions and admin actions taken against them.
     		ActorUid:  uid,
     		Action:    string(c.Query("action")),
     		StartTime: string(c.Query("start_time")),

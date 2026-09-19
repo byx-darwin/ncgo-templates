@@ -203,6 +203,10 @@ message ResetPasswordReq {
 message ResetPasswordResp {}
 
 message ListAuditLogsReq {
+  // actor_uid is the subject uid the query is about. It matches entries the
+  // user performed (actor_uid) AND entries performed against them by an admin
+  // (target), so admin-initiated bans/resets/force-logouts against this uid
+  // are included. The field keeps its name for wire compatibility.
   string actor_uid = 1;
   string action = 2;      // optional filter, empty = no filter
   string start_time = 3;  // optional, RFC3339

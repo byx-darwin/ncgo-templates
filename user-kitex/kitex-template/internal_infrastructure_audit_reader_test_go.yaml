@@ -46,6 +46,39 @@ body: |-
     	{{ "}" }}
     {{ "}" }}
 
+    // TestMemoryReader_List_MatchesTargetSide covers admin-initiated events:
+    // they record the admin as ActorUID and the affected end-user as Target, so
+    // a query about that end-user must still return them.
+    func TestMemoryReader_List_MatchesTargetSide(t *testing.T) {{ "{" }}
+    	w := audit.NewMemoryWriter()
+    	r := audit.NewMemoryReader(w)
+    	ctx := context.Background()
+
+    	_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "admin-1", Target: "u1", Action: "user.ban", CreatedAt: time.Now(){{ "}" }})
+    	_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "u1", Action: "auth.login.success", CreatedAt: time.Now(){{ "}" }})
+    	_ = w.Write(ctx, audit.Entry{{ "{" }}ActorUID: "admin-1", Target: "u2", Action: "user.ban", CreatedAt: time.Now(){{ "}" }})
+
+    	entries, total, err := r.List(ctx, audit.ListFilter{{ "{" }}ActorUID: "u1", Limit: 10{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("List returned error: %v", err)
+    	{{ "}" }}
+    	if total != 2 || len(entries) != 2 {{ "{" }}
+    		t.Fatalf("expected the self-service entry AND the admin ban against u1, got total=%d len=%d %+v", total, len(entries), entries)
+    	{{ "}" }}
+    	sawBan := false
+    	for _, e := range entries {{ "{" }}
+    		if e.Action == "user.ban" {{ "{" }}
+    			sawBan = true
+    			if e.ActorUID != "admin-1" || e.Target != "u1" {{ "{" }}
+    				t.Fatalf("unexpected ban entry: %+v", e)
+    			{{ "}" }}
+    		{{ "}" }}
+    	{{ "}" }}
+    	if !sawBan {{ "{" }}
+    		t.Fatalf("expected the admin ban against u1 to be returned, got %+v", entries)
+    	{{ "}" }}
+    {{ "}" }}
+
     func TestMemoryReader_List_Pagination(t *testing.T) {{ "{" }}
     	w := audit.NewMemoryWriter()
     	r := audit.NewMemoryReader(w)

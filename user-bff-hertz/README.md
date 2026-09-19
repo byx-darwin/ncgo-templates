@@ -113,10 +113,12 @@ oauth_redirect:
 | GET | `/auth/oauth/:provider/bind-callback` | none* | Complete bind-flow OAuth redirect |
 | DELETE | `/auth/oauth/:provider/bind` | JWT | Unbind a third-party identity from the authenticated user |
 | POST | `/auth/change-password` | JWT | Self-service password change — verifies the old password, then revokes existing tokens |
+| POST | `/auth/password-reset/request` | none | Public endpoint, no JWT required, rate-limited — requests a password reset; always returns success whether or not the identifier matched an account (anti-enumeration) |
+| POST | `/auth/password-reset/confirm` | none | Public endpoint, no JWT required, rate-limited — consumes a one-time reset token to set a new password |
 
 \* `bind-callback` itself carries no `Authorization` header (it's a browser redirect from the OAuth provider) — the identity being bound is recovered from the OAuth `state` value that `bind-start` minted from the caller's JWT `uid`, not from anything supplied in the callback request itself.
 
-`POST /auth/register` also runs through the `Idempotency` middleware when `idempotency.enabled: true`; both `/auth/register` and `/auth/login` run through `RateLimit` (`pre_auth` / `post_auth` phases respectively), and `/auth/change-password` runs through `RateLimit`'s `password_change` phase (it verifies the caller's old password, so it must be throttled like a login).
+`POST /auth/register` also runs through the `Idempotency` middleware when `idempotency.enabled: true`; both `/auth/register` and `/auth/login` run through `RateLimit` (`pre_auth` / `post_auth` phases respectively), `/auth/change-password` runs through `RateLimit`'s `password_change` phase (it verifies the caller's old password, so it must be throttled like a login), and `/auth/password-reset/request` / `/auth/password-reset/confirm` run through `RateLimit`'s `password_reset_request` / `password_reset_confirm` phases respectively.
 
 > **Client contract:** while `idempotency.enabled: true` (the shipped `conf/dev/conf.yaml` default), every `POST /auth/register` request **must** carry an `X-Idempotency-Key` header — the middleware rejects a request without one with `400 {"code":10203,"msg":"idempotency_key_missing"}` before the handler runs. Set `idempotency.enabled: false`, or add `/auth/register` to `idempotency.skip_paths`, if you do not want that requirement.
 

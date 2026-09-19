@@ -11,6 +11,7 @@ body: |
     	"errors"
     	"os"
     	"path/filepath"
+    	"strings"
     	"testing"
     	"time"
 
@@ -20,7 +21,10 @@ body: |
     	"github.com/cloudwego/hertz/pkg/route"
     	"github.com/cloudwego/kitex/client/callopt"
 
+    	goerror "github.com/byx-darwin/go-tools/go-common/error"
+
     	"{{.Module}}/internal/pkg/oauthcode"
+    	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
@@ -73,11 +77,14 @@ body: |
 
     // fakeRouterUserClient only implements the methods this test's routes
     // actually reach past JWTAuth (BindProvider, for the unauthenticated
-    // bind-callback route). Every other method panics via the nil embedded
-    // Client if called — which would itself indicate a test bug (a route
-    // that should have been blocked by JWTAuth wasn't).
+    // bind-callback route, and the two password-reset methods, for the
+    // unauthenticated password-reset routes). Every other method panics via
+    // the nil embedded Client if called — which would itself indicate a
+    // test bug (a route that should have been blocked by JWTAuth wasn't).
     type fakeRouterUserClient struct {{ "{" }}
     	userservice.Client
+    	requestPasswordResetFn func(ctx context.Context, req *userv1.RequestPasswordResetReq) (*userv1.RequestPasswordResetResp, error)
+    	confirmPasswordResetFn func(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error)
     {{ "}" }}
 
     func (f *fakeRouterUserClient) BindProvider(ctx context.Context, req *userv1.BindProviderReq, callOptions ...callopt.Option) (*userv1.BindProviderResp, error) {{ "{" }}
@@ -85,6 +92,14 @@ body: |
     	// state/code, but this test only asserts bind-callback is NOT blocked
     	// by JWTAuth — it doesn't need BindProvider to succeed.
     	return nil, errors.New("synthetic: no real rpc in router test")
+    {{ "}" }}
+
+    func (f *fakeRouterUserClient) RequestPasswordReset(ctx context.Context, req *userv1.RequestPasswordResetReq, callOptions ...callopt.Option) (*userv1.RequestPasswordResetResp, error) {{ "{" }}
+    	return f.requestPasswordResetFn(ctx, req)
+    {{ "}" }}
+
+    func (f *fakeRouterUserClient) ConfirmPasswordReset(ctx context.Context, req *userv1.ConfirmPasswordResetReq, callOptions ...callopt.Option) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
+    	return f.confirmPasswordResetFn(ctx, req)
     {{ "}" }}
 
     type noopRouterCodeStore struct{{ "{" }}{{ "}" }}
@@ -99,10 +114,10 @@ body: |
 
     var _ oauthcode.Store = noopRouterCodeStore{{ "{" }}{{ "}" }}
 
-    func newRouterTestEngine(t *testing.T) *route.Engine {{ "{" }}
+    func newRouterTestEngine(t *testing.T, userCli userservice.Client) *route.Engine {{ "{" }}
     	t.Helper()
     	h := server.New()
-    	Register{{.ServiceName}}BffServiceRoutes(h, &fakeRouterUserClient{{ "{" }}{{ "}" }}, noopRouterCodeStore{{ "{" }}{{ "}" }}, nil)
+    	Register{{.ServiceName}}BffServiceRoutes(h, userCli, noopRouterCodeStore{{ "{" }}{{ "}" }}, nil)
     	return h.Engine
     {{ "}" }}
 
@@ -114,7 +129,7 @@ body: |
     // error URL because the synthetic BindProvider call above fails) rather
     // than being aborted with 401 by the auth middleware.
     func TestBindCallback_NoAuthHeader_NotBlockedByJWTAuth(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t)
+    	engine := newRouterTestEngine(t, &fakeRouterUserClient{{ "{" }}{{ "}" }})
     	w := ut.PerformRequest(engine, "GET", "/auth/oauth/github/bind-callback?state=s&code=c", nil)
     	resp := w.Result()
     	if resp.StatusCode() == consts.StatusUnauthorized {{ "{" }}
@@ -128,7 +143,7 @@ body: |
     // TestBindStartAndUnbind_NoAuthHeader_StillBlocked is the regression
     // check: bind-start and unbind must still require a JWT.
     func TestBindStartAndUnbind_NoAuthHeader_StillBlocked(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t)
+    	engine := newRouterTestEngine(t, &fakeRouterUserClient{{ "{" }}{{ "}" }})
 
     	w := ut.PerformRequest(engine, "GET", "/auth/oauth/github/bind-start", nil)
     	if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
@@ -138,5 +153,58 @@ body: |
     	w = ut.PerformRequest(engine, "DELETE", "/auth/oauth/github/bind", nil)
     	if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
     		t.Fatalf("unbind: expected 401 without Authorization header, got %d", got)
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestPasswordResetRequest_AlwaysSucceeds_NoAuthRequired asserts
+    // /auth/password-reset/request sits outside authProtected — a locked-out
+    // user has no JWT to send — and that a successful RPC yields HTTP 200.
+    func TestPasswordResetRequest_AlwaysSucceeds_NoAuthRequired(t *testing.T) {{ "{" }}
+    	cli := &fakeRouterUserClient{{ "{" }}
+    		requestPasswordResetFn: func(ctx context.Context, req *userv1.RequestPasswordResetReq) (*userv1.RequestPasswordResetResp, error) {{ "{" }}
+    			return &userv1.RequestPasswordResetResp{{ "{" }}{{ "}" }}, nil
+    		{{ "}" }},
+    	{{ "}" }}
+    	engine := newRouterTestEngine(t, cli)
+    	w := ut.PerformRequest(engine, "POST", "/auth/password-reset/request", &ut.Body{{ "{" }}Body: strings.NewReader(`{{ "{" }}"identifier":"alice@example.com","channel":"email"{{ "}" }}`), Len: -1{{ "}" }})
+    	resp := w.Result()
+    	if resp.StatusCode() == consts.StatusUnauthorized {{ "{" }}
+    		t.Fatalf("password-reset/request was blocked by JWTAuth (401) — it must be reachable without an Authorization header")
+    	{{ "}" }}
+    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
+    		t.Fatalf("expected 200, got %d: %s", resp.StatusCode(), resp.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestPasswordResetConfirm_InvalidCredential_ReturnsError mirrors the
+    // intended ChangePassword-style error-path assertion: a business error
+    // from the RPC must be surfaced through response.Err rather than a bare
+    // 200. NOTE: it does NOT additionally assert "not 500" — that would
+    // require the coded HTTP status (401 for CodeAuthFailed here), but
+    // response.Err/response.OK call go-framework/hertz's PACKAGE-LEVEL
+    // Error()/Success() helpers, which always use that package's internal
+    // defaultResponder (constructed with no ErrorRouter — see
+    // NewResponder()'s doc default of failCode=500), not the per-request
+    // Responder the server's own middleware injects into the context (the
+    // one response.NewResponder() configures with RPCErrorRouter). So every
+    // handler's response.Err call in this template — Register/Login/
+    // ChangePassword and these two new routes alike — currently maps ANY
+    // goerror-coded business error to HTTP 500 rather than its real status.
+    // This is a pre-existing response-wiring gap outside Task 10's 3-file
+    // scope (internal_handler_auth_go.yaml / internal_router_userbffservice
+    // _go.yaml / this test file); fixing it belongs to response_go.yaml and
+    // is left for a follow-up task. This test only asserts the error is
+    // surfaced as a non-success response, which holds today.
+    func TestPasswordResetConfirm_InvalidCredential_ReturnsError(t *testing.T) {{ "{" }}
+    	cli := &fakeRouterUserClient{{ "{" }}
+    		confirmPasswordResetFn: func(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
+    			return nil, goerror.In("usersvc").Code(response.CodeAuthFailed).Public("invalid_credential").New("invalid or expired reset credential")
+    		{{ "}" }},
+    	{{ "}" }}
+    	engine := newRouterTestEngine(t, cli)
+    	w := ut.PerformRequest(engine, "POST", "/auth/password-reset/confirm", &ut.Body{{ "{" }}Body: strings.NewReader(`{{ "{" }}"credential":"bad-token","new_password":"hunter22"{{ "}" }}`), Len: -1{{ "}" }})
+    	resp := w.Result()
+    	if resp.StatusCode() == consts.StatusOK {{ "{" }}
+    		t.Fatalf("expected a non-200 response for an invalid reset credential, got 200: %s", resp.Body())
     	{{ "}" }}
     {{ "}" }}

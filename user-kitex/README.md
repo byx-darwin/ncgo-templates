@@ -24,7 +24,11 @@ ncgo new user --module github.com/acme/user --kind kitex \
 
 - `idl/user.proto` — `user.v1.UserService`:
   - **Self-service**: Register / Login / OAuthStart / OAuthCallback /
-    BindProvider / UnbindProvider / ChangePassword
+    BindProvider / UnbindProvider / ChangePassword / RequestPasswordReset /
+    ConfirmPasswordReset — `RequestPasswordReset` always returns success
+    whether or not the identifier matched an account (anti-enumeration);
+    `ConfirmPasswordReset` consumes a one-time reset token to set a new
+    password.
   - **Admin**: ListUsers / GetUser / BanUser / UnbanUser / ForceLogout /
     ListUserIdentities / AdminUnbindProvider / ResetPassword / ListAuditLogs
 - **DDD layers**:

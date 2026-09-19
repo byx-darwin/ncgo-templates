@@ -133,6 +133,19 @@ message ChangePasswordReq {
 }
 message ChangePasswordResp {}
 
+message RequestPasswordResetReq {
+  // identifier is an email address or phone number, per channel.
+  string identifier = 1;
+  string channel = 2; // "email" | "sms" — explicit, never inferred from identifier's format
+}
+message RequestPasswordResetResp {} // always empty on success; success is returned whether or not identifier matched an account
+
+message ConfirmPasswordResetReq {
+  string credential = 1;    // the email link's token, or the SMS code
+  string new_password = 2;
+}
+message ConfirmPasswordResetResp {}
+
 service UserService {
   rpc Register(RegisterReq) returns (RegisterResp);
   rpc Login(LoginReq) returns (LoginResp);
@@ -147,4 +160,6 @@ service UserService {
   rpc ForceLogout(ForceLogoutReq) returns (ForceLogoutResp);
   rpc ListUserIdentities(ListUserIdentitiesReq) returns (ListUserIdentitiesResp);
   rpc ChangePassword(ChangePasswordReq) returns (ChangePasswordResp);
+  rpc RequestPasswordReset(RequestPasswordResetReq) returns (RequestPasswordResetResp);
+  rpc ConfirmPasswordReset(ConfirmPasswordResetReq) returns (ConfirmPasswordResetResp);
 }

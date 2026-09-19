@@ -36,6 +36,11 @@ body: |
     	{{ "}" }}
     	auth.POST("/login", middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, resolver), authHandler.Login)
 
+    	// Public: forgot-password self-reset (no token available — the user
+    	// is locked out — so these must stay outside authProtected below).
+    	auth.POST("/password-reset/request", middleware.RateLimit("password_reset_request", cfg.RateLimit, cfg.RateLimit.PasswordResetRequest, resolver), authHandler.RequestPasswordReset)
+    	auth.POST("/password-reset/confirm", middleware.RateLimit("password_reset_confirm", cfg.RateLimit, cfg.RateLimit.PasswordResetConfirm, resolver), authHandler.ConfirmPasswordReset)
+
     	// Protected: self-service password change
     	authProtected := auth.Group("")
     	authProtected.Use(middleware.JWTAuth(cfg.Auth.Token))

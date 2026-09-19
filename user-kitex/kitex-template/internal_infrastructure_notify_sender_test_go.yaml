@@ -1,0 +1,35 @@
+# ncgo exported template — internal/infrastructure/notify/sender_test.go
+path: internal/infrastructure/notify/sender_test.go
+update_behavior:
+    type: cover
+body: |-
+    package notify_test
+
+    import (
+    	"context"
+    	"testing"
+
+    	"{{.Module}}/internal/infrastructure/notify"
+    )
+
+    func TestLogEmailSender_RecordsSentLink(t *testing.T) {{ "{" }}
+    	s := notify.NewLogEmailSender()
+    	if err := s.SendPasswordResetLink(context.Background(), "alice@example.com", "https://example.com/reset?token=abc"); err != nil {{ "{" }}
+    		t.Fatalf("SendPasswordResetLink: %v", err)
+    	{{ "}" }}
+    	sent := s.Sent()
+    	if len(sent) != 1 || sent[0].To != "alice@example.com" || sent[0].Link != "https://example.com/reset?token=abc" {{ "{" }}
+    		t.Fatalf("unexpected sent record: %+v", sent)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestLogSMSSender_RecordsSentCode(t *testing.T) {{ "{" }}
+    	s := notify.NewLogSMSSender()
+    	if err := s.SendPasswordResetCode(context.Background(), "13800000000", "123456"); err != nil {{ "{" }}
+    		t.Fatalf("SendPasswordResetCode: %v", err)
+    	{{ "}" }}
+    	sent := s.Sent()
+    	if len(sent) != 1 || sent[0].To != "13800000000" || sent[0].Code != "123456" {{ "{" }}
+    		t.Fatalf("unexpected sent record: %+v", sent)
+    	{{ "}" }}
+    {{ "}" }}

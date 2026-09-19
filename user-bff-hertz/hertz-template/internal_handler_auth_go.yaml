@@ -92,3 +92,41 @@ body: |
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "password_changed"{{ "}" }})
     {{ "}" }}
+
+    type requestPasswordResetReq struct {{ "{" }}
+    	Identifier string `json:"identifier"`
+    	Channel    string `json:"channel"`
+    {{ "}" }}
+
+    func (h *AuthHandler) RequestPasswordReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	var req requestPasswordResetReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	if _, err := h.userCli.RequestPasswordReset(ctx, &userv1.RequestPasswordResetReq{{ "{" }}Identifier: req.Identifier, Channel: req.Channel{{ "}" }}); err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	// Always the same success body, regardless of whether identifier
+    	// matched an account — see usersvc.RequestPasswordReset's doc comment.
+    	response.OK(c, map[string]string{{ "{" }}"status": "reset_requested"{{ "}" }})
+    {{ "}" }}
+
+    type confirmPasswordResetReq struct {{ "{" }}
+    	Credential  string `json:"credential"`
+    	NewPassword string `json:"new_password"`
+    {{ "}" }}
+
+    func (h *AuthHandler) ConfirmPasswordReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	var req confirmPasswordResetReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	if _, err := h.userCli.ConfirmPasswordReset(ctx, &userv1.ConfirmPasswordResetReq{{ "{" }}Credential: req.Credential, NewPassword: req.NewPassword{{ "}" }}); err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
+    {{ "}" }}

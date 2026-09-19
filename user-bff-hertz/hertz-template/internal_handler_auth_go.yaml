@@ -9,6 +9,7 @@ body: |
     import (
     	"context"
     	"encoding/json"
+    	"strings"
 
     	"github.com/cloudwego/hertz/pkg/app"
 
@@ -56,7 +57,10 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	resp, err := h.userCli.Login(ctx, &userv1.LoginReq{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	// Forward the end-user's IP and User-Agent so user-kitex can record
+    	// them on the login audit entry (both fields are optional; an empty
+    	// string simply means "unknown" downstream).
+    	resp, err := h.userCli.Login(ctx, &userv1.LoginReq{{ "{" }}Username: req.Username, Password: req.Password, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }})
     	if err != nil {{ "{" }}
     		response.Err(c, err)
     		return
@@ -80,7 +84,9 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	if _, err := h.userCli.ChangePassword(ctx, &userv1.ChangePasswordReq{{ "{" }}Uid: claims.Uid, OldPassword: req.OldPassword, NewPassword: req.NewPassword{{ "}" }}); err != nil {{ "{" }}
+    	// ClientIp/UserAgent feed the password-change audit entries (success
+    	// and failed-old-password) in user-kitex — see Login above.
+    	if _, err := h.userCli.ChangePassword(ctx, &userv1.ChangePasswordReq{{ "{" }}Uid: claims.Uid, OldPassword: req.OldPassword, NewPassword: req.NewPassword, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }}); err != nil {{ "{" }}
     		response.Err(c, err)
     		return
     	{{ "}" }}

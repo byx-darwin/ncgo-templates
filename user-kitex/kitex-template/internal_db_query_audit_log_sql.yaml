@@ -7,21 +7,25 @@ body: |-
     INSERT INTO audit_log (actor_uid, action, target, ip_address, user_agent, detail_json)
     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id;
     -- name: ListAuditLog :many
-    -- $1 is the subject uid the query is about: it matches entries the user
-    -- performed (actor_uid) AND entries performed against them by an admin
+    -- actor_uid is the subject uid the query is about: it matches entries the
+    -- user performed (actor_uid) AND entries performed against them by an admin
     -- (target), so "show me everything relevant to this uid" returns both
     -- self-service events and admin-initiated bans/resets/force-logouts.
+    -- Every placeholder here is a named sqlc arg (no bare $N): sqlc numbers
+    -- named params after the highest bare $N in the query, so mixing the two
+    -- styles would leave unreferenced placeholders and shuffle the generated
+    -- Params field order.
     SELECT * FROM audit_log
-    WHERE (actor_uid = $1 OR target = $1)
-      AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
+    WHERE (actor_uid = sqlc.arg('actor_uid') OR target = sqlc.arg('actor_uid'))
+      AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action')::text)
       AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
       AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'))
     ORDER BY created_at DESC
-    LIMIT $5 OFFSET $6;
+    LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
     -- name: CountAuditLog :one
-    -- $1 matches actor_uid OR target — see ListAuditLog.
+    -- actor_uid matches actor_uid OR target — see ListAuditLog.
     SELECT count(*) FROM audit_log
-    WHERE (actor_uid = $1 OR target = $1)
-      AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action'))
+    WHERE (actor_uid = sqlc.arg('actor_uid') OR target = sqlc.arg('actor_uid'))
+      AND (sqlc.narg('action')::text IS NULL OR action = sqlc.narg('action')::text)
       AND (sqlc.narg('start_time')::timestamptz IS NULL OR created_at >= sqlc.narg('start_time'))
       AND (sqlc.narg('end_time')::timestamptz IS NULL OR created_at <= sqlc.narg('end_time'));

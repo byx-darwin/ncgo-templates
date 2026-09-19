@@ -1,0 +1,93 @@
+# ncgo exported template — internal/infrastructure/notify/sender.go
+path: internal/infrastructure/notify/sender.go
+update_behavior:
+    type: cover
+body: |-
+    package notify
+
+    import (
+    	"context"
+    	"log"
+    	"sync"
+    )
+
+    // EmailSender delivers a password-reset link to an email address.
+    type EmailSender interface {{ "{" }}
+    	SendPasswordResetLink(ctx context.Context, to, resetLink string) error
+    {{ "}" }}
+
+    // SMSSender delivers a password-reset verification code to a phone number.
+    type SMSSender interface {{ "{" }}
+    	SendPasswordResetCode(ctx context.Context, to, code string) error
+    {{ "}" }}
+
+    // SentEmail records one LogEmailSender delivery, for test assertions.
+    type SentEmail struct {{ "{" }}
+    	To   string
+    	Link string
+    {{ "}" }}
+
+    // LogEmailSender is a stub EmailSender: it only logs and records what
+    // would have been sent. Real SMTP/gateway integration is out of scope
+    // for this template — swap this out via conf.Notify.Provider once a
+    // real provider account is available.
+    type LogEmailSender struct {{ "{" }}
+    	mu   sync.Mutex
+    	sent []SentEmail
+    {{ "}" }}
+
+    // NewLogEmailSender creates a stub EmailSender.
+    func NewLogEmailSender() *LogEmailSender {{ "{" }}
+    	return &LogEmailSender{{ "{" }}{{ "}" }}
+    {{ "}" }}
+
+    func (s *LogEmailSender) SendPasswordResetLink(ctx context.Context, to, resetLink string) error {{ "{" }}
+    	log.Printf("notify: [stub email] password reset link for %s: %s", to, resetLink)
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	s.sent = append(s.sent, SentEmail{{ "{" }}To: to, Link: resetLink{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // Sent returns a copy of the recorded deliveries.
+    func (s *LogEmailSender) Sent() []SentEmail {{ "{" }}
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	out := make([]SentEmail, len(s.sent))
+    	copy(out, s.sent)
+    	return out
+    {{ "}" }}
+
+    // SentSMS records one LogSMSSender delivery, for test assertions.
+    type SentSMS struct {{ "{" }}
+    	To   string
+    	Code string
+    {{ "}" }}
+
+    // LogSMSSender is a stub SMSSender — see LogEmailSender's doc comment.
+    type LogSMSSender struct {{ "{" }}
+    	mu   sync.Mutex
+    	sent []SentSMS
+    {{ "}" }}
+
+    // NewLogSMSSender creates a stub SMSSender.
+    func NewLogSMSSender() *LogSMSSender {{ "{" }}
+    	return &LogSMSSender{{ "{" }}{{ "}" }}
+    {{ "}" }}
+
+    func (s *LogSMSSender) SendPasswordResetCode(ctx context.Context, to, code string) error {{ "{" }}
+    	log.Printf("notify: [stub sms] password reset code for %s: %s", to, code)
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	s.sent = append(s.sent, SentSMS{{ "{" }}To: to, Code: code{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // Sent returns a copy of the recorded deliveries.
+    func (s *LogSMSSender) Sent() []SentSMS {{ "{" }}
+    	s.mu.Lock()
+    	defer s.mu.Unlock()
+    	out := make([]SentSMS, len(s.sent))
+    	copy(out, s.sent)
+    	return out
+    {{ "}" }}

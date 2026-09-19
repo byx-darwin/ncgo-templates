@@ -116,6 +116,7 @@ body: |
     type confirmPasswordResetReq struct {{ "{" }}
     	Credential  string `json:"credential"`
     	NewPassword string `json:"new_password"`
+    	Phone       string `json:"phone"`
     {{ "}" }}
 
     func (h *AuthHandler) ConfirmPasswordReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
@@ -124,7 +125,7 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	if _, err := h.userCli.ConfirmPasswordReset(ctx, &userv1.ConfirmPasswordResetReq{{ "{" }}Credential: req.Credential, NewPassword: req.NewPassword{{ "}" }}); err != nil {{ "{" }}
+    	if _, err := h.userCli.ConfirmPasswordReset(ctx, &userv1.ConfirmPasswordResetReq{{ "{" }}Credential: req.Credential, NewPassword: req.NewPassword, Phone: req.Phone{{ "}" }}); err != nil {{ "{" }}
     		response.Err(c, err)
     		return
     	{{ "}" }}

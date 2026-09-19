@@ -189,6 +189,6 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) ConfirmPasswordReset(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
-    	err := h.self.ConfirmPasswordReset(ctx, req.Credential, req.NewPassword)
+    	err := h.self.ConfirmPasswordReset(ctx, req.Credential, req.Phone, req.NewPassword)
     	return &userv1.ConfirmPasswordResetResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}

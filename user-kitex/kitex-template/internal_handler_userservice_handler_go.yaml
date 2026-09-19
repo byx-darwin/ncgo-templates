@@ -182,3 +182,13 @@ body: |-
     	{{ "}" }}
     	return &userv1.ListAuditLogsResp{{ "{" }}Entries: items, Total: total{{ "}" }}, nil
     {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) RequestPasswordReset(ctx context.Context, req *userv1.RequestPasswordResetReq) (*userv1.RequestPasswordResetResp, error) {{ "{" }}
+    	_ = h.self.RequestPasswordReset(ctx, req.Identifier, req.Channel)
+    	return &userv1.RequestPasswordResetResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) ConfirmPasswordReset(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
+    	err := h.self.ConfirmPasswordReset(ctx, req.Credential, req.NewPassword)
+    	return &userv1.ConfirmPasswordResetResp{{ "{" }}{{ "}" }}, err
+    {{ "}" }}

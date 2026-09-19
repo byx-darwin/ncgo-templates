@@ -32,6 +32,8 @@ body: |
     	"{{.Module}}/internal/handler"
     	"{{.Module}}/internal/infrastructure/audit"
     	authinfra "{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/infrastructure/notify"
+    	"{{.Module}}/internal/infrastructure/passwordreset"
     	"{{.Module}}/internal/pkg/interceptor"
     	"{{.Module}}/internal/pkg/oauth"
     	"{{.Module}}/internal/pkg/rpcerror"
@@ -114,10 +116,19 @@ body: |
     		auditReader = audit.NewMemoryReader(mw)
     	{{ "}" }}
 
+    	var resetRepo passwordreset.Repository
+    	if cfg.Database.Enabled {{ "{" }}
+    		resetRepo = passwordreset.NewSQLRepository(q)
+    	{{ "}" }} else {{ "{" }}
+    		resetRepo = passwordreset.NewMemoryRepository()
+    	{{ "}" }}
+    	emailSender := notify.NewLogEmailSender()
+    	smsSender := notify.NewLogSMSSender()
+
     	jwtMgr := authinfra.NewJWTManager(cfg.Auth.JWTSecret)
     	tokenTTL := time.Duration(cfg.Auth.AccessTTLSeconds) * time.Second
 
-    	userSvc := usersvc.New(userRepo, jwtMgr, providers, stateStore, tokenTTL, auditWriter, blacklist)
+    	userSvc := usersvc.New(userRepo, jwtMgr, providers, stateStore, tokenTTL, auditWriter, blacklist, resetRepo, emailSender, smsSender)
     	adminSvc := useradminsvc.New(userRepo, blacklist, auditWriter, userSvc)
     	userHandler := handler.NewUserServiceHandlerImpl(userSvc, adminSvc, auditReader)
 

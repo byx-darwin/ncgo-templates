@@ -568,7 +568,13 @@ body: |-
     			return errors.New("user: reset credential is invalid or expired")
     		{{ "}" }}
     		u, err := s.repo.GetByID(ctx, tok.UserID)
-    		if err != nil || u.Phone != phone {{ "{" }}
+    		if err != nil {{ "{" }}
+    			if !errors.Is(err, user.ErrNotFound) {{ "{" }}
+    				log.Printf("user: ConfirmPasswordReset phone lookup failed: %v", err)
+    			{{ "}" }}
+    			return errors.New("user: reset credential is invalid or expired")
+    		{{ "}" }}
+    		if u.Phone != phone {{ "{" }}
     			return errors.New("user: reset credential is invalid or expired")
     		{{ "}" }}
     	{{ "}" }}

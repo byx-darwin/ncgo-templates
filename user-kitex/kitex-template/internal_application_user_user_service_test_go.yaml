@@ -63,6 +63,15 @@ body: |-
     // u.Email = "...") is correctly visible to a later lookup by that
     // field — matching how the real SQL-backed repository always reads the
     // row's current column values.
+    //
+    // NOTE: like the real SQL-backed repository (whose sqlc :one query
+    // returns whichever matching row Postgres happens to pick), matching by
+    // exact equality here means an empty-string identifier is NOT a safe or
+    // valid lookup key — if more than one test user is ever left with
+    // Email == "" (or Phone == ""), which of them this returns depends on
+    // Go's unspecified map iteration order over r.byID. Callers (see
+    // Service.RequestPasswordReset) must reject an empty identifier before
+    // reaching this lookup rather than relying on it to "just not match."
     func (r *fakeRepo) GetByEmail(ctx context.Context, email string) (*user.User, error) {{ "{" }}
     	for _, u := range r.byID {{ "{" }}
     		if u.Email == email {{ "{" }}
@@ -71,6 +80,8 @@ body: |-
     	{{ "}" }}
     	return nil, user.ErrNotFound
     {{ "}" }}
+    // See the empty-identifier note on GetByEmail above — the same caveat
+    // applies here for Phone == "".
     func (r *fakeRepo) GetByPhone(ctx context.Context, phone string) (*user.User, error) {{ "{" }}
     	for _, u := range r.byID {{ "{" }}
     		if u.Phone == phone {{ "{" }}
@@ -356,6 +367,24 @@ body: |-
     	{{ "}" }}
     	if len(aw.Entries()) != 0 {{ "{" }}
     		t.Fatal("expected no audit entry for unknown identifier")
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestRequestPasswordReset_EmptyIdentifier_NoOpNoSend is the regression
+    // test for the empty-identifier bug: because Email/Phone are stored as
+    // "" (not NULL) for accounts that never set one, an empty identifier
+    // must be rejected up front rather than reaching GetByEmail/GetByPhone,
+    // where it could otherwise match an arbitrary account.
+    func TestRequestPasswordReset_EmptyIdentifier_NoOpNoSend(t *testing.T) {{ "{" }}
+    	svc, _, es, ss, aw := newTestServiceWithReset()
+    	if err := svc.RequestPasswordReset(context.Background(), "", "email"); err != nil {{ "{" }}
+    		t.Fatalf("expected nil error for empty identifier, got %v", err)
+    	{{ "}" }}
+    	if len(es.Sent()) != 0 || len(ss.Sent()) != 0 {{ "{" }}
+    		t.Fatal("expected no send for empty identifier")
+    	{{ "}" }}
+    	if len(aw.Entries()) != 0 {{ "{" }}
+    		t.Fatal("expected no audit entry for empty identifier")
     	{{ "}" }}
     {{ "}" }}
 

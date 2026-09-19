@@ -14,6 +14,7 @@ body: |-
     	"errors"
     	"fmt"
     	"log"
+    	"strings"
     	"time"
 
     	"github.com/google/uuid"
@@ -469,6 +470,14 @@ body: |-
     // doc's anti-enumeration section). Unexpected errors are logged, not
     // returned.
     func (s *Service) RequestPasswordReset(ctx context.Context, identifier, channel string) error {{ "{" }}
+    	if strings.TrimSpace(identifier) == "" {{ "{" }}
+    		// Local users' Email/Phone columns are stored as empty string (not
+    		// NULL) when unset, so an empty identifier would otherwise match
+    		// an arbitrary row via GetByEmail/GetByPhone's sqlc :one query.
+    		// Treat it exactly like "unknown account": no lookup, no audit,
+    		// no send.
+    		return nil
+    	{{ "}" }}
     	var (
     		u   *user.User
     		err error
@@ -555,6 +564,11 @@ body: |-
     	if err := s.setPassword(ctx, tok.UserID.String(), nil, newPassword, "user.password_reset_confirmed", "", "", ""); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_ = s.resetRepo.MarkUsed(ctx, tok.ID)
+    	if err := s.resetRepo.MarkUsed(ctx, tok.ID); err != nil {{ "{" }}
+    		// Best-effort: the password was already changed above, so this
+    		// failure is non-fatal, but log it so a stuck "still valid" token
+    		// row doesn't go unnoticed.
+    		log.Printf("user: ConfirmPasswordReset MarkUsed failed: %v", err)
+    	{{ "}" }}
     	return nil
     {{ "}" }}

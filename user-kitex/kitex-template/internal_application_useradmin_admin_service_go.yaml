@@ -19,7 +19,7 @@ body: |-
     // old-password-optional logic without useradminsvc importing usersvc's
     // full surface or duplicating hashing/blacklist-revoke logic.
     type PasswordSetter interface {{ "{" }}
-    	SetPasswordForAdmin(ctx context.Context, uid, newPassword string) error
+    	SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error
     {{ "}" }}
 
     // Service implements admin-facing end-user management operations,
@@ -134,8 +134,10 @@ body: |-
     // PasswordSetter. It does not itself write an audit entry: setPassword
     // (reached through SetPasswordForAdmin) already writes "user.password_reset"
     // on success, so writing here too would double-write the audit log.
-    func (s *Service) ResetPassword(ctx context.Context, uid, newPassword string) error {{ "{" }}
-    	return s.passwordSetter.SetPasswordForAdmin(ctx, uid, newPassword)
+    // operatorUID is the admin performing the reset, forwarded for audit
+    // attribution only; it may be empty.
+    func (s *Service) ResetPassword(ctx context.Context, uid, newPassword, operatorUID string) error {{ "{" }}
+    	return s.passwordSetter.SetPasswordForAdmin(ctx, uid, newPassword, operatorUID)
     {{ "}" }}
 
     func (s *Service) ListUserIdentities(ctx context.Context, uid string) ([]IdentityDTO, error) {{ "{" }}

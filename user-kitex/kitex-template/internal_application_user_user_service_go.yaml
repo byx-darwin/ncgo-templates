@@ -332,7 +332,8 @@ body: |-
     // end-user's request metadata (empty string = unknown) and are recorded on
     // both the success and the failed-verification audit entries.
     func (s *Service) ChangePassword(ctx context.Context, uid, oldPassword, newPassword, clientIP, userAgent string) error {{ "{" }}
-    	return s.setPassword(ctx, uid, &oldPassword, newPassword, "user.password_change", clientIP, userAgent)
+    	// operatorUID is empty: self-service, the actor IS the target.
+    	return s.setPassword(ctx, uid, &oldPassword, newPassword, "user.password_change", clientIP, userAgent, "")
     {{ "}" }}
 
     // setPassword is the shared implementation behind ChangePassword (self-
@@ -340,7 +341,13 @@ body: |-
     // forced, oldPassword nil — see server.go wiring, which passes this same
     // Service to construct useradminsvc.Service's password-reset path).
     // clientIP/userAgent may be empty when the caller has none.
-    func (s *Service) setPassword(ctx context.Context, uid string, oldPassword *string, newPassword, auditAction, clientIP, userAgent string) error {{ "{" }}
+    //
+    // operatorUID is only meaningful on the admin-forced path (oldPassword ==
+    // nil); it is the admin who performed the reset and becomes the audit
+    // entry's actor, with uid recorded as the target. The self-service path
+    // passes "" and keeps recording ActorUID: uid with no Target, since actor
+    // and target are the same person there.
+    func (s *Service) setPassword(ctx context.Context, uid string, oldPassword *string, newPassword, auditAction, clientIP, userAgent, operatorUID string) error {{ "{" }}
     	if len(newPassword) < minPasswordLength {{ "{" }}
     		return errors.New("user: password must be at least 8 characters")
     	{{ "}" }}
@@ -372,7 +379,20 @@ body: |-
     		return err
     	{{ "}" }}
     	_ = s.blacklist.Revoke(ctx, uid)
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: auditAction, IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
+    	// Attribution: on the self-service path (oldPassword != nil) one person
+    	// acts on themselves, so only ActorUID is recorded and Target stays
+    	// empty. On the admin-forced path the affected user goes in Target and
+    	// the operator in ActorUID, falling back to uid when the caller supplied
+    	// no operator — an empty actor_uid would be worse than the pre-fix
+    	// behaviour of attributing the action to the target.
+    	actor, target := uid, ""
+    	if oldPassword == nil {{ "{" }}
+    		target = uid
+    		if operatorUID != "" {{ "{" }}
+    			actor = operatorUID
+    		{{ "}" }}
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: actor, Target: target, Action: auditAction, IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
     	return nil
     {{ "}" }}
 
@@ -381,11 +401,17 @@ body: |-
     // (keeps the no-old-password path explicit at the call site rather than
     // letting any caller pass a nil oldPassword to the unexported helper).
     //
+    // operatorUID is the admin performing the reset; it becomes the audit
+    // entry's actor_uid while uid becomes its target (see
+    // ResetPasswordReq.operator_uid's trust-boundary comment — this value is
+    // for attribution only and is never re-verified here). It may be empty,
+    // in which case the entry is attributed to uid.
+    //
     // The admin-reset path records no IP/user agent: ResetPasswordReq carries
     // client_ip/user_agent fields, but admin-bff-hertz does not forward them
     // yet, so this passes empty strings rather than inventing a value. Only
     // the self-service login/password-change flows populate those columns
     // today (see the design note on filtering login audits by IP/UA).
-    func (s *Service) SetPasswordForAdmin(ctx context.Context, uid, newPassword string) error {{ "{" }}
-    	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset", "", "")
+    func (s *Service) SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error {{ "{" }}
+    	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset", "", "", operatorUID)
     {{ "}" }}

@@ -188,6 +188,8 @@ GET    /api/v1/terminal-users/:uid                      # permission: terminal_u
 POST   /api/v1/terminal-users/:uid/ban                  # permission: terminal_user:ban
 POST   /api/v1/terminal-users/:uid/unban                # permission: terminal_user:unban
 DELETE /api/v1/terminal-users/:uid/identities/:provider  # permission: terminal_user:unbind-identity
+POST   /api/v1/terminal-users/:uid/reset-password        # permission: terminal_user:password-reset
+GET    /api/v1/terminal-users/:uid/audit-logs            # permission: terminal_user:audit-log:read
 ```
 
 `POST .../ban` bans the account and then makes a best-effort `ForceLogout`
@@ -267,6 +269,8 @@ Standard naming convention: `resource:action`
 | `terminal_user:ban` | Ban a terminal user (also triggers `ForceLogout`, see [gRPC Connection](#grpc-connection)) |
 | `terminal_user:unban` | Unban a terminal user |
 | `terminal_user:unbind-identity` | Unbind a third-party identity provider from a terminal user |
+| `terminal_user:password-reset` | Force-reset a terminal user's password (no old password required; revokes existing tokens) |
+| `terminal_user:audit-log:read` | List a terminal user's audit log entries |
 
 ### Casbin Policy Model
 
@@ -451,6 +455,7 @@ make test
 
 - **`Authz` middleware ordering bug, fixed by this plan.** Prior to this plan, `middleware.Authz(rbacCli)` was registered at the `protected` route-group level via `.Use(...)`, before any per-route `RequirePermission(code)` had a chance to run. Because Hertz's `RouterGroup.combineHandlers` always places group-level `Use()` handlers ahead of a route's own handlers, and `RequestContext.Next` is a forward-only loop, `Authz` always executed with "no permission required yet" on the context and always took its no-op branch — silently skipping enforcement on **every** protected route in this package (all 19 pre-existing routes, not just the 5 new terminal-user ones). This plan fixed it by moving `Authz(rbacCli)` to run per-route, immediately after `RequirePermission(code)`, on every route. **If you are upgrading an existing deployment past this plan, be aware:** RBAC permission checks that were previously inert (any authenticated user could call any protected route regardless of assigned permissions) now actually enforce. Review your Casbin policies before rolling this out, or users without the right permission grants will start seeing `403 permission_denied` on routes that previously "worked."
 - **New required config fields (`grpc.terminal_user`, `grpc.authority`) break boot on upgrade without a config change.** Both fields are enforced by an unconditional `Validate()` guard, and `conf.Load` fully replaces `Default()` rather than merging into it, so an existing `conf.yaml` written before these fields existed won't pick up their defaults. An upgrade that doesn't also update `conf.yaml` fails to boot with `grpc.terminal_user.service_name is empty` (or the `grpc.authority` equivalent) instead of starting up without the newer feature. This is the intended, by-design tradeoff (fail loud at startup over a silently misconfigured client) — see the [gRPC Connection](#grpc-connection) upgrade note above before rolling out either field to a running deployment.
+- **New permission codes for admin-initiated password reset and audit-log read.** `POST /api/v1/terminal-users/:uid/reset-password` is gated by the `terminal_user:password-reset` permission code, and `GET /api/v1/terminal-users/:uid/audit-logs` by `terminal_user:audit-log:read` — both routed through the per-route `Authz(rbacCli)` + `RequirePermission(code)` pair described above, same as the pre-existing `terminal_user:*` codes, and both calling `user-kitex` via the same `grpc.terminal_user` client (see [Configuration](#grpc-connection)). Review your Casbin policies to grant these two codes to the appropriate admin roles before relying on either endpoint. Note the audit-log endpoint's query scope: it only ever returns records for the `:uid` in the path (`ActorUid` is pinned server-side from the path param, not from a request body/query field) — there is no cross-user or unscoped audit-log query capability in this package.
 
 ## Related Templates
 

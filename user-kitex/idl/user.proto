@@ -15,6 +15,12 @@ message RegisterResp {
 message LoginReq {
   string username = 1;
   string password = 2;
+  // client_ip/user_agent are optional (empty string = unknown). The calling
+  // BFF populates them from the original end-user's HTTP request when
+  // available; they land in the audit trail's promoted ip_address/user_agent
+  // columns so login auditing can be filtered by those two dimensions.
+  string client_ip = 3;
+  string user_agent = 4;
 }
 message LoginResp {
   string uid = 1;
@@ -89,17 +95,41 @@ message ListUsersResp {
 }
 
 message BanUserReq {
+  // uid is the target end-user being banned.
   string uid = 1;
+  // operator_uid identifies the admin who performed the action; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 2;
 }
 message BanUserResp {}
 
 message UnbanUserReq {
+  // uid is the target end-user being unbanned.
   string uid = 1;
+  // operator_uid identifies the admin who performed the action; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 2;
 }
 message UnbanUserResp {}
 
 message ForceLogoutReq {
+  // uid is the target end-user whose sessions are being revoked.
   string uid = 1;
+  // operator_uid identifies the admin who performed the action; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 2;
 }
 message ForceLogoutResp {}
 
@@ -136,6 +166,68 @@ message AdminUnbindProviderReq {
 }
 message AdminUnbindProviderResp {}
 
+message ChangePasswordReq {
+  // uid MUST be extracted from the caller's verified JWT by the invoking
+  // BFF — same trust boundary as UnbindProviderReq.uid.
+  string uid = 1;
+  string old_password = 2;
+  string new_password = 3;
+  // client_ip/user_agent are optional (empty string = unknown), populated by
+  // the calling BFF from the original end-user's HTTP request when available.
+  string client_ip = 4;
+  string user_agent = 5;
+}
+message ChangePasswordResp {}
+
+message ResetPasswordReq {
+  // uid is the target end-user, specified by an admin operator via
+  // admin-bff-hertz. Trust boundary matches AdminUnbindProviderReq: the
+  // calling BFF's RBAC check ("terminal_user:password-reset" permission)
+  // gates this call, user-kitex does not re-verify caller identity.
+  string uid = 1;
+  string new_password = 2;
+  // client_ip/user_agent are optional (empty string = unknown), populated by
+  // the calling BFF from the original end-user's HTTP request when available.
+  // Reserved for a follow-up: admin-bff-hertz does not yet forward them, so
+  // user-kitex currently records this path with empty values.
+  string client_ip = 3;
+  string user_agent = 4;
+  // operator_uid identifies the admin who performed the reset; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 5;
+}
+message ResetPasswordResp {}
+
+message ListAuditLogsReq {
+  // actor_uid is the subject uid the query is about. It matches entries the
+  // user performed (actor_uid) AND entries performed against them by an admin
+  // (target), so admin-initiated bans/resets/force-logouts against this uid
+  // are included. The field keeps its name for wire compatibility.
+  string actor_uid = 1;
+  string action = 2;      // optional filter, empty = no filter
+  string start_time = 3;  // optional, RFC3339
+  string end_time = 4;    // optional, RFC3339
+  int32 limit = 5;
+  int32 offset = 6;
+}
+message AuditLogItem {
+  string actor_uid = 1;
+  string action = 2;
+  string target = 3;
+  string ip_address = 4;
+  string user_agent = 5;
+  string detail_json = 6;
+  string created_at = 7;  // RFC3339
+}
+message ListAuditLogsResp {
+  repeated AuditLogItem entries = 1;
+  int64 total = 2;
+}
+
 service UserService {
   rpc Register(RegisterReq) returns (RegisterResp);
   rpc Login(LoginReq) returns (LoginResp);
@@ -152,4 +244,7 @@ service UserService {
 
   rpc GetUser(GetUserReq) returns (GetUserResp);
   rpc AdminUnbindProvider(AdminUnbindProviderReq) returns (AdminUnbindProviderResp);
+  rpc ChangePassword(ChangePasswordReq) returns (ChangePasswordResp);
+  rpc ResetPassword(ResetPasswordReq) returns (ResetPasswordResp);
+  rpc ListAuditLogs(ListAuditLogsReq) returns (ListAuditLogsResp);
 }

@@ -24,9 +24,9 @@ ncgo new user --module github.com/acme/user --kind kitex \
 
 - `idl/user.proto` — `user.v1.UserService`:
   - **Self-service**: Register / Login / OAuthStart / OAuthCallback /
-    BindProvider / UnbindProvider
+    BindProvider / UnbindProvider / ChangePassword
   - **Admin**: ListUsers / GetUser / BanUser / UnbanUser / ForceLogout /
-    ListUserIdentities / AdminUnbindProvider
+    ListUserIdentities / AdminUnbindProvider / ResetPassword / ListAuditLogs
 - **DDD layers**:
   - `internal/domain/user` — `User`/`Identity` entities, `Repository` port.
   - `internal/application/user` (`usersvc`) — self-service usecases: local
@@ -42,6 +42,12 @@ ncgo new user --module github.com/acme/user --kind kitex \
   - `internal/pkg/oauth` — provider-agnostic `Provider`/`Registry`
     abstraction, a Redis-backed `StateStore` for OAuth CSRF state, and five
     adapters: `wechat.go`, `alipay.go`, `github.go`, `google.go`, `oidc.go`.
+  - `internal/infrastructure/audit` — the `audit_log` subsystem: a
+    `Writer`/`Reader` pair (sqlc-backed plus in-memory test doubles) recording
+    login success/failure, identity bind/unbind and password change/reset
+    events. Entries are never pruned — no retention policy ships with this
+    template, so add one (partition drop or a scheduled `DELETE`) before the
+    table grows unbounded in production. *(future work)*
 - **Repository** (`internal/repository/user`, `userrepo`) — sqlc-backed
   `user.Repository` implementation.
 - `internal/base/server/server.go` wires the pgx pool, sqlc `gen.Queries`,

@@ -15,6 +15,12 @@ message RegisterResp {
 message LoginReq {
   string username = 1;
   string password = 2;
+  // client_ip/user_agent are optional (empty string = unknown). The calling
+  // BFF populates them from the original end-user's HTTP request when
+  // available; they land in the audit trail's promoted ip_address/user_agent
+  // columns so login auditing can be filtered by those two dimensions.
+  string client_ip = 3;
+  string user_agent = 4;
 }
 message LoginResp {
   string uid = 1;
@@ -114,6 +120,19 @@ message ListUserIdentitiesResp {
   repeated IdentityItem identities = 1;
 }
 
+message ChangePasswordReq {
+  // uid MUST be extracted from the caller's verified JWT by the invoking
+  // BFF — same trust boundary as UnbindProviderReq.uid.
+  string uid = 1;
+  string old_password = 2;
+  string new_password = 3;
+  // client_ip/user_agent are optional (empty string = unknown), populated by
+  // the calling BFF from the original end-user's HTTP request when available.
+  string client_ip = 4;
+  string user_agent = 5;
+}
+message ChangePasswordResp {}
+
 service UserService {
   rpc Register(RegisterReq) returns (RegisterResp);
   rpc Login(LoginReq) returns (LoginResp);
@@ -127,4 +146,5 @@ service UserService {
   rpc UnbanUser(UnbanUserReq) returns (UnbanUserResp);
   rpc ForceLogout(ForceLogoutReq) returns (ForceLogoutResp);
   rpc ListUserIdentities(ListUserIdentitiesReq) returns (ListUserIdentitiesResp);
+  rpc ChangePassword(ChangePasswordReq) returns (ChangePasswordResp);
 }

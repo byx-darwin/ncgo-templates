@@ -11,18 +11,29 @@ body: |-
     	"github.com/google/uuid"
 
     	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
     )
+
+    // PasswordSetter is implemented by usersvc.Service (see its
+    // SetPasswordForAdmin method) so ResetPassword can reuse the same
+    // old-password-optional logic without useradminsvc importing usersvc's
+    // full surface or duplicating hashing/blacklist-revoke logic.
+    type PasswordSetter interface {{ "{" }}
+    	SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error
+    {{ "}" }}
 
     // Service implements admin-facing end-user management operations,
     // called from admin-bff-hertz via the "user:manage" RBAC-gated endpoints.
     type Service struct {{ "{" }}
-    	repo      user.Repository
-    	blacklist Blacklist
+    	repo           user.Repository
+    	blacklist      Blacklist
+    	audit          audit.Writer
+    	passwordSetter PasswordSetter
     {{ "}" }}
 
     // New constructs a Service.
-    func New(repo user.Repository, blacklist Blacklist) *Service {{ "{" }}
-    	return &Service{{ "{" }}repo: repo, blacklist: blacklist{{ "}" }}
+    func New(repo user.Repository, blacklist Blacklist, auditWriter audit.Writer, passwordSetter PasswordSetter) *Service {{ "{" }}
+    	return &Service{{ "{" }}repo: repo, blacklist: blacklist, audit: auditWriter, passwordSetter: passwordSetter{{ "}" }}
     {{ "}" }}
 
     func toUserDTO(u *user.User) UserDTO {{ "{" }}
@@ -68,24 +79,65 @@ body: |-
     	return toUserDTO(u), nil
     {{ "}" }}
 
-    func (s *Service) BanUser(ctx context.Context, uid string) error {{ "{" }}
+    // auditActor resolves the actor_uid for an admin-initiated audit entry.
+    // operatorUID is the admin who performed the action; when the caller did
+    // not supply one (an older or not-yet-updated BFF) the action is attributed
+    // to the target uid instead of writing an empty actor_uid, matching the
+    // pre-operator_uid behaviour.
+    func auditActor(operatorUID, uid string) string {{ "{" }}
+    	if operatorUID == "" {{ "{" }}
+    		return uid
+    	{{ "}" }}
+    	return operatorUID
+    {{ "}" }}
+
+    // BanUser bans the end-user uid. operatorUID is the admin performing the
+    // action, used only for audit attribution (see BanUserReq.operator_uid's
+    // trust-boundary comment); it may be empty.
+    func (s *Service) BanUser(ctx context.Context, uid, operatorUID string) error {{ "{" }}
     	id, err := uuid.Parse(uid)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	return s.repo.UpdateStatus(ctx, id, user.StatusBanned)
+    	if err := s.repo.UpdateStatus(ctx, id, user.StatusBanned); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.ban"{{ "}" }})
+    	return nil
     {{ "}" }}
 
-    func (s *Service) UnbanUser(ctx context.Context, uid string) error {{ "{" }}
+    // UnbanUser unbans the end-user uid. operatorUID is the admin performing
+    // the action, used only for audit attribution; it may be empty.
+    func (s *Service) UnbanUser(ctx context.Context, uid, operatorUID string) error {{ "{" }}
     	id, err := uuid.Parse(uid)
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	return s.repo.UpdateStatus(ctx, id, user.StatusEnabled)
+    	if err := s.repo.UpdateStatus(ctx, id, user.StatusEnabled); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.unban"{{ "}" }})
+    	return nil
     {{ "}" }}
 
-    func (s *Service) ForceLogout(ctx context.Context, uid string) error {{ "{" }}
-    	return s.blacklist.Revoke(ctx, uid)
+    // ForceLogout revokes the end-user uid's sessions. operatorUID is the admin
+    // performing the action, used only for audit attribution; it may be empty.
+    func (s *Service) ForceLogout(ctx context.Context, uid, operatorUID string) error {{ "{" }}
+    	if err := s.blacklist.Revoke(ctx, uid); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.force_logout"{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // ResetPassword delegates to usersvc's shared password-setting logic via
+    // PasswordSetter. It does not itself write an audit entry: setPassword
+    // (reached through SetPasswordForAdmin) already writes "user.password_reset"
+    // on success, so writing here too would double-write the audit log.
+    // operatorUID is the admin performing the reset, forwarded for audit
+    // attribution only; it may be empty.
+    func (s *Service) ResetPassword(ctx context.Context, uid, newPassword, operatorUID string) error {{ "{" }}
+    	return s.passwordSetter.SetPasswordForAdmin(ctx, uid, newPassword, operatorUID)
     {{ "}" }}
 
     func (s *Service) ListUserIdentities(ctx context.Context, uid string) ([]IdentityDTO, error) {{ "{" }}

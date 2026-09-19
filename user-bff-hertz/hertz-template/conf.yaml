@@ -127,6 +127,7 @@ body: |-
       PreAuth      RateLimitPhaseConfig    `yaml:"register"`
       // PostAuth backs the `login` config key.
       PostAuth     RateLimitPhaseConfig    `yaml:"login"`
+      PasswordChange RateLimitPhaseConfig  `yaml:"password_change"`
       Memory       MemoryCacheConfig       `yaml:"memory"`
       Redis        RedisConfig             `yaml:"redis"`
   }

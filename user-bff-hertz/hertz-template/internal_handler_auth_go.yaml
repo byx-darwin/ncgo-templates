@@ -9,9 +9,11 @@ body: |
     import (
     	"context"
     	"encoding/json"
+    	"strings"
 
     	"github.com/cloudwego/hertz/pkg/app"
 
+    	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
@@ -55,10 +57,38 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	resp, err := h.userCli.Login(ctx, &userv1.LoginReq{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	// Forward the end-user's IP and User-Agent so user-kitex can record
+    	// them on the login audit entry (both fields are optional; an empty
+    	// string simply means "unknown" downstream).
+    	resp, err := h.userCli.Login(ctx, &userv1.LoginReq{{ "{" }}Username: req.Username, Password: req.Password, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }})
     	if err != nil {{ "{" }}
     		response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"uid": resp.Uid, "token": resp.Token{{ "}" }})
+    {{ "}" }}
+
+    type changePasswordReq struct {{ "{" }}
+    	OldPassword string `json:"old_password"`
+    	NewPassword string `json:"new_password"`
+    {{ "}" }}
+
+    func (h *AuthHandler) ChangePassword(ctx context.Context, c *app.RequestContext) {{ "{" }}
+    	claims, ok := middleware.GetClaims(c)
+    	if !ok {{ "{" }}
+    		response.ErrorCode(c, response.CodeTokenInvalid)
+    		return
+    	{{ "}" }}
+    	var req changePasswordReq
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+    		response.ErrorCode(c, response.CodeRequestParamInvalid)
+    		return
+    	{{ "}" }}
+    	// ClientIp/UserAgent feed the password-change audit entries (success
+    	// and failed-old-password) in user-kitex — see Login above.
+    	if _, err := h.userCli.ChangePassword(ctx, &userv1.ChangePasswordReq{{ "{" }}Uid: claims.Uid, OldPassword: req.OldPassword, NewPassword: req.NewPassword, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }}); err != nil {{ "{" }}
+    		response.Err(c, err)
+    		return
+    	{{ "}" }}
+    	response.OK(c, map[string]string{{ "{" }}"status": "password_changed"{{ "}" }})
     {{ "}" }}

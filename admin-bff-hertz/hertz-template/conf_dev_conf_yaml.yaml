@@ -88,6 +88,15 @@ body: |
       # 可选：仅当需要覆盖顶层 redis 连接时填写；留空则复用顶层 redis
       # 结构与顶层 redis 完全一致
       redis: {{ "{" }}{{ "}" }}
+      # 重置终端用户密码：管理侧敏感写操作，必须限流
+      password_change:
+        enabled: true
+        default_rule:
+          enabled: true
+          key_by: ["ip"]
+          strategy: "fixed_window"
+          window_seconds: "60s"
+          max_requests: 10
     # 鉴权配置
     auth:
       public_paths:

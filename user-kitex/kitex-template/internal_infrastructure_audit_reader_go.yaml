@@ -1,0 +1,149 @@
+# ncgo exported template — internal/infrastructure/audit/reader.go
+path: internal/infrastructure/audit/reader.go
+update_behavior:
+    type: cover
+body: |-
+    package audit
+
+    import (
+    	"context"
+    	"sort"
+    	"time"
+
+    	"{{.Module}}/internal/db/gen"
+    )
+
+    // ListFilter selects audit entries about one subject uid, optionally
+    // narrowed by action and/or a created_at range.
+    //
+    // ActorUID is required — this subsystem does not support an unscoped "list
+    // everything" query. Despite its name it is matched against BOTH actor_uid
+    // and target: an admin-initiated event (ban/unban/force-logout/password
+    // reset) records the admin as actor_uid and the affected end-user as
+    // target, so matching on actor_uid alone would hide everything done TO the
+    // subject. The query endpoint takes a single uid and means "show me
+    // everything relevant to this uid", so one field serving both sides keeps
+    // the filter honest to that intent.
+    type ListFilter struct {{ "{" }}
+    	ActorUID  string
+    	Action    *string
+    	StartTime *time.Time
+    	EndTime   *time.Time
+    	Limit     int
+    	Offset    int
+    {{ "}" }}
+
+    // Reader queries previously written audit entries.
+    type Reader interface {{ "{" }}
+    	List(ctx context.Context, f ListFilter) ([]Entry, int64, error)
+    {{ "}" }}
+
+    // SQLReader queries audit entries via sqlc.
+    type SQLReader struct {{ "{" }}
+    	q *gen.Queries
+    {{ "}" }}
+
+    // NewSQLReader creates an audit reader backed by the audit_log table.
+    func NewSQLReader(q *gen.Queries) *SQLReader {{ "{" }}
+    	return &SQLReader{{ "{" }}q: q{{ "}" }}
+    {{ "}" }}
+
+    func (r *SQLReader) List(ctx context.Context, f ListFilter) ([]Entry, int64, error) {{ "{" }}
+    	limit := f.Limit
+    	if limit <= 0 {{ "{" }}
+    		limit = 20
+    	{{ "}" }}
+    	if limit > 100 {{ "{" }}
+    		limit = 100
+    	{{ "}" }}
+    	// ListAuditLog/CountAuditLog use sqlc.narg('action'/'start_time'/'end_time'),
+    	// so the generated Params fields are deterministically named
+    	// Action/StartTime/EndTime. ActorUid is the single positional $1, which
+    	// the SQL matches against actor_uid OR target (see ListFilter's doc).
+    	actorUID := f.ActorUID
+    	rows, err := r.q.ListAuditLog(ctx, &gen.ListAuditLogParams{{ "{" }}
+    		ActorUid:  toPgText(&actorUID),
+    		Action:    toPgText(f.Action),
+    		StartTime: toPgTimestamptz(f.StartTime),
+    		EndTime:   toPgTimestamptz(f.EndTime),
+    		Limit:     int32(limit),
+    		Offset:    int32(f.Offset),
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, 0, err
+    	{{ "}" }}
+    	total, err := r.q.CountAuditLog(ctx, &gen.CountAuditLogParams{{ "{" }}
+    		ActorUid:  toPgText(&actorUID),
+    		Action:    toPgText(f.Action),
+    		StartTime: toPgTimestamptz(f.StartTime),
+    		EndTime:   toPgTimestamptz(f.EndTime),
+    	{{ "}" }})
+    	if err != nil {{ "{" }}
+    		return nil, 0, err
+    	{{ "}" }}
+    	out := make([]Entry, 0, len(rows))
+    	for _, row := range rows {{ "{" }}
+    		actor := ""
+    		if v := fromPgText(row.ActorUid); v != nil {{ "{" }}
+    			actor = *v
+    		{{ "}" }}
+    		out = append(out, Entry{{ "{" }}
+    			ActorUID:   actor,
+    			Action:     row.Action,
+    			Target:     row.Target,
+    			IPAddress:  row.IpAddress,
+    			UserAgent:  row.UserAgent,
+    			DetailJSON: row.DetailJson,
+    			CreatedAt:  fromPgTimestamptz(row.CreatedAt),
+    		{{ "}" }})
+    	{{ "}" }}
+    	return out, total, nil
+    {{ "}" }}
+
+    // MemoryReader queries entries recorded by a MemoryWriter. It is a thin,
+    // read-only view (no separate storage) — construct it with the same
+    // *MemoryWriter instance the code under test writes through.
+    type MemoryReader struct {{ "{" }}
+    	w *MemoryWriter
+    {{ "}" }}
+
+    // NewMemoryReader creates an in-memory audit reader backed by w.
+    func NewMemoryReader(w *MemoryWriter) *MemoryReader {{ "{" }}
+    	return &MemoryReader{{ "{" }}w: w{{ "}" }}
+    {{ "}" }}
+
+    func (r *MemoryReader) List(ctx context.Context, f ListFilter) ([]Entry, int64, error) {{ "{" }}
+    	all := r.w.Entries()
+    	matched := make([]Entry, 0, len(all))
+    	for _, e := range all {{ "{" }}
+    		// Mirrors the SQL's (actor_uid = $1 OR target = $1).
+    		if e.ActorUID != f.ActorUID && e.Target != f.ActorUID {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		if f.Action != nil && e.Action != *f.Action {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		if f.StartTime != nil && e.CreatedAt.Before(*f.StartTime) {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		if f.EndTime != nil && e.CreatedAt.After(*f.EndTime) {{ "{" }}
+    			continue
+    		{{ "}" }}
+    		matched = append(matched, e)
+    	{{ "}" }}
+    	sort.Slice(matched, func(i, j int) bool {{ "{" }} return matched[i].CreatedAt.After(matched[j].CreatedAt) {{ "}" }})
+    	total := int64(len(matched))
+    	limit := f.Limit
+    	if limit <= 0 {{ "{" }}
+    		limit = 20
+    	{{ "}" }}
+    	start := f.Offset
+    	if start > len(matched) {{ "{" }}
+    		start = len(matched)
+    	{{ "}" }}
+    	end := start + limit
+    	if end > len(matched) {{ "{" }}
+    		end = len(matched)
+    	{{ "}" }}
+    	return matched[start:end], total, nil
+    {{ "}" }}

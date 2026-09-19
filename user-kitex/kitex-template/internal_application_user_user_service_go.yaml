@@ -8,12 +8,14 @@ body: |-
     import (
     	"context"
     	"errors"
+    	"fmt"
     	"log"
     	"time"
 
     	"github.com/google/uuid"
 
     	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
     	"{{.Module}}/internal/infrastructure/auth"
     	"{{.Module}}/internal/pkg/oauth"
     )
@@ -47,6 +49,15 @@ body: |-
     	providers  oauth.Registry
     	stateStore oauth.StateStore
     	tokenTTL   time.Duration
+    	audit      audit.Writer
+    	blacklist  Blacklist
+    {{ "}" }}
+
+    // Blacklist revokes a JWT before its natural expiry. Mirrors
+    // useradminsvc.Blacklist's shape exactly — server.go wires the same
+    // concrete redisBlacklist/noopBlacklist instance into both services.
+    type Blacklist interface {{ "{" }}
+    	Revoke(ctx context.Context, uid string) error
     {{ "}" }}
 
     // New constructs a Service. providers may be a partial registry (only
@@ -55,8 +66,8 @@ body: |-
     // BindProvider) — those methods call it unconditionally and will panic
     // on a nil stateStore. Unit tests that only exercise Register/Login may
     // safely pass nil, since those methods never touch it.
-    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration) *Service {{ "{" }}
-    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL{{ "}" }}
+    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration, auditWriter audit.Writer, blacklist Blacklist) *Service {{ "{" }}
+    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL, audit: auditWriter, blacklist: blacklist{{ "}" }}
     {{ "}" }}
 
     func parseUID(uid string) (user.ID, error) {{ "{" }}
@@ -102,26 +113,36 @@ body: |-
     		// Run a dummy verification so this path costs about as much time
     		// as the real-user path below, closing the timing side-channel.
     		_, _ = auth.VerifyPassword(in.Password, dummyPasswordHash)
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"user_not_found"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.PasswordHash == nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"no_local_password"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	ok, err := auth.VerifyPassword(in.Password, *u.PasswordHash)
     	if err != nil || !ok {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"bad_password"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
-    	return s.issueToken(u)
+    	return s.issueToken(ctx, u, in.ClientIP, in.UserAgent)
     {{ "}" }}
 
-    func (s *Service) issueToken(u *user.User) (LoginOutput, error) {{ "{" }}
+    // issueToken signs a JWT for u and records the login-success audit entry.
+    // clientIP/userAgent are the end-user's request metadata for that entry and
+    // may be empty when the caller has none — the OAuth callback path passes
+    // empty strings, since OAuthCallbackReq does not carry them (only the
+    // local Login and password-change flows forward IP/UA today).
+    func (s *Service) issueToken(ctx context.Context, u *user.User, clientIP, userAgent string) (LoginOutput, error) {{ "{" }}
     	token, err := s.jwt.Sign(u.ID.String(), []string{{ "{" }}"user"{{ "}" }}, s.tokenTTL)
     	if err != nil {{ "{" }}
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.success", IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
     	return LoginOutput{{ "{" }}Uid: u.ID.String(), Token: token{{ "}" }}, nil
     {{ "}" }}
 
@@ -158,23 +179,28 @@ body: |-
     func (s *Service) OAuthCallback(ctx context.Context, in OAuthCallbackInput) (LoginOutput, error) {{ "{" }}
     	provider, purpose, _, ok, err := s.stateStore.Consume(ctx, in.State)
     	if err != nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_state_error","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	if !ok || provider != in.Provider || purpose != oauthPurposeLogin {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_state_invalid","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: oauth state invalid or expired")
     	{{ "}" }}
 
     	p, ok := s.providers.Get(in.Provider)
     	if !ok {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"provider_not_enabled","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: provider not enabled")
     	{{ "}" }}
 
     	tok, err := p.ExchangeCode(ctx, in.Code)
     	if err != nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_exchange_failed","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	info, err := p.FetchUserInfo(ctx, tok)
     	if err != nil {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: fmt.Sprintf(`{{ "{" }}"reason":"oauth_fetch_userinfo_failed","provider":%q{{ "}" }}`, in.Provider){{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
 
@@ -195,7 +221,7 @@ body: |-
     		if err := s.repo.CreateIdentity(ctx, newIdentity); err != nil {{ "{" }}
     			return LoginOutput{{ "{" }}{{ "}" }}, err
     		{{ "}" }}
-    		return s.issueToken(u)
+    		return s.issueToken(ctx, u, "", "")
     	{{ "}" }}
     	if err != nil {{ "{" }}
     		return LoginOutput{{ "{" }}{{ "}" }}, err
@@ -206,9 +232,10 @@ body: |-
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
-    	return s.issueToken(u)
+    	return s.issueToken(ctx, u, "", "")
     {{ "}" }}
 
     // BindProvider links a third-party identity to an already-authenticated
@@ -252,7 +279,11 @@ body: |-
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	return s.repo.CreateIdentity(ctx, identity)
+    	if err := s.repo.CreateIdentity(ctx, identity); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "identity.bind", Target: in.Provider{{ "}" }})
+    	return nil
     {{ "}" }}
 
     // UnbindProvider removes a third-party identity from uid. uid MUST come
@@ -289,5 +320,98 @@ body: |-
     			return errors.New("user: cannot unbind your only authentication method")
     		{{ "}" }}
     	{{ "}" }}
-    	return s.repo.DeleteIdentity(ctx, id, providerName)
+    	if err := s.repo.DeleteIdentity(ctx, id, providerName); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "identity.unbind", Target: providerName{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // ChangePassword lets an already-authenticated end-user change their own
+    // password after verifying the current one. clientIP/userAgent are the
+    // end-user's request metadata (empty string = unknown) and are recorded on
+    // both the success and the failed-verification audit entries.
+    func (s *Service) ChangePassword(ctx context.Context, uid, oldPassword, newPassword, clientIP, userAgent string) error {{ "{" }}
+    	// operatorUID is empty: self-service, the actor IS the target.
+    	return s.setPassword(ctx, uid, &oldPassword, newPassword, "user.password_change", clientIP, userAgent, "")
+    {{ "}" }}
+
+    // setPassword is the shared implementation behind ChangePassword (self-
+    // service, oldPassword required) and useradminsvc.ResetPassword (admin-
+    // forced, oldPassword nil — see server.go wiring, which passes this same
+    // Service to construct useradminsvc.Service's password-reset path).
+    // clientIP/userAgent may be empty when the caller has none.
+    //
+    // operatorUID is only meaningful on the admin-forced path (oldPassword ==
+    // nil); it is the admin who performed the reset and becomes the audit
+    // entry's actor, with uid recorded as the target. The self-service path
+    // passes "" and keeps recording ActorUID: uid with no Target, since actor
+    // and target are the same person there.
+    func (s *Service) setPassword(ctx context.Context, uid string, oldPassword *string, newPassword, auditAction, clientIP, userAgent, operatorUID string) error {{ "{" }}
+    	if len(newPassword) < minPasswordLength {{ "{" }}
+    		return errors.New("user: password must be at least 8 characters")
+    	{{ "}" }}
+    	id, err := parseUID(uid)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	u, err := s.repo.GetByID(ctx, id)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if oldPassword != nil {{ "{" }}
+    		if u.PasswordHash == nil {{ "{" }}
+    			return errors.New("user: account has no local password set")
+    		{{ "}" }}
+    		ok, err := auth.VerifyPassword(*oldPassword, *u.PasswordHash)
+    		if err != nil || !ok {{ "{" }}
+    			// Record the failed verification so brute-force attempts are
+    			// visible in the audit trail (mirrors auth.login.failure).
+    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.password_change.failure", IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
+    			return errors.New("user: old password is incorrect")
+    		{{ "}" }}
+    	{{ "}" }}
+    	newHash, err := auth.HashPassword(newPassword)
+    	if err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	if err := s.repo.UpdatePassword(ctx, id, newHash); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.blacklist.Revoke(ctx, uid)
+    	// Attribution: on the self-service path (oldPassword != nil) one person
+    	// acts on themselves, so only ActorUID is recorded and Target stays
+    	// empty. On the admin-forced path the affected user goes in Target and
+    	// the operator in ActorUID, falling back to uid when the caller supplied
+    	// no operator — an empty actor_uid would be worse than the pre-fix
+    	// behaviour of attributing the action to the target.
+    	actor, target := uid, ""
+    	if oldPassword == nil {{ "{" }}
+    		target = uid
+    		if operatorUID != "" {{ "{" }}
+    			actor = operatorUID
+    		{{ "}" }}
+    	{{ "}" }}
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: actor, Target: target, Action: auditAction, IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // SetPasswordForAdmin is called by useradminsvc.ResetPassword to reuse
+    // setPassword's shared logic without exporting setPassword itself
+    // (keeps the no-old-password path explicit at the call site rather than
+    // letting any caller pass a nil oldPassword to the unexported helper).
+    //
+    // operatorUID is the admin performing the reset; it becomes the audit
+    // entry's actor_uid while uid becomes its target (see
+    // ResetPasswordReq.operator_uid's trust-boundary comment — this value is
+    // for attribution only and is never re-verified here). It may be empty,
+    // in which case the entry is attributed to uid.
+    //
+    // The admin-reset path records no IP/user agent: ResetPasswordReq carries
+    // client_ip/user_agent fields, but admin-bff-hertz does not forward them
+    // yet, so this passes empty strings rather than inventing a value. Only
+    // the self-service login/password-change flows populate those columns
+    // today (see the design note on filtering login audits by IP/UA).
+    func (s *Service) SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error {{ "{" }}
+    	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset", "", "", operatorUID)
     {{ "}" }}

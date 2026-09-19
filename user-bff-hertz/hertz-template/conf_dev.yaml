@@ -77,6 +77,15 @@ body: |
           strategy: "fixed_window"
           window_seconds: "60s"
           max_requests: 20
+      # 修改密码：会校验旧密码，必须限流以免成为密码枚举预言机
+      password_change:
+        enabled: true
+        default_rule:
+          enabled: true
+          key_by: ["ip"]
+          strategy: "fixed_window"
+          window_seconds: "60s"
+          max_requests: 10
     idempotency:
       enabled: true
       backend: "memory"

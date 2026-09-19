@@ -20,6 +20,7 @@ body: |
     	"github.com/cloudwego/kitex/client/callopt"
     	"github.com/golang-jwt/jwt/v5"
 
+    	"{{.Module}}/internal/pkg/ratelimit"
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
     	rbacv1 "{{.Module}}/kitex_gen/api/rbac/v1"
@@ -108,8 +109,9 @@ body: |
     	h := server.New()
     	var authCli authservice.Client
     	var ruleCli ruleservice.Client
+    	var resolver *ratelimit.Resolver
     	userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
-    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli)
+    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli, resolver)
     	return h.Engine
     {{ "}" }}
 

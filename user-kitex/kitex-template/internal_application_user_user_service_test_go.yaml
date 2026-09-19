@@ -11,9 +11,19 @@ body: |-
     	"time"
 
     	"{{.Module}}/internal/domain/user"
+    	"{{.Module}}/internal/infrastructure/audit"
     	"{{.Module}}/internal/infrastructure/auth"
     	"{{.Module}}/internal/pkg/oauth"
     )
+
+    type fakeBlacklist struct {{ "{" }}
+    	revoked []string
+    {{ "}" }}
+
+    func (b *fakeBlacklist) Revoke(ctx context.Context, uid string) error {{ "{" }}
+    	b.revoked = append(b.revoked, uid)
+    	return nil
+    {{ "}" }}
 
     type fakeRepo struct {{ "{" }}
     	byUsername map[string]*user.User
@@ -55,7 +65,16 @@ body: |-
     func (r *fakeRepo) DeleteIdentity(ctx context.Context, userID user.ID, provider string) error {{ "{" }} return nil {{ "}" }}
 
     func newTestService() *Service {{ "{" }}
-    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour)
+    	svc, _ := newTestServiceWithAudit()
+    	return svc
+    {{ "}" }}
+
+    // newTestServiceWithAudit is newTestService plus a handle on the
+    // audit.MemoryWriter it was constructed with, for tests that assert on
+    // the recorded audit entries.
+    func newTestServiceWithAudit() (*Service, *audit.MemoryWriter) {{ "{" }}
+    	aw := audit.NewMemoryWriter()
+    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }}), aw
     {{ "}" }}
 
     // fakeStateStore is a minimal oauth.StateStore stub for exercising
@@ -78,7 +97,7 @@ body: |-
     {{ "}" }}
 
     func TestRegister_And_Login(t *testing.T) {{ "{" }}
-    	svc := newTestService()
+    	svc, aw := newTestServiceWithAudit()
     	ctx := context.Background()
 
     	regOut, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "alice", Password: "correct horse battery staple"{{ "}" }})
@@ -89,7 +108,7 @@ body: |-
     		t.Fatal("expected non-empty uid")
     	{{ "}" }}
 
-    	loginOut, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "correct horse battery staple"{{ "}" }})
+    	loginOut, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "correct horse battery staple", ClientIP: "203.0.113.7", UserAgent: "test-agent/1.0"{{ "}" }})
     	if err != nil {{ "{" }}
     		t.Fatalf("login: %v", err)
     	{{ "}" }}
@@ -99,21 +118,39 @@ body: |-
     	if loginOut.Uid != regOut.Uid {{ "{" }}
     		t.Fatalf("expected uid %s, got %s", regOut.Uid, loginOut.Uid)
     	{{ "}" }}
+
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "auth.login.success" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action auth.login.success, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].ActorUID != loginOut.Uid {{ "{" }}
+    		t.Fatalf("expected audit ActorUID %q, got %q", loginOut.Uid, entries[0].ActorUID)
+    	{{ "}" }}
+    	if entries[0].IPAddress != "203.0.113.7" || entries[0].UserAgent != "test-agent/1.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent threaded from LoginInput, got %q/%q", entries[0].IPAddress, entries[0].UserAgent)
+    	{{ "}" }}
     {{ "}" }}
 
     func TestLogin_WrongPassword(t *testing.T) {{ "{" }}
-    	svc := newTestService()
+    	svc, aw := newTestServiceWithAudit()
     	ctx := context.Background()
     	if _, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "bob", Password: "correct-pw"{{ "}" }}); err != nil {{ "{" }}
     		t.Fatalf("register: %v", err)
     	{{ "}" }}
-    	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "bob", Password: "wrong-pw"{{ "}" }}); err == nil {{ "{" }}
+    	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "bob", Password: "wrong-pw", ClientIP: "198.51.100.4", UserAgent: "bad-agent/2.0"{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("expected error for wrong password")
+    	{{ "}" }}
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "auth.login.failure" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action auth.login.failure, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].IPAddress != "198.51.100.4" || entries[0].UserAgent != "bad-agent/2.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent on the failure entry, got %q/%q", entries[0].IPAddress, entries[0].UserAgent)
     	{{ "}" }}
     {{ "}" }}
 
     func TestLogin_BannedUser(t *testing.T) {{ "{" }}
-    	svc := newTestService()
+    	svc, aw := newTestServiceWithAudit()
     	ctx := context.Background()
     	out, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "carol", Password: "pw12345678"{{ "}" }})
     	if err != nil {{ "{" }}
@@ -124,6 +161,13 @@ body: |-
 
     	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "carol", Password: "pw12345678"{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("expected error for banned user")
+    	{{ "}" }}
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "auth.login.failure" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action auth.login.failure, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].ActorUID != out.Uid {{ "{" }}
+    		t.Fatalf("expected audit ActorUID %q, got %q", out.Uid, entries[0].ActorUID)
     	{{ "}" }}
     {{ "}" }}
 
@@ -137,11 +181,132 @@ body: |-
     {{ "}" }}
 
     func TestBindProvider_RejectsEmptyUidState(t *testing.T) {{ "{" }}
-    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, &fakeStateStore{{ "{" }}provider: "github", purpose: oauthPurposeBind, uid: "", ok: true{{ "}" }}, time.Hour)
+    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, &fakeStateStore{{ "{" }}provider: "github", purpose: oauthPurposeBind, uid: "", ok: true{{ "}" }}, time.Hour, audit.NewMemoryWriter(), &fakeBlacklist{{ "{" }}{{ "}" }})
     	ctx := context.Background()
 
     	err := svc.BindProvider(ctx, BindProviderInput{{ "{" }}Provider: "github", State: "state-1", Code: "code-1"{{ "}" }})
     	if err == nil {{ "{" }}
     		t.Fatal("expected error when consumed state has an empty uid")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestChangePassword_WrongOldPassword_Rejected(t *testing.T) {{ "{" }}
+    	repo := newFakeRepo()
+    	hash, _ := auth.HashPassword("correct-horse")
+    	u, _ := user.NewLocal("alice", hash)
+    	_ = repo.Create(context.Background(), u)
+
+    	aw := audit.NewMemoryWriter()
+    	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+
+    	err := svc.ChangePassword(context.Background(), u.ID.String(), "wrong-password", "new-password-1", "203.0.113.7", "test-agent/1.0")
+    	if err == nil {{ "{" }}
+    		t.Fatal("expected error for wrong old password, got nil")
+    	{{ "}" }}
+    	if len(aw.Entries()) != 1 || aw.Entries()[0].Action != "user.password_change.failure" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action user.password_change.failure, got %+v", aw.Entries())
+    	{{ "}" }}
+    	if aw.Entries()[0].IPAddress != "203.0.113.7" || aw.Entries()[0].UserAgent != "test-agent/1.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent on the failure entry, got %q/%q", aw.Entries()[0].IPAddress, aw.Entries()[0].UserAgent)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestChangePassword_Success_UpdatesHashRevokesAndAudits(t *testing.T) {{ "{" }}
+    	repo := newFakeRepo()
+    	hash, _ := auth.HashPassword("correct-horse")
+    	u, _ := user.NewLocal("alice", hash)
+    	_ = repo.Create(context.Background(), u)
+
+    	aw := audit.NewMemoryWriter()
+    	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+
+    	err := svc.ChangePassword(context.Background(), u.ID.String(), "correct-horse", "new-password-1", "203.0.113.7", "test-agent/1.0")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("expected success, got error: %v", err)
+    	{{ "}" }}
+
+    	updated, err := repo.GetByID(context.Background(), u.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID failed: %v", err)
+    	{{ "}" }}
+    	if ok, _ := auth.VerifyPassword("new-password-1", *updated.PasswordHash); !ok {{ "{" }}
+    		t.Fatal("password hash was not updated to the new password")
+    	{{ "}" }}
+
+    	if len(bl.revoked) != 1 || bl.revoked[0] != u.ID.String() {{ "{" }}
+    		t.Fatalf("expected blacklist.Revoke called once with uid %q, got %v", u.ID.String(), bl.revoked)
+    	{{ "}" }}
+
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "user.password_change" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action user.password_change, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].IPAddress != "203.0.113.7" || entries[0].UserAgent != "test-agent/1.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent threaded through ChangePassword, got %q/%q", entries[0].IPAddress, entries[0].UserAgent)
+    	{{ "}" }}
+    	// Self-service: actor and target are the same person, so only ActorUID
+    	// is recorded and Target stays empty.
+    	if entries[0].ActorUID != u.ID.String() || entries[0].Target != "" {{ "{" }}
+    		t.Fatalf("expected self-service entry actor=%s target empty, got %+v", u.ID.String(), entries[0])
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestSetPasswordForAdmin_WritesAuditEntry covers the admin-forced reset
+    // path: no old password is supplied or verified, yet the reset succeeds
+    // and is recorded as user.password_reset (not user.password_change) with
+    // the operator as actor and the affected user as target.
+    func TestSetPasswordForAdmin_WritesAuditEntry(t *testing.T) {{ "{" }}
+    	repo := newFakeRepo()
+    	hash, _ := auth.HashPassword("correct-horse")
+    	u, _ := user.NewLocal("dave", hash)
+    	_ = repo.Create(context.Background(), u)
+
+    	aw := audit.NewMemoryWriter()
+    	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+
+    	if err := svc.SetPasswordForAdmin(context.Background(), u.ID.String(), "newpassword123", "admin-1"); err != nil {{ "{" }}
+    		t.Fatalf("expected admin reset to succeed without an old password, got error: %v", err)
+    	{{ "}" }}
+
+    	updated, err := repo.GetByID(context.Background(), u.ID)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByID failed: %v", err)
+    	{{ "}" }}
+    	if ok, _ := auth.VerifyPassword("newpassword123", *updated.PasswordHash); !ok {{ "{" }}
+    		t.Fatal("password hash was not updated to the new password")
+    	{{ "}" }}
+
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "user.password_reset" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action user.password_reset, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].ActorUID != "admin-1" || entries[0].Target != u.ID.String() {{ "{" }}
+    		t.Fatalf("expected actor=admin-1 target=%s, got %+v", u.ID.String(), entries[0])
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestSetPasswordForAdmin_EmptyOperator_AttributesToTarget pins the
+    // fallback for a caller that supplies no operator uid.
+    func TestSetPasswordForAdmin_EmptyOperator_AttributesToTarget(t *testing.T) {{ "{" }}
+    	repo := newFakeRepo()
+    	hash, _ := auth.HashPassword("correct-horse")
+    	u, _ := user.NewLocal("erin", hash)
+    	_ = repo.Create(context.Background(), u)
+
+    	aw := audit.NewMemoryWriter()
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }})
+
+    	if err := svc.SetPasswordForAdmin(context.Background(), u.ID.String(), "newpassword123", ""); err != nil {{ "{" }}
+    		t.Fatalf("expected admin reset to succeed, got error: %v", err)
+    	{{ "}" }}
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "user.password_reset" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry with action user.password_reset, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].ActorUID != u.ID.String() || entries[0].Target != u.ID.String() {{ "{" }}
+    		t.Fatalf("expected actor and target both %s, got %+v", u.ID.String(), entries[0])
     	{{ "}" }}
     {{ "}" }}

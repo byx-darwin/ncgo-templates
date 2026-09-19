@@ -133,6 +133,7 @@ body: |-
       SkipPaths    []string                `yaml:"skip_paths"`
       PreAuth      RateLimitPhaseConfig    `yaml:"pre_auth"`
       PostAuth     RateLimitPhaseConfig    `yaml:"post_auth"`
+      PasswordChange RateLimitPhaseConfig  `yaml:"password_change"`
       Memory       MemoryCacheConfig       `yaml:"memory"`
       Redis        RedisConfig    `yaml:"redis"`
   }

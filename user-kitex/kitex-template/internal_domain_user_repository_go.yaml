@@ -15,6 +15,8 @@ body: |-
     	Create(ctx context.Context, u *User) error
     	GetByID(ctx context.Context, id ID) (*User, error)
     	GetByUsername(ctx context.Context, username string) (*User, error)
+    	GetByEmail(ctx context.Context, email string) (*User, error)
+    	GetByPhone(ctx context.Context, phone string) (*User, error)
     	UpdateStatus(ctx context.Context, id ID, status int) error
     	UpdatePassword(ctx context.Context, id ID, passwordHash string) error
     	List(ctx context.Context, limit, offset int32) ([]*User, error)

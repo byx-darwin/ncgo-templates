@@ -28,6 +28,8 @@ body: |-
     	return nil, user.ErrNotFound
     {{ "}" }}
     func (r *fakeRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }} return nil, user.ErrNotFound {{ "}" }}
+    func (r *fakeRepo) GetByEmail(ctx context.Context, email string) (*user.User, error) {{ "{" }} return nil, user.ErrNotFound {{ "}" }}
+    func (r *fakeRepo) GetByPhone(ctx context.Context, phone string) (*user.User, error) {{ "{" }} return nil, user.ErrNotFound {{ "}" }}
     func (r *fakeRepo) UpdateStatus(ctx context.Context, id user.ID, status int) error {{ "{" }} r.users[id].Status = status; return nil {{ "}" }}
     func (r *fakeRepo) UpdatePassword(ctx context.Context, id user.ID, hash string) error {{ "{" }} return nil {{ "}" }}
     func (r *fakeRepo) List(ctx context.Context, limit, offset int32) ([]*user.User, error) {{ "{" }}

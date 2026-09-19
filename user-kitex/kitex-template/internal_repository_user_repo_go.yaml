@@ -117,6 +117,28 @@ body: |-
     	return toDomainUser(row), nil
     {{ "}" }}
 
+    func (r *Repo) GetByEmail(ctx context.Context, email string) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByEmail(ctx, &gen.GetUserByEmailParams{{ "{" }}Email: toPgText(&email){{ "}" }})
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return nil, user.ErrNotFound
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
+    func (r *Repo) GetByPhone(ctx context.Context, phone string) (*user.User, error) {{ "{" }}
+    	row, err := r.q.GetUserByPhone(ctx, &gen.GetUserByPhoneParams{{ "{" }}Phone: toPgText(&phone){{ "}" }})
+    	if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+    		return nil, user.ErrNotFound
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		return nil, err
+    	{{ "}" }}
+    	return toDomainUser(row), nil
+    {{ "}" }}
+
     func (r *Repo) UpdateStatus(ctx context.Context, id user.ID, status int) error {{ "{" }}
     	_, err := r.q.UpdateUserStatus(ctx, &gen.UpdateUserStatusParams{{ "{" }}ID: toPgUUID(id), Status: int32(status){{ "}" }})
     	return err

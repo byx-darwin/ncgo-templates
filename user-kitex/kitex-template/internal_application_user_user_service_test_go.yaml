@@ -28,16 +28,24 @@ body: |-
     type fakeRepo struct {{ "{" }}
     	byUsername map[string]*user.User
     	byID       map[user.ID]*user.User
+    	byEmail    map[string]*user.User
+    	byPhone    map[string]*user.User
     {{ "}" }}
 
     func newFakeRepo() *fakeRepo {{ "{" }}
-    	return &fakeRepo{{ "{" }}byUsername: map[string]*user.User{{ "{" }}{{ "}" }}, byID: map[user.ID]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
+    	return &fakeRepo{{ "{" }}byUsername: map[string]*user.User{{ "{" }}{{ "}" }}, byID: map[user.ID]*user.User{{ "{" }}{{ "}" }}, byEmail: map[string]*user.User{{ "{" }}{{ "}" }}, byPhone: map[string]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
     {{ "}" }}
 
     func (r *fakeRepo) Create(ctx context.Context, u *user.User) error {{ "{" }}
     	r.byID[u.ID] = u
     	if u.Username != nil {{ "{" }}
     		r.byUsername[*u.Username] = u
+    	{{ "}" }}
+    	if u.Email != "" {{ "{" }}
+    		r.byEmail[u.Email] = u
+    	{{ "}" }}
+    	if u.Phone != "" {{ "{" }}
+    		r.byPhone[u.Phone] = u
     	{{ "}" }}
     	return nil
     {{ "}" }}
@@ -49,6 +57,18 @@ body: |-
     {{ "}" }}
     func (r *fakeRepo) GetByUsername(ctx context.Context, username string) (*user.User, error) {{ "{" }}
     	if u, ok := r.byUsername[username]; ok {{ "{" }}
+    		return u, nil
+    	{{ "}" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) GetByEmail(ctx context.Context, email string) (*user.User, error) {{ "{" }}
+    	if u, ok := r.byEmail[email]; ok {{ "{" }}
+    		return u, nil
+    	{{ "}" }}
+    	return nil, user.ErrNotFound
+    {{ "}" }}
+    func (r *fakeRepo) GetByPhone(ctx context.Context, phone string) (*user.User, error) {{ "{" }}
+    	if u, ok := r.byPhone[phone]; ok {{ "{" }}
     		return u, nil
     	{{ "}" }}
     	return nil, user.ErrNotFound

@@ -8,6 +8,7 @@ body: |
 
     import (
     	"context"
+    	"errors"
     	"os"
     	"os/exec"
     	"testing"
@@ -91,6 +92,34 @@ body: |
     	{{ "}" }}
     	if _, err := repo.GetIdentityByProvider(ctx, "github", "gh-12345"); err != user.ErrNotFound {{ "{" }}
     		t.Fatalf("GetIdentityByProvider after DeleteIdentity error = %v, want user.ErrNotFound", err)
+    	{{ "}" }}
+
+    	// GetByEmail/GetByPhone round-trip.
+    	u2, err := user.NewLocal("integration-user-2", "argon2hash-placeholder")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("NewLocal: %v", err)
+    	{{ "}" }}
+    	u2.Email = "integration@example.com"
+    	u2.Phone = "13800000000"
+    	if err := repo.Create(ctx, u2); err != nil {{ "{" }}
+    		t.Fatalf("Create u2: %v", err)
+    	{{ "}" }}
+    	byEmail, err := repo.GetByEmail(ctx, "integration@example.com")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByEmail: %v", err)
+    	{{ "}" }}
+    	if byEmail.ID != u2.ID {{ "{" }}
+    		t.Fatalf("GetByEmail.ID = %v, want %v", byEmail.ID, u2.ID)
+    	{{ "}" }}
+    	byPhone, err := repo.GetByPhone(ctx, "13800000000")
+    	if err != nil {{ "{" }}
+    		t.Fatalf("GetByPhone: %v", err)
+    	{{ "}" }}
+    	if byPhone.ID != u2.ID {{ "{" }}
+    		t.Fatalf("GetByPhone.ID = %v, want %v", byPhone.ID, u2.ID)
+    	{{ "}" }}
+    	if _, err := repo.GetByEmail(ctx, "no-such-email@example.com"); !errors.Is(err, user.ErrNotFound) {{ "{" }}
+    		t.Fatalf("GetByEmail unknown: expected ErrNotFound, got %v", err)
     	{{ "}" }}
     {{ "}" }}
 

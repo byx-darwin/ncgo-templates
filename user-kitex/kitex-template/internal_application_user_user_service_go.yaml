@@ -547,6 +547,9 @@ body: |-
     func (s *Service) ConfirmPasswordReset(ctx context.Context, credential, newPassword string) error {{ "{" }}
     	tok, err := s.resetRepo.GetValid(ctx, hashCredential(credential))
     	if err != nil {{ "{" }}
+    		if !errors.Is(err, passwordreset.ErrNotFound) {{ "{" }}
+    			log.Printf("user: ConfirmPasswordReset lookup failed: %v", err)
+    		{{ "}" }}
     		return errors.New("user: reset credential is invalid or expired")
     	{{ "}" }}
     	if err := s.setPassword(ctx, tok.UserID.String(), nil, newPassword, "user.password_reset_confirmed", "", "", ""); err != nil {{ "{" }}

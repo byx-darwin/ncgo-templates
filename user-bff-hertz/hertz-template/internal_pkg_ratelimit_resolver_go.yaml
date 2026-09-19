@@ -125,6 +125,10 @@ body: |
     		return r.cfg.PostAuth
     	case "password_change":
     		return r.cfg.PasswordChange
+    	case "password_reset_request":
+    		return r.cfg.PasswordResetRequest
+    	case "password_reset_confirm":
+    		return r.cfg.PasswordResetConfirm
     	default:
     		return r.cfg.PreAuth
     	{{ "}" }}

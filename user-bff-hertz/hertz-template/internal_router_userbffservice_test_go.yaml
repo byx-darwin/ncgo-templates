@@ -208,3 +208,22 @@ body: |
     		t.Fatalf("expected a non-200 response for an invalid reset credential, got 200: %s", resp.Body())
     	{{ "}" }}
     {{ "}" }}
+
+    func TestPasswordResetConfirm_PhoneFieldPassedThrough(t *testing.T) {{ "{" }}
+    	var captured *userv1.ConfirmPasswordResetReq
+    	cli := &fakeRouterUserClient{{ "{" }}
+    		confirmPasswordResetFn: func(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
+    			captured = req
+    			return &userv1.ConfirmPasswordResetResp{{ "{" }}{{ "}" }}, nil
+    		{{ "}" }},
+    	{{ "}" }}
+    	engine := newRouterTestEngine(t, cli)
+    	w := ut.PerformRequest(engine, "POST", "/auth/password-reset/confirm", &ut.Body{{ "{" }}Body: strings.NewReader(`{{ "{" }}"credential":"123456","new_password":"hunter22","phone":"+15550001111"{{ "}" }}`), Len: -1{{ "}" }})
+    	resp := w.Result()
+    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
+    		t.Fatalf("expected 200, got %d: %s", resp.StatusCode(), resp.Body())
+    	{{ "}" }}
+    	if captured == nil || captured.Phone != "+15550001111" {{ "{" }}
+    		t.Fatalf("expected phone to be passed through to the RPC request, got %+v", captured)
+    	{{ "}" }}
+    {{ "}" }}

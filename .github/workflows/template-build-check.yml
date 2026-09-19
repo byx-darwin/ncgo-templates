@@ -1,14 +1,25 @@
 name: Template Build Check
 
+# 注：GitHub Actions 不允许同一事件同时使用 `paths` 与 `paths-ignore`，
+# 因此用 `paths` 内的否定模式（`!`）代替单独的 paths-ignore，排除纯文档改动。
 on:
-  pull_request:
-    paths:
+  push:
+    branches:
+      - main
+    paths: &watched-paths
       - 'rbac-kitex/**'
       - 'admin-services-kitex/**'
       - 'admin-bff-hertz/**'
       - 'rule-center/**'
+      - 'user-kitex/**'
+      - 'user-bff-hertz/**'
+      - 'base-hertz/**'
+      - 'ratelimit-hertz/**'
       - 'scripts/**'
       - '.github/workflows/template-build-check.yml'
+      - '!**/*.md'
+  pull_request:
+    paths: *watched-paths
 
 jobs:
   duplicate-path-check:

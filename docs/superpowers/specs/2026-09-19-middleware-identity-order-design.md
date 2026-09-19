@@ -90,10 +90,15 @@ populated.
 Delete:
 - `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml`
 - `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml`
-- `RateLimitConfig` type, `RateLimit` field, `PreAuth`/`PostAuth` fields, and their
-  validation branches (`validateRateLimitPhase` calls) from
-  `internal_base_conf_conf_go.yaml`
-- The `rate_limit:` config block from `conf_dev_conf_yaml.yaml`
+- `RateLimitConfig` and its exclusively-owned sub-types (`StaticLimitConfig`,
+  `RateLimitSourceConfig`, `RateLimitGRPCConfig`, `RateLimitDatabaseConfig`,
+  `RateLimitPhaseConfig`, `RateLimitMatchConfig`, `RateLimitRuleConfig`), the
+  `RateLimit` field on `Config`, the `c.RateLimit.Redis = mergeRedisConfig(...)` line
+  in `applyRedisFallbacks()`, and the `if c.RateLimit.Enabled { ... }` validation block
+  — all from `internal_base_conf_conf_go.yaml`. Keep `MemoryCacheConfig` and
+  `RedisConfig` (shared with `Idempotency`/`Signature.Nonce`).
+- (base-hertz's `conf_dev_conf_yaml.yaml` has no `rate_limit:` block already — nothing
+  to remove there.)
 
 Verify after removal: `grep -rn "RateLimit" base-hertz/hertz-template/` returns nothing,
 and a generated base-hertz project still builds (`go build ./...`) and passes

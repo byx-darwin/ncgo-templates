@@ -95,17 +95,41 @@ message ListUsersResp {
 }
 
 message BanUserReq {
+  // uid is the target end-user being banned.
   string uid = 1;
+  // operator_uid identifies the admin who performed the action; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 2;
 }
 message BanUserResp {}
 
 message UnbanUserReq {
+  // uid is the target end-user being unbanned.
   string uid = 1;
+  // operator_uid identifies the admin who performed the action; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 2;
 }
 message UnbanUserResp {}
 
 message ForceLogoutReq {
+  // uid is the target end-user whose sessions are being revoked.
   string uid = 1;
+  // operator_uid identifies the admin who performed the action; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 2;
 }
 message ForceLogoutResp {}
 
@@ -168,6 +192,13 @@ message ResetPasswordReq {
   // user-kitex currently records this path with empty values.
   string client_ip = 3;
   string user_agent = 4;
+  // operator_uid identifies the admin who performed the reset; it is recorded
+  // as the audit entry's actor_uid while uid is recorded as the target. Trust
+  // boundary matches AdminUnbindProviderReq: the calling BFF's own RBAC/JWT
+  // verification is trusted and user-kitex does NOT re-verify the operator's
+  // identity — this field exists purely for audit attribution. Optional: when
+  // empty, the audit entry falls back to attributing the action to uid.
+  string operator_uid = 5;
 }
 message ResetPasswordResp {}
 

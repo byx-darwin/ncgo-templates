@@ -62,6 +62,14 @@ jobs:
         with:
           go-version: '1.22'
 
+      # actions/setup-go does not export GOPATH into the environment for
+      # later steps — it only ensures `go` and `$(go env GOPATH)/bin` are on
+      # PATH. Tools invoked directly (e.g. `hz`, installed below) that read
+      # the GOPATH env var rather than shelling out to `go env` fail with
+      # "GOPATH is not set" without this.
+      - name: Export GOPATH
+        run: echo "GOPATH=$(go env GOPATH)" >> "$GITHUB_ENV"
+
       - name: Install ncgo
         run: go install github.com/byx-darwin/ncgo@latest
 

@@ -550,16 +550,27 @@ body: |-
     // ConfirmPasswordReset validates credential against the stored token,
     // then sets uid's password to newPassword via the shared setPassword
     // helper (same path as admin-forced reset). All failure modes — no
-    // matching token, expired, already used — return the same generic error
-    // so a caller cannot distinguish them (see design doc's anti-enumeration
-    // section).
-    func (s *Service) ConfirmPasswordReset(ctx context.Context, credential, newPassword string) error {{ "{" }}
+    // matching token, expired, already used, or (SMS channel only) a
+    // missing/mismatched phone — return the same generic error so a caller
+    // cannot distinguish them (see design doc's anti-enumeration section).
+    // phone is required and checked only when the matched token's Channel
+    // is "sms"; it is ignored entirely for "email" tokens (Issue #75).
+    func (s *Service) ConfirmPasswordReset(ctx context.Context, credential, phone, newPassword string) error {{ "{" }}
     	tok, err := s.resetRepo.GetValid(ctx, hashCredential(credential))
     	if err != nil {{ "{" }}
     		if !errors.Is(err, passwordreset.ErrNotFound) {{ "{" }}
     			log.Printf("user: ConfirmPasswordReset lookup failed: %v", err)
     		{{ "}" }}
     		return errors.New("user: reset credential is invalid or expired")
+    	{{ "}" }}
+    	if tok.Channel == "sms" {{ "{" }}
+    		if phone == "" {{ "{" }}
+    			return errors.New("user: reset credential is invalid or expired")
+    		{{ "}" }}
+    		u, err := s.repo.GetByID(ctx, tok.UserID)
+    		if err != nil || u.Phone != phone {{ "{" }}
+    			return errors.New("user: reset credential is invalid or expired")
+    		{{ "}" }}
     	{{ "}" }}
     	if err := s.setPassword(ctx, tok.UserID.String(), nil, newPassword, "user.password_reset_confirmed", "", "", ""); err != nil {{ "{" }}
     		return err

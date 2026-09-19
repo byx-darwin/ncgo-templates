@@ -444,7 +444,7 @@ body: |-
     	_ = svc.RequestPasswordReset(ctx, "carol@example.com", "email")
     	token := extractTokenFromLink(t, es.Sent()[0].Link)
 
-    	if err := svc.ConfirmPasswordReset(ctx, token, "brand-new-password-1"); err != nil {{ "{" }}
+    	if err := svc.ConfirmPasswordReset(ctx, token, "", "brand-new-password-1"); err != nil {{ "{" }}
     		t.Fatalf("ConfirmPasswordReset: %v", err)
     	{{ "}" }}
     	updated, _ := svc.repo.GetByID(ctx, uid)
@@ -464,7 +464,7 @@ body: |-
 
     func TestConfirmPasswordReset_UnknownCredential_ReturnsGenericError(t *testing.T) {{ "{" }}
     	svc, _, _, _, _ := newTestServiceWithReset()
-    	if err := svc.ConfirmPasswordReset(context.Background(), "no-such-token", "brand-new-password-1"); err == nil {{ "{" }}
+    	if err := svc.ConfirmPasswordReset(context.Background(), "no-such-token", "", "brand-new-password-1"); err == nil {{ "{" }}
     		t.Fatal("expected an error for unknown credential")
     	{{ "}" }}
     {{ "}" }}
@@ -479,11 +479,69 @@ body: |-
     	_ = svc.RequestPasswordReset(ctx, "dave@example.com", "email")
     	token := extractTokenFromLink(t, es.Sent()[0].Link)
 
-    	if err := svc.ConfirmPasswordReset(ctx, token, "brand-new-password-1"); err != nil {{ "{" }}
+    	if err := svc.ConfirmPasswordReset(ctx, token, "", "brand-new-password-1"); err != nil {{ "{" }}
     		t.Fatalf("first confirm: %v", err)
     	{{ "}" }}
-    	if err := svc.ConfirmPasswordReset(ctx, token, "another-password-2"); err == nil {{ "{" }}
+    	if err := svc.ConfirmPasswordReset(ctx, token, "", "another-password-2"); err == nil {{ "{" }}
     		t.Fatal("expected reused credential to be rejected")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestConfirmPasswordReset_SMSChannel_CorrectPhone_Succeeds(t *testing.T) {{ "{" }}
+    	svc, _, _, ss, aw := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "erin", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Phone = "+15550001111"
+    	_ = svc.RequestPasswordReset(ctx, "+15550001111", "sms")
+    	code := ss.Sent()[0].Code
+
+    	if err := svc.ConfirmPasswordReset(ctx, code, "+15550001111", "brand-new-password-1"); err != nil {{ "{" }}
+    		t.Fatalf("ConfirmPasswordReset: %v", err)
+    	{{ "}" }}
+    	updated, _ := svc.repo.GetByID(ctx, uid)
+    	if ok, _ := auth.VerifyPassword("brand-new-password-1", *updated.PasswordHash); !ok {{ "{" }}
+    		t.Fatal("password was not updated")
+    	{{ "}" }}
+    	found := false
+    	for _, e := range aw.Entries() {{ "{" }}
+    		if e.Action == "user.password_reset_confirmed" {{ "{" }}
+    			found = true
+    		{{ "}" }}
+    	{{ "}" }}
+    	if !found {{ "{" }}
+    		t.Fatal("expected a user.password_reset_confirmed audit entry")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestConfirmPasswordReset_SMSChannel_MissingPhone_ReturnsGenericError(t *testing.T) {{ "{" }}
+    	svc, _, _, ss, _ := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "frank", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Phone = "+15550002222"
+    	_ = svc.RequestPasswordReset(ctx, "+15550002222", "sms")
+    	code := ss.Sent()[0].Code
+
+    	if err := svc.ConfirmPasswordReset(ctx, code, "", "brand-new-password-1"); err == nil {{ "{" }}
+    		t.Fatal("expected an error when phone is missing for an sms-channel token")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestConfirmPasswordReset_SMSChannel_WrongPhone_ReturnsGenericError(t *testing.T) {{ "{" }}
+    	svc, _, _, ss, _ := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "grace", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Phone = "+15550003333"
+    	_ = svc.RequestPasswordReset(ctx, "+15550003333", "sms")
+    	code := ss.Sent()[0].Code
+
+    	if err := svc.ConfirmPasswordReset(ctx, code, "+15550009999", "brand-new-password-1"); err == nil {{ "{" }}
+    		t.Fatal("expected an error when phone does not match the token's owning account")
     	{{ "}" }}
     {{ "}" }}
 

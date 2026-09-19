@@ -108,7 +108,7 @@ body: |-
     		t.Fatal("expected non-empty uid")
     	{{ "}" }}
 
-    	loginOut, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "correct horse battery staple"{{ "}" }})
+    	loginOut, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "alice", Password: "correct horse battery staple", ClientIP: "203.0.113.7", UserAgent: "test-agent/1.0"{{ "}" }})
     	if err != nil {{ "{" }}
     		t.Fatalf("login: %v", err)
     	{{ "}" }}
@@ -126,6 +126,9 @@ body: |-
     	if entries[0].ActorUID != loginOut.Uid {{ "{" }}
     		t.Fatalf("expected audit ActorUID %q, got %q", loginOut.Uid, entries[0].ActorUID)
     	{{ "}" }}
+    	if entries[0].IPAddress != "203.0.113.7" || entries[0].UserAgent != "test-agent/1.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent threaded from LoginInput, got %q/%q", entries[0].IPAddress, entries[0].UserAgent)
+    	{{ "}" }}
     {{ "}" }}
 
     func TestLogin_WrongPassword(t *testing.T) {{ "{" }}
@@ -134,12 +137,15 @@ body: |-
     	if _, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "bob", Password: "correct-pw"{{ "}" }}); err != nil {{ "{" }}
     		t.Fatalf("register: %v", err)
     	{{ "}" }}
-    	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "bob", Password: "wrong-pw"{{ "}" }}); err == nil {{ "{" }}
+    	if _, err := svc.Login(ctx, LoginInput{{ "{" }}Username: "bob", Password: "wrong-pw", ClientIP: "198.51.100.4", UserAgent: "bad-agent/2.0"{{ "}" }}); err == nil {{ "{" }}
     		t.Fatal("expected error for wrong password")
     	{{ "}" }}
     	entries := aw.Entries()
     	if len(entries) != 1 || entries[0].Action != "auth.login.failure" {{ "{" }}
     		t.Fatalf("expected 1 audit entry with action auth.login.failure, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].IPAddress != "198.51.100.4" || entries[0].UserAgent != "bad-agent/2.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent on the failure entry, got %q/%q", entries[0].IPAddress, entries[0].UserAgent)
     	{{ "}" }}
     {{ "}" }}
 
@@ -194,12 +200,15 @@ body: |-
     	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
     	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
 
-    	err := svc.ChangePassword(context.Background(), u.ID.String(), "wrong-password", "new-password-1")
+    	err := svc.ChangePassword(context.Background(), u.ID.String(), "wrong-password", "new-password-1", "203.0.113.7", "test-agent/1.0")
     	if err == nil {{ "{" }}
     		t.Fatal("expected error for wrong old password, got nil")
     	{{ "}" }}
     	if len(aw.Entries()) != 1 || aw.Entries()[0].Action != "user.password_change.failure" {{ "{" }}
     		t.Fatalf("expected 1 audit entry with action user.password_change.failure, got %+v", aw.Entries())
+    	{{ "}" }}
+    	if aw.Entries()[0].IPAddress != "203.0.113.7" || aw.Entries()[0].UserAgent != "test-agent/1.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent on the failure entry, got %q/%q", aw.Entries()[0].IPAddress, aw.Entries()[0].UserAgent)
     	{{ "}" }}
     {{ "}" }}
 
@@ -213,7 +222,7 @@ body: |-
     	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
     	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
 
-    	err := svc.ChangePassword(context.Background(), u.ID.String(), "correct-horse", "new-password-1")
+    	err := svc.ChangePassword(context.Background(), u.ID.String(), "correct-horse", "new-password-1", "203.0.113.7", "test-agent/1.0")
     	if err != nil {{ "{" }}
     		t.Fatalf("expected success, got error: %v", err)
     	{{ "}" }}
@@ -233,6 +242,9 @@ body: |-
     	entries := aw.Entries()
     	if len(entries) != 1 || entries[0].Action != "user.password_change" {{ "{" }}
     		t.Fatalf("expected 1 audit entry with action user.password_change, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].IPAddress != "203.0.113.7" || entries[0].UserAgent != "test-agent/1.0" {{ "{" }}
+    		t.Fatalf("expected audit IPAddress/UserAgent threaded through ChangePassword, got %q/%q", entries[0].IPAddress, entries[0].UserAgent)
     	{{ "}" }}
     {{ "}" }}
 

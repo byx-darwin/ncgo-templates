@@ -113,31 +113,36 @@ body: |-
     		// Run a dummy verification so this path costs about as much time
     		// as the real-user path below, closing the timing side-channel.
     		_, _ = auth.VerifyPassword(in.Password, dummyPasswordHash)
-    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"user_not_found"{{ "}" }}`{{ "}" }})
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"user_not_found"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.IsBanned() {{ "{" }}
-    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	if u.PasswordHash == nil {{ "{" }}
-    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"no_local_password"{{ "}" }}`{{ "}" }})
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"no_local_password"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
     	ok, err := auth.VerifyPassword(in.Password, *u.PasswordHash)
     	if err != nil || !ok {{ "{" }}
-    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"bad_password"{{ "}" }}`{{ "}" }})
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", IPAddress: in.ClientIP, UserAgent: in.UserAgent, DetailJSON: `{{ "{" }}"reason":"bad_password"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
-    	return s.issueToken(ctx, u)
+    	return s.issueToken(ctx, u, in.ClientIP, in.UserAgent)
     {{ "}" }}
 
-    func (s *Service) issueToken(ctx context.Context, u *user.User) (LoginOutput, error) {{ "{" }}
+    // issueToken signs a JWT for u and records the login-success audit entry.
+    // clientIP/userAgent are the end-user's request metadata for that entry and
+    // may be empty when the caller has none — the OAuth callback path passes
+    // empty strings, since OAuthCallbackReq does not carry them (only the
+    // local Login and password-change flows forward IP/UA today).
+    func (s *Service) issueToken(ctx context.Context, u *user.User, clientIP, userAgent string) (LoginOutput, error) {{ "{" }}
     	token, err := s.jwt.Sign(u.ID.String(), []string{{ "{" }}"user"{{ "}" }}, s.tokenTTL)
     	if err != nil {{ "{" }}
     		return LoginOutput{{ "{" }}{{ "}" }}, err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.success"{{ "}" }})
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.success", IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
     	return LoginOutput{{ "{" }}Uid: u.ID.String(), Token: token{{ "}" }}, nil
     {{ "}" }}
 
@@ -216,7 +221,7 @@ body: |-
     		if err := s.repo.CreateIdentity(ctx, newIdentity); err != nil {{ "{" }}
     			return LoginOutput{{ "{" }}{{ "}" }}, err
     		{{ "}" }}
-    		return s.issueToken(ctx, u)
+    		return s.issueToken(ctx, u, "", "")
     	{{ "}" }}
     	if err != nil {{ "{" }}
     		return LoginOutput{{ "{" }}{{ "}" }}, err
@@ -230,7 +235,7 @@ body: |-
     		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "auth.login.failure", DetailJSON: `{{ "{" }}"reason":"banned"{{ "}" }}`{{ "}" }})
     		return LoginOutput{{ "{" }}{{ "}" }}, errors.New("user: invalid credentials")
     	{{ "}" }}
-    	return s.issueToken(ctx, u)
+    	return s.issueToken(ctx, u, "", "")
     {{ "}" }}
 
     // BindProvider links a third-party identity to an already-authenticated
@@ -323,16 +328,19 @@ body: |-
     {{ "}" }}
 
     // ChangePassword lets an already-authenticated end-user change their own
-    // password after verifying the current one.
-    func (s *Service) ChangePassword(ctx context.Context, uid, oldPassword, newPassword string) error {{ "{" }}
-    	return s.setPassword(ctx, uid, &oldPassword, newPassword, "user.password_change")
+    // password after verifying the current one. clientIP/userAgent are the
+    // end-user's request metadata (empty string = unknown) and are recorded on
+    // both the success and the failed-verification audit entries.
+    func (s *Service) ChangePassword(ctx context.Context, uid, oldPassword, newPassword, clientIP, userAgent string) error {{ "{" }}
+    	return s.setPassword(ctx, uid, &oldPassword, newPassword, "user.password_change", clientIP, userAgent)
     {{ "}" }}
 
     // setPassword is the shared implementation behind ChangePassword (self-
     // service, oldPassword required) and useradminsvc.ResetPassword (admin-
     // forced, oldPassword nil — see server.go wiring, which passes this same
     // Service to construct useradminsvc.Service's password-reset path).
-    func (s *Service) setPassword(ctx context.Context, uid string, oldPassword *string, newPassword, auditAction string) error {{ "{" }}
+    // clientIP/userAgent may be empty when the caller has none.
+    func (s *Service) setPassword(ctx context.Context, uid string, oldPassword *string, newPassword, auditAction, clientIP, userAgent string) error {{ "{" }}
     	if len(newPassword) < minPasswordLength {{ "{" }}
     		return errors.New("user: password must be at least 8 characters")
     	{{ "}" }}
@@ -352,7 +360,7 @@ body: |-
     		if err != nil || !ok {{ "{" }}
     			// Record the failed verification so brute-force attempts are
     			// visible in the audit trail (mirrors auth.login.failure).
-    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.password_change.failure"{{ "}" }})
+    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.password_change.failure", IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
     			return errors.New("user: old password is incorrect")
     		{{ "}" }}
     	{{ "}" }}
@@ -364,7 +372,7 @@ body: |-
     		return err
     	{{ "}" }}
     	_ = s.blacklist.Revoke(ctx, uid)
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: auditAction{{ "}" }})
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: auditAction, IPAddress: clientIP, UserAgent: userAgent{{ "}" }})
     	return nil
     {{ "}" }}
 
@@ -372,6 +380,12 @@ body: |-
     // setPassword's shared logic without exporting setPassword itself
     // (keeps the no-old-password path explicit at the call site rather than
     // letting any caller pass a nil oldPassword to the unexported helper).
+    //
+    // The admin-reset path records no IP/user agent: ResetPasswordReq carries
+    // client_ip/user_agent fields, but admin-bff-hertz does not forward them
+    // yet, so this passes empty strings rather than inventing a value. Only
+    // the self-service login/password-change flows populate those columns
+    // today (see the design note on filtering login audits by IP/UA).
     func (s *Service) SetPasswordForAdmin(ctx context.Context, uid, newPassword string) error {{ "{" }}
-    	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset")
+    	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset", "", "")
     {{ "}" }}

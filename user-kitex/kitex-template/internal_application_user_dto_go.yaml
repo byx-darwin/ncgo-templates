@@ -17,6 +17,12 @@ body: |-
     type LoginInput struct {{ "{" }}
     	Username string
     	Password string
+    	// ClientIP/UserAgent are optional (empty string = unknown); the
+    	// handler fills them from LoginReq, which the calling BFF populates
+    	// from the original end-user HTTP request. They are recorded on the
+    	// login audit entries (success and every failure branch).
+    	ClientIP  string
+    	UserAgent string
     {{ "}" }}
 
     type LoginOutput struct {{ "{" }}

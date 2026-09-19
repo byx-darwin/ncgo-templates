@@ -39,7 +39,7 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {{ "{" }}
-    	out, err := h.self.Login(ctx, usersvc.LoginInput{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
+    	out, err := h.self.Login(ctx, usersvc.LoginInput{{ "{" }}Username: req.Username, Password: req.Password, ClientIP: req.ClientIp, UserAgent: req.UserAgent{{ "}" }})
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
@@ -136,7 +136,7 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) ChangePassword(ctx context.Context, req *userv1.ChangePasswordReq) (*userv1.ChangePasswordResp, error) {{ "{" }}
-    	err := h.self.ChangePassword(ctx, req.Uid, req.OldPassword, req.NewPassword)
+    	err := h.self.ChangePassword(ctx, req.Uid, req.OldPassword, req.NewPassword, req.ClientIp, req.UserAgent)
     	return &userv1.ChangePasswordResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
 

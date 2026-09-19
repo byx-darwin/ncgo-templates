@@ -143,6 +143,7 @@ message RequestPasswordResetResp {} // always empty on success; success is retur
 message ConfirmPasswordResetReq {
   string credential = 1;    // the email link's token, or the SMS code
   string new_password = 2;
+  string phone = 3; // required when the matched token's channel is "sms"; ignored for "email" tokens. A missing/mismatched phone returns the same generic invalid-credential error as any other failure — see design doc's anti-enumeration section.
 }
 message ConfirmPasswordResetResp {}
 

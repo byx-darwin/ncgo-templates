@@ -43,10 +43,27 @@ Confirmed with the repo owner (2026-09-19):
    `pre_auth` stays engine-level (IP-based DoS mitigation before any routing work).
 2. **base-hertz `RateLimit`** — remove entirely (dead code contradicting the template's
    own "no rate limiting" documentation).
-3. **Idempotency (all 3 packages)** — dual registration: keep the existing `api`-group
-   registration (serves AK/IP-scoped signature callers and public routes), add a
-   second registration inside the `protected` group after `JWTAuth` (makes the
-   `Uid`-scoped branches reachable for authenticated routes).
+3. **Idempotency (all 3 packages)** — per-group single registration (revised
+   2026-09-19 after discovering dual registration's flaw — see "Design rejected during
+   planning" below): move the registration off the shared `api` group and onto
+   whichever subgroup actually owns each route (`protected` after `JWTAuth`, plus a
+   public subgroup for packages that have public mutating routes), so each request
+   only ever runs Idempotency once, with whatever identity is genuinely available for
+   that route.
+
+### Design rejected during planning: dual registration
+
+The design initially approved (2026-09-19) kept `api.Use(Idempotency)` unchanged and
+added a second `protected.Use(Idempotency)` after `JWTAuth`. Rejected before
+implementation because it has a real correctness defect: the outer (`api`-group)
+instance still runs for every protected request too (Hertz subgroups inherit their
+parent's middleware), always scoping by `ip:`/`ak:` since it runs pre-`JWTAuth`. Two
+different JWT-authenticated users behind the same IP who happen to reuse the same
+client-supplied `X-Idempotency-Key` value would collide on that outer check and never
+reach the inner, `Uid`-aware check — the outer instance's coarser scope shadows the
+inner one instead of being superseded by it. Moving to one registration per route
+group (instead of layering a second on top) avoids both this shadowing and the doubled
+store round-trip.
 
 ## Design
 
@@ -82,27 +99,61 @@ Verify after removal: `grep -rn "RateLimit" base-hertz/hertz-template/` returns 
 and a generated base-hertz project still builds (`go build ./...`) and passes
 `go vet ./...`.
 
-### 3. Idempotency: dual registration (all 3 packages)
+### 3. Idempotency: per-group single registration (all 3 packages)
 
-In each package's router file (`internal/router/service.go` for base-hertz /
-ratelimit-hertz, `internal/router/adminbffservice.go` for admin-bff-hertz), after
-`protected.Use(middleware.JWTAuth(cfg.Auth.Token))`, add:
+**base-hertz, ratelimit-hertz** (`internal/router/service.go`): these packages have no
+public mutating (POST/PUT/PATCH/DELETE) routes — the only public route is
+`api.GET("/health", ...)`, and Idempotency's default method set
+(`POST,PUT,PATCH,DELETE`) already skips GET. So the fix is a straight move, not an add:
 
 ```go
+api := h.Group("/api/v1")
+if cfg.Auth.Signature.Enabled {
+    api.Use(middleware.SignatureAuth(cfg.Auth.Signature, resolver))
+}
+// (Idempotency no longer registered here)
+
+api.GET("/health", resourceHandler.Health)
+
+protected := api.Group("")
+protected.Use(middleware.JWTAuth(cfg.Auth.Token))
 if cfg.Idempotency.Enabled {
     protected.Use(middleware.Idempotency(cfg.Idempotency))
 }
 ```
 
-The existing `api.Use(middleware.Idempotency(cfg.Idempotency))` registration is
-unchanged. `idempotencyKey()` already handles precedence correctly
-(`ak_user_uuid:` > `user_uuid:` > `ak:` > `ip:`); running the middleware twice for a
-protected request creates two independently-tracked keys (one derived pre-JWT with
-whatever identity was available then, one post-JWT with `Uid` now available) from the
-same `X-Idempotency-Key` header value — both must acquire for the request to proceed,
-both get marked complete on success. This is a deliberate small redundancy (extra
-store round-trip for protected routes) traded for correctness without restructuring
-the handler pipeline.
+**admin-bff-hertz** (`internal/router/adminbffservice.go`): has two public mutating
+routes, `POST /auth/login` and `POST /auth/refresh`, already declared on their own
+existing subgroup (`auth := api.Group("/auth")`) — no new subgroup needed, just move
+the registration onto that subgroup and onto `protected`:
+
+```go
+api := h.Group("/api/v1")
+if cfg.Auth.Signature.Enabled {
+    api.Use(middleware.SignatureAuth(cfg.Auth.Signature, resolver))
+}
+// (Idempotency no longer registered here)
+
+auth := api.Group("/auth")
+if cfg.Idempotency.Enabled {
+    auth.Use(middleware.Idempotency(cfg.Idempotency))
+}
+auth.POST("/login", authHandler.Login)
+auth.POST("/refresh", authHandler.Refresh)
+
+protected := api.Group("")
+protected.Use(middleware.JWTAuth(cfg.Auth.Token))
+if cfg.Idempotency.Enabled {
+    protected.Use(middleware.Idempotency(cfg.Idempotency))
+}
+```
+
+Each request now runs Idempotency exactly once, through whichever group it actually
+belongs to. `/auth/login`/`/auth/refresh` keep `ak:`/`ip:`-scoped protection (no
+`Uid` — they're pre-authentication by definition); every `protected` route gets
+`idempotencyKey()`'s full precedence (`ak_user_uuid:` > `user_uuid:` > `ak:` > `ip:`)
+since both `AK` (from `SignatureAuth`, preserved through `TokenAuth`) and `Uid` (from
+`JWTAuth`) are populated by the time it runs.
 
 No changes to `idempotency.go` itself.
 
@@ -116,11 +167,17 @@ for), one per package:
   valid JWT should reach `RateLimit("post_auth", ...)` with `Uid` populated in the
   `ratelimit.Lookup` — assert via a resolver/store test double that records the
   `Lookup.UserUUID` it received is non-empty.
-- **base-hertz / ratelimit-hertz / admin-bff-hertz**: a request through the full chain
-  to a `protected` POST route with a valid JWT and an `X-Idempotency-Key` header should
-  produce an idempotency store key containing the `user_uuid:`/`ak_user_uuid:` scope
-  (not just `ak:`/`ip:`) — assert via a store test double or by inspecting the key
-  format if the store exposes it in test builds.
+- **base-hertz / ratelimit-hertz / admin-bff-hertz**: two requests to a `protected`
+  POST route, same `X-Idempotency-Key` header value, but signed as two *different*
+  users (different `uid` claims) — must NOT collide (both must succeed independently).
+  Before the fix (Idempotency only reachable pre-`JWTAuth`, scoped by `ip:`), both
+  requests share the same test-client IP and the same key, so the second would be
+  wrongly rejected/replayed as a duplicate of the first. After the fix, each gets its
+  own `user_uuid:`-scoped key. This directly exercises the reachability bug without
+  needing to inspect the unexported `idempotencyKey()`'s output.
+- **admin-bff-hertz only**: `POST /auth/login` with an `X-Idempotency-Key` must still
+  get idempotency protection (two identical requests → second one replays/dedupes),
+  confirming the move to the `auth` subgroup didn't drop public-route coverage.
 
 These are regression tests against reordering, not unit tests that assume the order.
 
@@ -130,14 +187,17 @@ Replace the three README notes #72 left pointing at #73 as unresolved, with the 
 state:
 
 - `base-hertz/README.md:70` — update to state `RateLimit` was removed entirely (no
-  rate limiting in this template, see `ratelimit-hertz`); `Idempotency` now reaches
-  `ak_user_uuid:` via dual registration.
+  rate limiting in this template, see `ratelimit-hertz`); `Idempotency` now runs once,
+  inside the `protected` group, after both `SignatureAuth` (api-level) and `JWTAuth`
+  have run, so it reaches the full precedence (`ak_user_uuid:` > `user_uuid:` > `ak:`
+  > `ip:`).
 - `ratelimit-hertz/README.md:270` — update to state final registration order and that
   all branches (`ak:`, `ak_user_uuid:`, `user_uuid:`, `ip:`, and both `RateLimit`
   phases) are now reachable as designed.
-- `admin-bff-hertz/README.md:371` — same update as ratelimit-hertz for `Idempotency`;
-  note `RateLimit` only exists as the already-correct `password_change` phase (no
-  `pre_auth`/`post_auth` in this package).
+- `admin-bff-hertz/README.md:371` — same update as ratelimit-hertz for `Idempotency`
+  (now split: `auth` subgroup for public login/refresh, `protected` group for
+  everything else); note `RateLimit` only exists as the already-correct
+  `password_change` phase (no `pre_auth`/`post_auth` in this package).
 
 ## Testing / Verification
 
@@ -145,8 +205,8 @@ state:
   (hermetic, memory backend) — must stay green after removing base-hertz's RateLimit
   fields (config struct shape changes).
 - Each package's existing `e2e_test.sh` — must stay green.
-- New router-level tests above — RED before the reposition/dual-registration changes,
-  GREEN after.
+- New router-level tests above — RED before the reposition/per-group-registration
+  changes, GREEN after.
 - `grep -rn "RateLimit" base-hertz/` — zero hits outside this design doc / commit
   history after removal.
 

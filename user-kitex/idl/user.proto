@@ -15,6 +15,12 @@ message RegisterResp {
 message LoginReq {
   string username = 1;
   string password = 2;
+  // client_ip/user_agent are optional (empty string = unknown). The calling
+  // BFF populates them from the original end-user's HTTP request when
+  // available; they land in the audit trail's promoted ip_address/user_agent
+  // columns so login auditing can be filtered by those two dimensions.
+  string client_ip = 3;
+  string user_agent = 4;
 }
 message LoginResp {
   string uid = 1;
@@ -142,6 +148,10 @@ message ChangePasswordReq {
   string uid = 1;
   string old_password = 2;
   string new_password = 3;
+  // client_ip/user_agent are optional (empty string = unknown), populated by
+  // the calling BFF from the original end-user's HTTP request when available.
+  string client_ip = 4;
+  string user_agent = 5;
 }
 message ChangePasswordResp {}
 
@@ -152,6 +162,12 @@ message ResetPasswordReq {
   // gates this call, user-kitex does not re-verify caller identity.
   string uid = 1;
   string new_password = 2;
+  // client_ip/user_agent are optional (empty string = unknown), populated by
+  // the calling BFF from the original end-user's HTTP request when available.
+  // Reserved for a follow-up: admin-bff-hertz does not yet forward them, so
+  // user-kitex currently records this path with empty values.
+  string client_ip = 3;
+  string user_agent = 4;
 }
 message ResetPasswordResp {}
 

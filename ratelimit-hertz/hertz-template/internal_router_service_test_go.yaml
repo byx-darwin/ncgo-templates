@@ -132,20 +132,34 @@ body: |-
     // before JWTAuth ever ran, so idempotencyKey() always fell back to
     // ip:-scoped keys for every request through this test client (same IP).
     // Two different JWT-authenticated users reusing the same
-    // X-Idempotency-Key value would collide on that ip: key — the second
-    // user's identical request would be wrongly rejected as a duplicate
-    // (409) instead of succeeding independently, because ip: scoping
-    // doesn't distinguish them. With the fix (Idempotency registered on
-    // `protected` after JWTAuth), each user gets their own
-    // user_uuid:-scoped key.
+    // X-Idempotency-Key value would collide on that ip: key.
+    //
+    // The two requests below deliberately use DIFFERENT bodies (and
+    // therefore different idempotencyFingerprint() values, since the
+    // fingerprint hashes method+path+query+body — it does not include the
+    // scoping key). This is what makes the test discriminate the bug from
+    // the fix:
+    //   - Pre-fix (ip:-scoped key shared by both users): same key, but
+    //     DIFFERENT fingerprints -> idempotency.go's
+    //     `existing.Fingerprint != fingerprint` branch fires ->
+    //     CodeIdempotencyConflict -> HTTP 409 for user B.
+    //   - Fixed (user_uuid:-scoped key, distinct per user): B's key never
+    //     collides with A's at all -> B's own handler runs -> HTTP 200,
+    //     with no X-Idempotency-Replayed header.
+    // (Using identical bodies would NOT discriminate: pre-fix, same key +
+    // same fingerprint would hit the idempotencyStateCompleted branch and
+    // silently replay user A's cached 200 response for user B, which also
+    // reports status 200 — indistinguishable from the fixed behavior by
+    // status code alone.)
     func TestIdempotency_DifferentUsers_DoNotCollide(t *testing.T) {
         h := newRouterTestEngine(t, &capturingGRPCClient{})
         tokenA := newRouterTestJWT(t, "user-A")
         tokenB := newRouterTestJWT(t, "user-B")
-        body := []byte(`{}`)
+        bodyA := []byte(`{"who":"A"}`)
+        bodyB := []byte(`{"who":"B"}`)
 
         wA := ut.PerformRequest(h.Engine, "POST", "/api/v1/resources",
-            &ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+            &ut.Body{Body: bytes.NewReader(bodyA), Len: len(bodyA)},
             ut.Header{Key: "Authorization", Value: "Bearer " + tokenA},
             ut.Header{Key: "X-Idempotency-Key", Value: "shared-key-123"},
             ut.Header{Key: "Content-Type", Value: "application/json"},
@@ -155,12 +169,16 @@ body: |-
         }
 
         wB := ut.PerformRequest(h.Engine, "POST", "/api/v1/resources",
-            &ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+            &ut.Body{Body: bytes.NewReader(bodyB), Len: len(bodyB)},
             ut.Header{Key: "Authorization", Value: "Bearer " + tokenB},
             ut.Header{Key: "X-Idempotency-Key", Value: "shared-key-123"},
             ut.Header{Key: "Content-Type", Value: "application/json"},
         )
-        if got := wB.Result().StatusCode(); got != consts.StatusOK {
-            t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes", got)
+        respB := wB.Result()
+        if got := respB.StatusCode(); got != consts.StatusOK {
+            t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes (pre-fix: 409 conflict from a shared ip:-scoped key)", got)
+        }
+        if replayed := respB.Header.Get("X-Idempotency-Replayed"); replayed != "" {
+            t.Errorf("user B: response was replayed from user A's cache (X-Idempotency-Replayed=%q) — keys are colliding across users", replayed)
         }
     }

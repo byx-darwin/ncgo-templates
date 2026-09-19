@@ -11,10 +11,13 @@ body: |-
         "{{.Module}}/internal/base/conf"
         "{{.Module}}/internal/handler"
         "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/ratelimit"
     )
 
-    // RegisterServiceRoutes registers service routes with rate limiting
-    func RegisterServiceRoutes(h *server.Hertz) {
+    // RegisterServiceRoutes registers service routes with rate limiting.
+    // resolver is used by the post_auth RateLimit phase registered below on
+    // `protected`; it may be nil when cfg.RateLimit.Enabled is false.
+    func RegisterServiceRoutes(h *server.Hertz, resolver *ratelimit.Resolver) {
         cfg := conf.Get()
 
         resourceHandler := handler.NewResourceHandler()
@@ -23,21 +26,31 @@ body: |-
 
         // ── Signature verification (optional, for open-api callers) ─────────
         if cfg.Auth.Signature.Enabled {
-            resolver := middleware.StaticSecretResolver{SecretValue: cfg.Auth.Signature.StaticSecret}
-            api.Use(middleware.SignatureAuth(cfg.Auth.Signature, resolver))
+            sigResolver := middleware.StaticSecretResolver{SecretValue: cfg.Auth.Signature.StaticSecret}
+            api.Use(middleware.SignatureAuth(cfg.Auth.Signature, sigResolver))
         }
 
-        // ── Idempotency (optional, for POST/PUT/DELETE) ─────────────────────
-        if cfg.Idempotency.Enabled {
-            api.Use(middleware.Idempotency(cfg.Idempotency))
-        }
-
-        // Public routes (no JWT)
+        // Public routes (no JWT) — no mutating methods here, so Idempotency
+        // is not needed on this group (its default method set is
+        // POST/PUT/PATCH/DELETE, which GET already skips).
         api.GET("/health", resourceHandler.Health)
 
         // Protected routes (JWT required, rate limited)
         protected := api.Group("")
         protected.Use(middleware.JWTAuth(cfg.Auth.Token))
+
+        // ── Idempotency (optional, for POST/PUT/DELETE) — registered here,
+        // after JWTAuth, so Claims.Uid is available and idempotencyKey()'s
+        // ak_user_uuid:/user_uuid: branches are reachable (see issue #73).
+        if cfg.Idempotency.Enabled {
+            protected.Use(middleware.Idempotency(cfg.Idempotency))
+        }
+
+        // post_auth rate limiting — registered here, after JWTAuth, so
+        // Claims.AK/Uid are available (see issue #73).
+        if cfg.RateLimit.Enabled {
+            protected.Use(middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, resolver))
+        }
 
         // Example protected endpoints (all are rate limited by middleware)
         resources := protected.Group("/resources")

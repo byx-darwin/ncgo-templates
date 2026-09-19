@@ -188,6 +188,8 @@ GET    /api/v1/terminal-users/:uid                      # permission: terminal_u
 POST   /api/v1/terminal-users/:uid/ban                  # permission: terminal_user:ban
 POST   /api/v1/terminal-users/:uid/unban                # permission: terminal_user:unban
 DELETE /api/v1/terminal-users/:uid/identities/:provider  # permission: terminal_user:unbind-identity
+POST   /api/v1/terminal-users/:uid/reset-password        # permission: terminal_user:password-reset
+GET    /api/v1/terminal-users/:uid/audit-logs            # permission: terminal_user:audit-log:read
 ```
 
 `POST .../ban` bans the account and then makes a best-effort `ForceLogout`
@@ -267,6 +269,8 @@ Standard naming convention: `resource:action`
 | `terminal_user:ban` | Ban a terminal user (also triggers `ForceLogout`, see [gRPC Connection](#grpc-connection)) |
 | `terminal_user:unban` | Unban a terminal user |
 | `terminal_user:unbind-identity` | Unbind a third-party identity provider from a terminal user |
+| `terminal_user:password-reset` | Force-reset a terminal user's password (no old password required; revokes existing tokens) |
+| `terminal_user:audit-log:read` | List a terminal user's audit log entries |
 
 ### Casbin Policy Model
 

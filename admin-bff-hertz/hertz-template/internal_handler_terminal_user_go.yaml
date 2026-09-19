@@ -8,6 +8,7 @@ body: |
 
     import (
     	"context"
+    	"encoding/json"
     	"strconv"
 
     	"github.com/cloudwego/hertz/pkg/app"
@@ -129,8 +130,8 @@ body: |
     	response.OK(c, map[string]string{{ "{" }}"status": "unbound"{{ "}" }})
     {{ "}" }}
 
-    type ResetPasswordRequest struct {{ "{" }}
-    	NewPassword string `json:"new_password" binding:"required,min=8"`
+    type resetPasswordRequest struct {{ "{" }}
+    	NewPassword string `json:"new_password"`
     {{ "}" }}
 
     func (h *TerminalUserHandler) ResetPassword(ctx context.Context, c *app.RequestContext) {{ "{" }}
@@ -139,8 +140,8 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	var req ResetPasswordRequest
-    	if err := c.BindJSON(&req); err != nil {{ "{" }}
+    	var req resetPasswordRequest
+    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}

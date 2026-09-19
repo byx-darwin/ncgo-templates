@@ -17,6 +17,7 @@ body: |
     	"github.com/cloudwego/hertz/pkg/route/param"
     	"github.com/cloudwego/kitex/client/callopt"
 
+    	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
@@ -27,6 +28,10 @@ body: |
     	banErr, unbanErr, logoutErr, unbindErr error
     	resetPasswordErr, listAuditLogsErr     error
     	forceLogoutCalled                      bool
+    	// lastBanReq/lastForceLogoutReq capture the forwarded requests so tests
+    	// can assert on the operator uid threaded into them.
+    	lastBanReq         *userv1.BanUserReq
+    	lastForceLogoutReq *userv1.ForceLogoutReq
     {{ "}" }}
 
     func (f *fakeTerminalUserClient) ListUsers(ctx context.Context, req *userv1.ListUsersReq, callOptions ...callopt.Option) (*userv1.ListUsersResp, error) {{ "{" }}
@@ -42,6 +47,7 @@ body: |
     {{ "}" }}
 
     func (f *fakeTerminalUserClient) BanUser(ctx context.Context, req *userv1.BanUserReq, callOptions ...callopt.Option) (*userv1.BanUserResp, error) {{ "{" }}
+    	f.lastBanReq = req
     	return &userv1.BanUserResp{{ "{" }}{{ "}" }}, f.banErr
     {{ "}" }}
 
@@ -51,6 +57,7 @@ body: |
 
     func (f *fakeTerminalUserClient) ForceLogout(ctx context.Context, req *userv1.ForceLogoutReq, callOptions ...callopt.Option) (*userv1.ForceLogoutResp, error) {{ "{" }}
     	f.forceLogoutCalled = true
+    	f.lastForceLogoutReq = req
     	return &userv1.ForceLogoutResp{{ "{" }}{{ "}" }}, f.logoutErr
     {{ "}" }}
 
@@ -132,6 +139,38 @@ body: |
     	h.Ban(ctx, c)
     	if c.Response.StatusCode() != 200 {{ "{" }}
     		t.Fatalf("status = %d, want 200 (ban succeeds even if ForceLogout fails)", c.Response.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestTerminalUserHandler_Ban_ForwardsOperatorUidFromClaims(t *testing.T) {{ "{" }}
+    	fake := &fakeTerminalUserClient{{ "{" }}{{ "}" }}
+    	h := NewTerminalUserHandler(fake)
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	c.Set(middleware.ContextKeyTokenClaims, &middleware.Claims{{ "{" }}Uid: "admin-1"{{ "}" }})
+    	h.Ban(ctx, c)
+    	if fake.lastBanReq == nil || fake.lastBanReq.OperatorUid != "admin-1" {{ "{" }}
+    		t.Fatalf("expected BanUserReq.OperatorUid = admin-1, got %+v", fake.lastBanReq)
+    	{{ "}" }}
+    	if fake.lastForceLogoutReq == nil || fake.lastForceLogoutReq.OperatorUid != "admin-1" {{ "{" }}
+    		t.Fatalf("expected ForceLogoutReq.OperatorUid = admin-1, got %+v", fake.lastForceLogoutReq)
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestTerminalUserHandler_Ban_NoClaims_SendsEmptyOperatorUid pins that a
+    // request without claims is still forwarded (user-kitex then falls back to
+    // attributing the audit entry to the target) rather than rejected here.
+    func TestTerminalUserHandler_Ban_NoClaims_SendsEmptyOperatorUid(t *testing.T) {{ "{" }}
+    	fake := &fakeTerminalUserClient{{ "{" }}{{ "}" }}
+    	h := NewTerminalUserHandler(fake)
+    	ctx, c := newTerminalUserTestCtx()
+    	c.Params = append(c.Params, param.Param{{ "{" }}Key: "uid", Value: "u1"{{ "}" }})
+    	h.Ban(ctx, c)
+    	if c.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("status = %d, want 200", c.Response.StatusCode())
+    	{{ "}" }}
+    	if fake.lastBanReq == nil || fake.lastBanReq.OperatorUid != "" {{ "{" }}
+    		t.Fatalf("expected empty OperatorUid, got %+v", fake.lastBanReq)
     	{{ "}" }}
     {{ "}" }}
 

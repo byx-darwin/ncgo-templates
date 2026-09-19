@@ -13,6 +13,7 @@ body: |
 
     	"github.com/cloudwego/hertz/pkg/app"
 
+    	"{{.Module}}/internal/pkg/middleware"
     	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
@@ -80,7 +81,19 @@ body: |
     		return
     	{{ "}" }}
 
-    	if _, err := h.userCli.BanUser(ctx, &userv1.BanUserReq{{ "{" }}Uid: uid{{ "}" }}); err != nil {{ "{" }}
+    	// operatorUID is the calling admin, forwarded so user-kitex records the
+    	// audit entry with actor_uid = the operator and target = uid. These
+    	// routes sit behind TokenAuth + RBAC so claims are normally present; an
+    	// empty value is tolerated rather than failing an already-authorized
+    	// request (user-kitex then attributes the action to the target, as it
+    	// did before operator_uid existed). Extracted inline rather than via a
+    	// package-level helper because this template is loop_service.
+    	operatorUID := ""
+    	if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
+    		operatorUID = claims.Uid
+    	{{ "}" }}
+
+    	if _, err := h.userCli.BanUser(ctx, &userv1.BanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
@@ -95,7 +108,7 @@ body: |
     	// when Redis is disabled — it's designed to degrade, not to be
     	// load-bearing for the ban itself).
     	logoutErr := ""
-    	if _, err := h.userCli.ForceLogout(ctx, &userv1.ForceLogoutReq{{ "{" }}Uid: uid{{ "}" }}); err != nil {{ "{" }}
+    	if _, err := h.userCli.ForceLogout(ctx, &userv1.ForceLogoutReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
     		logoutErr = err.Error()
     	{{ "}" }}
     	response.OK(c, map[string]any{{ "{" }}"banned": true, "force_logout_error": logoutErr{{ "}" }})
@@ -108,7 +121,13 @@ body: |
     		return
     	{{ "}" }}
 
-    	if _, err := h.userCli.UnbanUser(ctx, &userv1.UnbanUserReq{{ "{" }}Uid: uid{{ "}" }}); err != nil {{ "{" }}
+    	// See Ban's operatorUID comment.
+    	operatorUID := ""
+    	if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
+    		operatorUID = claims.Uid
+    	{{ "}" }}
+
+    	if _, err := h.userCli.UnbanUser(ctx, &userv1.UnbanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
@@ -145,7 +164,12 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	if _, err := h.userCli.ResetPassword(ctx, &userv1.ResetPasswordReq{{ "{" }}Uid: uid, NewPassword: req.NewPassword{{ "}" }}); err != nil {{ "{" }}
+    	// See Ban's operatorUID comment.
+    	operatorUID := ""
+    	if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
+    		operatorUID = claims.Uid
+    	{{ "}" }}
+    	if _, err := h.userCli.ResetPassword(ctx, &userv1.ResetPasswordReq{{ "{" }}Uid: uid, NewPassword: req.NewPassword, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}

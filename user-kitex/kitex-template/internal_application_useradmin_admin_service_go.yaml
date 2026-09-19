@@ -79,7 +79,22 @@ body: |-
     	return toUserDTO(u), nil
     {{ "}" }}
 
-    func (s *Service) BanUser(ctx context.Context, uid string) error {{ "{" }}
+    // auditActor resolves the actor_uid for an admin-initiated audit entry.
+    // operatorUID is the admin who performed the action; when the caller did
+    // not supply one (an older or not-yet-updated BFF) the action is attributed
+    // to the target uid instead of writing an empty actor_uid, matching the
+    // pre-operator_uid behaviour.
+    func auditActor(operatorUID, uid string) string {{ "{" }}
+    	if operatorUID == "" {{ "{" }}
+    		return uid
+    	{{ "}" }}
+    	return operatorUID
+    {{ "}" }}
+
+    // BanUser bans the end-user uid. operatorUID is the admin performing the
+    // action, used only for audit attribution (see BanUserReq.operator_uid's
+    // trust-boundary comment); it may be empty.
+    func (s *Service) BanUser(ctx context.Context, uid, operatorUID string) error {{ "{" }}
     	id, err := uuid.Parse(uid)
     	if err != nil {{ "{" }}
     		return err
@@ -87,11 +102,13 @@ body: |-
     	if err := s.repo.UpdateStatus(ctx, id, user.StatusBanned); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.ban"{{ "}" }})
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.ban"{{ "}" }})
     	return nil
     {{ "}" }}
 
-    func (s *Service) UnbanUser(ctx context.Context, uid string) error {{ "{" }}
+    // UnbanUser unbans the end-user uid. operatorUID is the admin performing
+    // the action, used only for audit attribution; it may be empty.
+    func (s *Service) UnbanUser(ctx context.Context, uid, operatorUID string) error {{ "{" }}
     	id, err := uuid.Parse(uid)
     	if err != nil {{ "{" }}
     		return err
@@ -99,15 +116,17 @@ body: |-
     	if err := s.repo.UpdateStatus(ctx, id, user.StatusEnabled); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.unban"{{ "}" }})
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.unban"{{ "}" }})
     	return nil
     {{ "}" }}
 
-    func (s *Service) ForceLogout(ctx context.Context, uid string) error {{ "{" }}
+    // ForceLogout revokes the end-user uid's sessions. operatorUID is the admin
+    // performing the action, used only for audit attribution; it may be empty.
+    func (s *Service) ForceLogout(ctx context.Context, uid, operatorUID string) error {{ "{" }}
     	if err := s.blacklist.Revoke(ctx, uid); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: uid, Action: "user.force_logout"{{ "}" }})
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.force_logout"{{ "}" }})
     	return nil
     {{ "}" }}
 

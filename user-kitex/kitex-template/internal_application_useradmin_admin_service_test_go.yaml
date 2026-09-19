@@ -72,14 +72,14 @@ body: |-
     	svc := New(repo, bl, aw, &fakePasswordSetter{{ "{" }}{{ "}" }})
     	ctx := context.Background()
 
-    	if err := svc.BanUser(ctx, id.String()); err != nil {{ "{" }}
+    	if err := svc.BanUser(ctx, id.String(), "admin-1"); err != nil {{ "{" }}
     		t.Fatalf("ban: %v", err)
     	{{ "}" }}
     	if repo.users[id].Status != user.StatusBanned {{ "{" }}
     		t.Fatal("expected status banned")
     	{{ "}" }}
 
-    	if err := svc.ForceLogout(ctx, id.String()); err != nil {{ "{" }}
+    	if err := svc.ForceLogout(ctx, id.String(), "admin-1"); err != nil {{ "{" }}
     		t.Fatalf("force logout: %v", err)
     	{{ "}" }}
     	if len(bl.revoked) != 1 || bl.revoked[0] != id.String() {{ "{" }}
@@ -90,8 +90,34 @@ body: |-
     	if len(entries) != 2 || entries[0].Action != "user.ban" || entries[1].Action != "user.force_logout" {{ "{" }}
     		t.Fatalf("expected audit entries user.ban then user.force_logout, got %+v", entries)
     	{{ "}" }}
-    	if entries[0].ActorUID != id.String() || entries[1].ActorUID != id.String() {{ "{" }}
-    		t.Fatalf("expected audit entries actor=%s, got %+v", id.String(), entries)
+    	for i, e := range entries {{ "{" }}
+    		if e.ActorUID != "admin-1" {{ "{" }}
+    			t.Fatalf("entry %d: expected actor=admin-1 (the operator), got %+v", i, e)
+    		{{ "}" }}
+    		if e.Target != id.String() {{ "{" }}
+    			t.Fatalf("entry %d: expected target=%s (the affected user), got %+v", i, id.String(), e)
+    		{{ "}" }}
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestBanUser_EmptyOperator_AttributesToTarget pins the fallback for callers
+    // that don't supply an operator uid: rather than an empty actor_uid, the
+    // entry is attributed to the target, matching pre-operator_uid behaviour.
+    func TestBanUser_EmptyOperator_AttributesToTarget(t *testing.T) {{ "{" }}
+    	id, _ := uuid.NewV7()
+    	repo := &fakeRepo{{ "{" }}users: map[user.ID]*user.User{{ "{" }}id: {{ "{" }}ID: id, Status: user.StatusEnabled{{ "}" }}{{ "}" }}{{ "}" }}
+    	aw := audit.NewMemoryWriter()
+    	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }}, aw, &fakePasswordSetter{{ "{" }}{{ "}" }})
+
+    	if err := svc.BanUser(context.Background(), id.String(), ""); err != nil {{ "{" }}
+    		t.Fatalf("ban: %v", err)
+    	{{ "}" }}
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "user.ban" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry action=user.ban, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].ActorUID != id.String() || entries[0].Target != id.String() {{ "{" }}
+    		t.Fatalf("expected actor and target both %s, got %+v", id.String(), entries[0])
     	{{ "}" }}
     {{ "}" }}
 
@@ -101,15 +127,18 @@ body: |-
     	aw := audit.NewMemoryWriter()
     	svc := New(repo, &fakeBlacklist{{ "{" }}{{ "}" }}, aw, &fakePasswordSetter{{ "{" }}{{ "}" }})
 
-    	if err := svc.UnbanUser(context.Background(), id.String()); err != nil {{ "{" }}
+    	if err := svc.UnbanUser(context.Background(), id.String(), "admin-1"); err != nil {{ "{" }}
     		t.Fatalf("unban: %v", err)
     	{{ "}" }}
     	if repo.users[id].Status != user.StatusEnabled {{ "{" }}
     		t.Fatal("expected status enabled")
     	{{ "}" }}
     	entries := aw.Entries()
-    	if len(entries) != 1 || entries[0].Action != "user.unban" || entries[0].ActorUID != id.String() {{ "{" }}
-    		t.Fatalf("expected 1 audit entry action=user.unban actor=%s, got %+v", id.String(), entries)
+    	if len(entries) != 1 || entries[0].Action != "user.unban" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry action=user.unban, got %+v", entries)
+    	{{ "}" }}
+    	if entries[0].ActorUID != "admin-1" || entries[0].Target != id.String() {{ "{" }}
+    		t.Fatalf("expected actor=admin-1 target=%s, got %+v", id.String(), entries[0])
     	{{ "}" }}
     {{ "}" }}
 

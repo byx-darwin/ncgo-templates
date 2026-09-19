@@ -7,6 +7,10 @@ body: |-
 
     import (
     	"context"
+    	"crypto/rand"
+    	"crypto/sha256"
+    	"encoding/base64"
+    	"encoding/hex"
     	"errors"
     	"fmt"
     	"log"
@@ -17,6 +21,8 @@ body: |-
     	"{{.Module}}/internal/domain/user"
     	"{{.Module}}/internal/infrastructure/audit"
     	"{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/infrastructure/notify"
+    	"{{.Module}}/internal/infrastructure/passwordreset"
     	"{{.Module}}/internal/pkg/oauth"
     )
 
@@ -29,6 +35,13 @@ body: |-
     	// minPasswordLength is a template default minimum; raise it (and/or
     	// add a complexity check) to match your own security policy.
     	minPasswordLength = 8
+    )
+
+    // emailResetTokenTTL/smsResetCodeTTL bound how long a password-reset
+    // credential remains valid after RequestPasswordReset issues it.
+    const (
+    	emailResetTokenTTL = 15 * time.Minute
+    	smsResetCodeTTL    = 5 * time.Minute
     )
 
     // dummyPasswordHash is a precomputed, valid-format Argon2id PHC hash for
@@ -44,13 +57,16 @@ body: |-
     // Service implements end-user self-service account operations:
     // local registration/login and third-party OAuth login/binding.
     type Service struct {{ "{" }}
-    	repo       user.Repository
-    	jwt        *auth.JWTManager
-    	providers  oauth.Registry
-    	stateStore oauth.StateStore
-    	tokenTTL   time.Duration
-    	audit      audit.Writer
-    	blacklist  Blacklist
+    	repo        user.Repository
+    	jwt         *auth.JWTManager
+    	providers   oauth.Registry
+    	stateStore  oauth.StateStore
+    	tokenTTL    time.Duration
+    	audit       audit.Writer
+    	blacklist   Blacklist
+    	resetRepo   passwordreset.Repository
+    	emailSender notify.EmailSender
+    	smsSender   notify.SMSSender
     {{ "}" }}
 
     // Blacklist revokes a JWT before its natural expiry. Mirrors
@@ -66,8 +82,8 @@ body: |-
     // BindProvider) — those methods call it unconditionally and will panic
     // on a nil stateStore. Unit tests that only exercise Register/Login may
     // safely pass nil, since those methods never touch it.
-    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration, auditWriter audit.Writer, blacklist Blacklist) *Service {{ "{" }}
-    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL, audit: auditWriter, blacklist: blacklist{{ "}" }}
+    func New(repo user.Repository, jwt *auth.JWTManager, providers oauth.Registry, stateStore oauth.StateStore, tokenTTL time.Duration, auditWriter audit.Writer, blacklist Blacklist, resetRepo passwordreset.Repository, emailSender notify.EmailSender, smsSender notify.SMSSender) *Service {{ "{" }}
+    	return &Service{{ "{" }}repo: repo, jwt: jwt, providers: providers, stateStore: stateStore, tokenTTL: tokenTTL, audit: auditWriter, blacklist: blacklist, resetRepo: resetRepo, emailSender: emailSender, smsSender: smsSender{{ "}" }}
     {{ "}" }}
 
     func parseUID(uid string) (user.ID, error) {{ "{" }}
@@ -414,4 +430,128 @@ body: |-
     // today (see the design note on filtering login audits by IP/UA).
     func (s *Service) SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error {{ "{" }}
     	return s.setPassword(ctx, uid, nil, newPassword, "user.password_reset", "", "", operatorUID)
+    {{ "}" }}
+
+    // hashCredential returns the sha256 hex digest stored in
+    // password_reset_tokens.credential_hash — the raw credential (link token
+    // or SMS code) is never persisted.
+    func hashCredential(raw string) string {{ "{" }}
+    	sum := sha256.Sum256([]byte(raw))
+    	return hex.EncodeToString(sum[:])
+    {{ "}" }}
+
+    // generateEmailToken returns a 32-byte crypto/rand token, base64url-encoded
+    // for safe inclusion in a URL query parameter.
+    func generateEmailToken() (string, error) {{ "{" }}
+    	b := make([]byte, 32)
+    	if _, err := rand.Read(b); err != nil {{ "{" }}
+    		return "", err
+    	{{ "}" }}
+    	return base64.RawURLEncoding.EncodeToString(b), nil
+    {{ "}" }}
+
+    // generateSMSCode returns a 6-digit numeric code using crypto/rand (not
+    // math/rand — this is a security credential, not a UI nonce).
+    func generateSMSCode() (string, error) {{ "{" }}
+    	b := make([]byte, 4)
+    	if _, err := rand.Read(b); err != nil {{ "{" }}
+    		return "", err
+    	{{ "}" }}
+    	n := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+    	return fmt.Sprintf("%06d", n%1000000), nil
+    {{ "}" }}
+
+    // RequestPasswordReset looks up identifier by channel ("email" or "sms")
+    // and, if it matches an account, invalidates any outstanding reset token
+    // for that user, issues a new one, and sends it. It ALWAYS returns nil —
+    // whether identifier matched no account, matched one, or the send failed
+    // — so the response carries no signal about account existence (see design
+    // doc's anti-enumeration section). Unexpected errors are logged, not
+    // returned.
+    func (s *Service) RequestPasswordReset(ctx context.Context, identifier, channel string) error {{ "{" }}
+    	var (
+    		u   *user.User
+    		err error
+    	)
+    	switch channel {{ "{" }}
+    	case "email":
+    		u, err = s.repo.GetByEmail(ctx, identifier)
+    	case "sms":
+    		u, err = s.repo.GetByPhone(ctx, identifier)
+    	default:
+    		return errors.New("user: channel must be email or sms")
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		if !errors.Is(err, user.ErrNotFound) {{ "{" }}
+    			log.Printf("user: RequestPasswordReset lookup failed: %v", err)
+    		{{ "}" }}
+    		return nil
+    	{{ "}" }}
+
+    	if err := s.resetRepo.InvalidateForUser(ctx, u.ID); err != nil {{ "{" }}
+    		log.Printf("user: InvalidateForUser failed: %v", err)
+    		return nil
+    	{{ "}" }}
+
+    	id := uuid.New()
+    	var (
+    		raw string
+    		ttl time.Duration
+    	)
+    	if channel == "email" {{ "{" }}
+    		raw, err = generateEmailToken()
+    		ttl = emailResetTokenTTL
+    	{{ "}" }} else {{ "{" }}
+    		raw, err = generateSMSCode()
+    		ttl = smsResetCodeTTL
+    	{{ "}" }}
+    	if err != nil {{ "{" }}
+    		log.Printf("user: generate reset credential failed: %v", err)
+    		return nil
+    	{{ "}" }}
+
+    	if err := s.resetRepo.Create(ctx, passwordreset.Token{{ "{" }}
+    		ID:             id,
+    		UserID:         u.ID,
+    		Channel:        channel,
+    		CredentialHash: hashCredential(raw),
+    		ExpiresAt:      time.Now().Add(ttl),
+    	{{ "}" }}); err != nil {{ "{" }}
+    		log.Printf("user: store reset token failed: %v", err)
+    		return nil
+    	{{ "}" }}
+
+    	if channel == "email" {{ "{" }}
+    		link := fmt.Sprintf("https://%s/reset-password?token=%s", "example.com", raw) // TODO: replace host with cfg.Notify.ResetLinkHost once real sending is wired up
+    		if err := s.emailSender.SendPasswordResetLink(ctx, identifier, link); err != nil {{ "{" }}
+    			log.Printf("user: send reset email failed: %v", err)
+    			return nil
+    		{{ "}" }}
+    	{{ "}" }} else {{ "{" }}
+    		if err := s.smsSender.SendPasswordResetCode(ctx, identifier, raw); err != nil {{ "{" }}
+    			log.Printf("user: send reset sms failed: %v", err)
+    			return nil
+    		{{ "}" }}
+    	{{ "}" }}
+
+    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: u.ID.String(), Action: "user.password_reset_requested", DetailJSON: fmt.Sprintf(`{{ "{" }}"channel":%q{{ "}" }}`, channel){{ "}" }})
+    	return nil
+    {{ "}" }}
+
+    // ConfirmPasswordReset validates credential against the stored token,
+    // then sets uid's password to newPassword via the shared setPassword
+    // helper (same path as admin-forced reset). All failure modes — no
+    // matching token, expired, already used — return the same generic error
+    // so a caller cannot distinguish them (see design doc's anti-enumeration
+    // section).
+    func (s *Service) ConfirmPasswordReset(ctx context.Context, credential, newPassword string) error {{ "{" }}
+    	tok, err := s.resetRepo.GetValid(ctx, hashCredential(credential))
+    	if err != nil {{ "{" }}
+    		return errors.New("user: reset credential is invalid or expired")
+    	{{ "}" }}
+    	if err := s.setPassword(ctx, tok.UserID.String(), nil, newPassword, "user.password_reset_confirmed", "", "", ""); err != nil {{ "{" }}
+    		return err
+    	{{ "}" }}
+    	_ = s.resetRepo.MarkUsed(ctx, tok.ID)
+    	return nil
     {{ "}" }}

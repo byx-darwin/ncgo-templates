@@ -7,12 +7,15 @@ body: |-
 
     import (
     	"context"
+    	"net/url"
     	"testing"
     	"time"
 
     	"{{.Module}}/internal/domain/user"
     	"{{.Module}}/internal/infrastructure/audit"
     	"{{.Module}}/internal/infrastructure/auth"
+    	"{{.Module}}/internal/infrastructure/notify"
+    	"{{.Module}}/internal/infrastructure/passwordreset"
     	"{{.Module}}/internal/pkg/oauth"
     )
 
@@ -28,24 +31,16 @@ body: |-
     type fakeRepo struct {{ "{" }}
     	byUsername map[string]*user.User
     	byID       map[user.ID]*user.User
-    	byEmail    map[string]*user.User
-    	byPhone    map[string]*user.User
     {{ "}" }}
 
     func newFakeRepo() *fakeRepo {{ "{" }}
-    	return &fakeRepo{{ "{" }}byUsername: map[string]*user.User{{ "{" }}{{ "}" }}, byID: map[user.ID]*user.User{{ "{" }}{{ "}" }}, byEmail: map[string]*user.User{{ "{" }}{{ "}" }}, byPhone: map[string]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
+    	return &fakeRepo{{ "{" }}byUsername: map[string]*user.User{{ "{" }}{{ "}" }}, byID: map[user.ID]*user.User{{ "{" }}{{ "}" }}{{ "}" }}
     {{ "}" }}
 
     func (r *fakeRepo) Create(ctx context.Context, u *user.User) error {{ "{" }}
     	r.byID[u.ID] = u
     	if u.Username != nil {{ "{" }}
     		r.byUsername[*u.Username] = u
-    	{{ "}" }}
-    	if u.Email != "" {{ "{" }}
-    		r.byEmail[u.Email] = u
-    	{{ "}" }}
-    	if u.Phone != "" {{ "{" }}
-    		r.byPhone[u.Phone] = u
     	{{ "}" }}
     	return nil
     {{ "}" }}
@@ -61,15 +56,26 @@ body: |-
     	{{ "}" }}
     	return nil, user.ErrNotFound
     {{ "}" }}
+
+    // GetByEmail/GetByPhone scan byID live (rather than a separate index
+    // populated only at Create time) so a test that mutates a field on the
+    // pointer returned by GetByID/Create after registration (e.g.
+    // u.Email = "...") is correctly visible to a later lookup by that
+    // field — matching how the real SQL-backed repository always reads the
+    // row's current column values.
     func (r *fakeRepo) GetByEmail(ctx context.Context, email string) (*user.User, error) {{ "{" }}
-    	if u, ok := r.byEmail[email]; ok {{ "{" }}
-    		return u, nil
+    	for _, u := range r.byID {{ "{" }}
+    		if u.Email == email {{ "{" }}
+    			return u, nil
+    		{{ "}" }}
     	{{ "}" }}
     	return nil, user.ErrNotFound
     {{ "}" }}
     func (r *fakeRepo) GetByPhone(ctx context.Context, phone string) (*user.User, error) {{ "{" }}
-    	if u, ok := r.byPhone[phone]; ok {{ "{" }}
-    		return u, nil
+    	for _, u := range r.byID {{ "{" }}
+    		if u.Phone == phone {{ "{" }}
+    			return u, nil
+    		{{ "}" }}
     	{{ "}" }}
     	return nil, user.ErrNotFound
     {{ "}" }}
@@ -94,7 +100,7 @@ body: |-
     // the recorded audit entries.
     func newTestServiceWithAudit() (*Service, *audit.MemoryWriter) {{ "{" }}
     	aw := audit.NewMemoryWriter()
-    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }}), aw
+    	return New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }}, nil, nil, nil), aw
     {{ "}" }}
 
     // fakeStateStore is a minimal oauth.StateStore stub for exercising
@@ -201,7 +207,7 @@ body: |-
     {{ "}" }}
 
     func TestBindProvider_RejectsEmptyUidState(t *testing.T) {{ "{" }}
-    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, &fakeStateStore{{ "{" }}provider: "github", purpose: oauthPurposeBind, uid: "", ok: true{{ "}" }}, time.Hour, audit.NewMemoryWriter(), &fakeBlacklist{{ "{" }}{{ "}" }})
+    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, &fakeStateStore{{ "{" }}provider: "github", purpose: oauthPurposeBind, uid: "", ok: true{{ "}" }}, time.Hour, audit.NewMemoryWriter(), &fakeBlacklist{{ "{" }}{{ "}" }}, nil, nil, nil)
     	ctx := context.Background()
 
     	err := svc.BindProvider(ctx, BindProviderInput{{ "{" }}Provider: "github", State: "state-1", Code: "code-1"{{ "}" }})
@@ -218,7 +224,7 @@ body: |-
 
     	aw := audit.NewMemoryWriter()
     	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
-    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl, nil, nil, nil)
 
     	err := svc.ChangePassword(context.Background(), u.ID.String(), "wrong-password", "new-password-1", "203.0.113.7", "test-agent/1.0")
     	if err == nil {{ "{" }}
@@ -240,7 +246,7 @@ body: |-
 
     	aw := audit.NewMemoryWriter()
     	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
-    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl, nil, nil, nil)
 
     	err := svc.ChangePassword(context.Background(), u.ID.String(), "correct-horse", "new-password-1", "203.0.113.7", "test-agent/1.0")
     	if err != nil {{ "{" }}
@@ -285,7 +291,7 @@ body: |-
 
     	aw := audit.NewMemoryWriter()
     	bl := &fakeBlacklist{{ "{" }}{{ "}" }}
-    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl)
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, bl, nil, nil, nil)
 
     	if err := svc.SetPasswordForAdmin(context.Background(), u.ID.String(), "newpassword123", "admin-1"); err != nil {{ "{" }}
     		t.Fatalf("expected admin reset to succeed without an old password, got error: %v", err)
@@ -317,7 +323,7 @@ body: |-
     	_ = repo.Create(context.Background(), u)
 
     	aw := audit.NewMemoryWriter()
-    	svc := New(repo, nil, nil, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }})
+    	svc := New(repo, nil, nil, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }}, nil, nil, nil)
 
     	if err := svc.SetPasswordForAdmin(context.Background(), u.ID.String(), "newpassword123", ""); err != nil {{ "{" }}
     		t.Fatalf("expected admin reset to succeed, got error: %v", err)
@@ -329,4 +335,142 @@ body: |-
     	if entries[0].ActorUID != u.ID.String() || entries[0].Target != u.ID.String() {{ "{" }}
     		t.Fatalf("expected actor and target both %s, got %+v", u.ID.String(), entries[0])
     	{{ "}" }}
+    {{ "}" }}
+
+    func newTestServiceWithReset() (*Service, *passwordreset.MemoryRepository, *notify.LogEmailSender, *notify.LogSMSSender, *audit.MemoryWriter) {{ "{" }}
+    	rr := passwordreset.NewMemoryRepository()
+    	es := notify.NewLogEmailSender()
+    	ss := notify.NewLogSMSSender()
+    	aw := audit.NewMemoryWriter()
+    	svc := New(newFakeRepo(), auth.NewJWTManager("test-secret"), oauth.Registry{{ "{" }}{{ "}" }}, nil, time.Hour, aw, &fakeBlacklist{{ "{" }}{{ "}" }}, rr, es, ss)
+    	return svc, rr, es, ss, aw
+    {{ "}" }}
+
+    func TestRequestPasswordReset_UnknownIdentifier_StillSucceedsNoSend(t *testing.T) {{ "{" }}
+    	svc, _, es, ss, aw := newTestServiceWithReset()
+    	if err := svc.RequestPasswordReset(context.Background(), "nobody@example.com", "email"); err != nil {{ "{" }}
+    		t.Fatalf("expected nil error for unknown identifier, got %v", err)
+    	{{ "}" }}
+    	if len(es.Sent()) != 0 || len(ss.Sent()) != 0 {{ "{" }}
+    		t.Fatal("expected no send for unknown identifier")
+    	{{ "}" }}
+    	if len(aw.Entries()) != 0 {{ "{" }}
+    		t.Fatal("expected no audit entry for unknown identifier")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRequestPasswordReset_KnownEmail_SendsAndAudits(t *testing.T) {{ "{" }}
+    	svc, rr, es, _, aw := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, err := svc.Register(ctx, RegisterInput{{ "{" }}Username: "alice", Password: "correct horse battery staple"{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatalf("register: %v", err)
+    	{{ "}" }}
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Email = "alice@example.com"
+
+    	if err := svc.RequestPasswordReset(ctx, "alice@example.com", "email"); err != nil {{ "{" }}
+    		t.Fatalf("expected nil error, got %v", err)
+    	{{ "}" }}
+    	sent := es.Sent()
+    	if len(sent) != 1 || sent[0].To != "alice@example.com" {{ "{" }}
+    		t.Fatalf("expected 1 email sent to alice@example.com, got %+v", sent)
+    	{{ "}" }}
+    	entries := aw.Entries()
+    	if len(entries) != 1 || entries[0].Action != "user.password_reset_requested" {{ "{" }}
+    		t.Fatalf("expected 1 audit entry action=user.password_reset_requested, got %+v", entries)
+    	{{ "}" }}
+    	if _, err := rr.GetValid(ctx, hashCredential(extractTokenFromLink(t, sent[0].Link))); err != nil {{ "{" }}
+    		t.Fatalf("expected a valid stored token matching the sent link, got err: %v", err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestRequestPasswordReset_SecondRequest_InvalidatesFirstToken(t *testing.T) {{ "{" }}
+    	svc, rr, es, _, _ := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "bob", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Email = "bob@example.com"
+
+    	_ = svc.RequestPasswordReset(ctx, "bob@example.com", "email")
+    	firstLink := es.Sent()[0].Link
+    	firstHash := hashCredential(extractTokenFromLink(t, firstLink))
+
+    	_ = svc.RequestPasswordReset(ctx, "bob@example.com", "email")
+
+    	if _, err := rr.GetValid(ctx, firstHash); err != passwordreset.ErrNotFound {{ "{" }}
+    		t.Fatalf("expected first token invalidated by second request, got err=%v", err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestConfirmPasswordReset_ValidCredential_UpdatesPasswordAndAudits(t *testing.T) {{ "{" }}
+    	svc, _, es, _, aw := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "carol", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Email = "carol@example.com"
+    	_ = svc.RequestPasswordReset(ctx, "carol@example.com", "email")
+    	token := extractTokenFromLink(t, es.Sent()[0].Link)
+
+    	if err := svc.ConfirmPasswordReset(ctx, token, "brand-new-password-1"); err != nil {{ "{" }}
+    		t.Fatalf("ConfirmPasswordReset: %v", err)
+    	{{ "}" }}
+    	updated, _ := svc.repo.GetByID(ctx, uid)
+    	if ok, _ := auth.VerifyPassword("brand-new-password-1", *updated.PasswordHash); !ok {{ "{" }}
+    		t.Fatal("password was not updated")
+    	{{ "}" }}
+    	found := false
+    	for _, e := range aw.Entries() {{ "{" }}
+    		if e.Action == "user.password_reset_confirmed" {{ "{" }}
+    			found = true
+    		{{ "}" }}
+    	{{ "}" }}
+    	if !found {{ "{" }}
+    		t.Fatal("expected a user.password_reset_confirmed audit entry")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestConfirmPasswordReset_UnknownCredential_ReturnsGenericError(t *testing.T) {{ "{" }}
+    	svc, _, _, _, _ := newTestServiceWithReset()
+    	if err := svc.ConfirmPasswordReset(context.Background(), "no-such-token", "brand-new-password-1"); err == nil {{ "{" }}
+    		t.Fatal("expected an error for unknown credential")
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestConfirmPasswordReset_ReusedCredential_Rejected(t *testing.T) {{ "{" }}
+    	svc, _, es, _, _ := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "dave", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Email = "dave@example.com"
+    	_ = svc.RequestPasswordReset(ctx, "dave@example.com", "email")
+    	token := extractTokenFromLink(t, es.Sent()[0].Link)
+
+    	if err := svc.ConfirmPasswordReset(ctx, token, "brand-new-password-1"); err != nil {{ "{" }}
+    		t.Fatalf("first confirm: %v", err)
+    	{{ "}" }}
+    	if err := svc.ConfirmPasswordReset(ctx, token, "another-password-2"); err == nil {{ "{" }}
+    		t.Fatal("expected reused credential to be rejected")
+    	{{ "}" }}
+    {{ "}" }}
+
+    // extractTokenFromLink pulls the ?token= query value out of a reset link
+    // produced by RequestPasswordReset, for tests that need the raw credential
+    // to exercise ConfirmPasswordReset (which only ever receives the raw value
+    // from a real caller, never the hash).
+    func extractTokenFromLink(t *testing.T, link string) string {{ "{" }}
+    	t.Helper()
+    	u, err := url.Parse(link)
+    	if err != nil {{ "{" }}
+    		t.Fatalf("parse link %q: %v", link, err)
+    	{{ "}" }}
+    	tok := u.Query().Get("token")
+    	if tok == "" {{ "{" }}
+    		t.Fatalf("link %q has no token query param", link)
+    	{{ "}" }}
+    	return tok
     {{ "}" }}

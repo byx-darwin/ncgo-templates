@@ -41,8 +41,9 @@ Confirmed with the repo owner (2026-09-19):
 
 1. **ratelimit-hertz `RateLimit`** — reposition `post_auth` to actually run post-auth.
    `pre_auth` stays engine-level (IP-based DoS mitigation before any routing work).
-2. **base-hertz `RateLimit`** — remove entirely (dead code contradicting the template's
-   own "no rate limiting" documentation).
+2. **base-hertz `RateLimit`** — **keep, do not remove** (revised 2026-09-19 during
+   execution — see "Design rejected during execution: removing base-hertz's
+   RateLimit code" below). Document the limitation in the README instead.
 3. **Idempotency (all 3 packages)** — per-group single registration (revised
    2026-09-19 after discovering dual registration's flaw — see "Design rejected during
    planning" below): move the registration off the shared `api` group and onto
@@ -85,24 +86,43 @@ No changes to `rate_limit.go` itself — `rateLimitAppKey`/`rateLimitUserUUID` a
 read `Claims` correctly; they just weren't being invoked at a point where `Claims` was
 populated.
 
-### 2. base-hertz: remove dead `RateLimit` code
+### 2. base-hertz: keep `RateLimit` code, document the limitation
 
-Delete:
-- `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml`
-- `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml`
-- `RateLimitConfig` and its exclusively-owned sub-types (`StaticLimitConfig`,
-  `RateLimitSourceConfig`, `RateLimitGRPCConfig`, `RateLimitDatabaseConfig`,
-  `RateLimitPhaseConfig`, `RateLimitMatchConfig`, `RateLimitRuleConfig`), the
-  `RateLimit` field on `Config`, the `c.RateLimit.Redis = mergeRedisConfig(...)` line
-  in `applyRedisFallbacks()`, and the `if c.RateLimit.Enabled { ... }` validation block
-  — all from `internal_base_conf_conf_go.yaml`. Keep `MemoryCacheConfig` and
-  `RedisConfig` (shared with `Idempotency`/`Signature.Nonce`).
-- (base-hertz's `conf_dev_conf_yaml.yaml` has no `rate_limit:` block already — nothing
-  to remove there.)
+**Superseded during execution (2026-09-19) — see "Design rejected during execution"
+below.** Originally planned as a deletion; reverted before merge. No code change in
+this section; `internal_pkg_middleware_rate_limit_go.yaml`,
+`internal_pkg_middleware_rate_limit_test_go.yaml`, and `internal_base_conf_conf_go.yaml`
+are untouched by this issue. Only the README gets a new note (see Documentation below)
+explaining why `RateLimit` code ships in a template whose own docs say it has no rate
+limiting.
 
-Verify after removal: `grep -rn "RateLimit" base-hertz/hertz-template/` returns nothing,
-and a generated base-hertz project still builds (`go build ./...`) and passes
-`go vet ./...`.
+### Design rejected during execution: removing base-hertz's `RateLimit` code
+
+The Task 2 implementer (dispatched to delete `base-hertz`'s `RateLimit` middleware and
+config, per the original decision above) found that the deletion breaks `go build` for
+any `base-hertz` project generated with `--db`. Root cause: `ncgo` itself (a separate
+repository, `github.com/byx-darwin/ncgo`) ships a built-in default hertz layout
+(`internal/assets/_data/hertz/layout.yaml`) that unconditionally generates
+`internal/repository/rate_limit_rule.go` (plus its db schema/query/migration/seed
+files) for any hertz template that doesn't set `skip_default_templates: true` —
+`base-hertz` doesn't set it, and has no local override for that specific path. That
+embedded default file references `conf.RateLimitConfig`/`conf.RateLimitRuleConfig`
+directly, so it fails to compile once those types are removed from `base-hertz`'s own
+`conf.go`.
+
+In other words: `base-hertz`'s local `RateLimit` middleware/config were not simply
+leftover copy-paste from `ratelimit-hertz` — they exist (at least in part) to satisfy a
+compile-time dependency from `ncgo`'s shared default DB-repository scaffold, which this
+repository (`ncgo-templates`) doesn't control. Removing them without also either (a)
+patching `ncgo`'s embedded layout in a separate PR to that repository, or (b) adding
+`skip_default_templates: true` to `base-hertz/template.yaml` and fully re-validating
+everything that flag drops (unknown blast radius — it may skip far more than the
+rate-limit-specific files), is out of scope for this issue and this repository.
+
+Decided with the repo owner (2026-09-19): keep `base-hertz`'s `RateLimit` code as-is.
+Document the limitation in the README (Task 5) instead of removing it. No follow-up
+issue filed against `ncgo` as part of this change — left to the repo owner's
+discretion outside this workflow.
 
 ### 3. Idempotency: per-group single registration (all 3 packages)
 
@@ -191,11 +211,14 @@ These are regression tests against reordering, not unit tests that assume the or
 Replace the three README notes #72 left pointing at #73 as unresolved, with the final
 state:
 
-- `base-hertz/README.md:70` — update to state `RateLimit` was removed entirely (no
-  rate limiting in this template, see `ratelimit-hertz`); `Idempotency` now runs once,
-  inside the `protected` group, after both `SignatureAuth` (api-level) and `JWTAuth`
-  have run, so it reaches the full precedence (`ak_user_uuid:` > `user_uuid:` > `ak:`
-  > `ip:`).
+- `base-hertz/README.md:70` — update to state `RateLimit` middleware/config ship in
+  this template but are never wired into `server.go`/router (kept only to satisfy a
+  compile-time dependency from `ncgo`'s shared default DB-repository scaffold — see
+  the design doc's "Design rejected during execution" note); this template still has
+  no user-facing rate limiting (see `ratelimit-hertz` for that). `Idempotency` now runs
+  once, inside the `protected` group, after both `SignatureAuth` (api-level) and
+  `JWTAuth` have run, so it reaches the full precedence (`ak_user_uuid:` > `user_uuid:`
+  > `ak:` > `ip:`).
 - `ratelimit-hertz/README.md:270` — update to state final registration order and that
   all branches (`ak:`, `ak_user_uuid:`, `user_uuid:`, `ip:`, and both `RateLimit`
   phases) are now reachable as designed.
@@ -207,13 +230,10 @@ state:
 ## Testing / Verification
 
 - `go build ./...` + `go vet ./...` on a project generated from each of the 3 templates
-  (hermetic, memory backend) — must stay green after removing base-hertz's RateLimit
-  fields (config struct shape changes).
+  (hermetic, memory backend, and `--db` for base-hertz) — must stay green.
 - Each package's existing `e2e_test.sh` — must stay green.
 - New router-level tests above — RED before the reposition/per-group-registration
   changes, GREEN after.
-- `grep -rn "RateLimit" base-hertz/` — zero hits outside this design doc / commit
-  history after removal.
 
 ## Out of scope
 
@@ -221,6 +241,7 @@ state:
   correctly positioned.
 - Any change to `idempotencyKey()`'s or `rateLimitAppKey()`/`rateLimitUserUUID()`'s
   scope-precedence logic — only registration position changes.
-- Filing a separate issue for base-hertz's dead code — folded into #73 per repo
-  owner's decision (2026-09-19), since it was discovered during this issue's
-  re-verification.
+- Removing base-hertz's `RateLimit` middleware/config — reverted during execution
+  (2026-09-19); see "Design rejected during execution" above. Any fix belongs in
+  `github.com/byx-darwin/ncgo` (a different repository), not here.
+

@@ -36,23 +36,29 @@ body: |
 
     	// ── Signature verification (optional, for open-api callers) ─────────
     	if cfg.Auth.Signature.Enabled {{ "{" }}
-    		resolver := middleware.StaticSecretResolver{{ "{" }}SecretValue: cfg.Auth.Signature.StaticSecret{{ "}" }}
-    		api.Use(middleware.SignatureAuth(cfg.Auth.Signature, resolver))
-    	{{ "}" }}
-
-    	// ── Idempotency (optional, for POST/PUT/DELETE) ─────────────────────
-    	if cfg.Idempotency.Enabled {{ "{" }}
-    		api.Use(middleware.Idempotency(cfg.Idempotency))
+    		sigResolver := middleware.StaticSecretResolver{{ "{" }}SecretValue: cfg.Auth.Signature.StaticSecret{{ "}" }}
+    		api.Use(middleware.SignatureAuth(cfg.Auth.Signature, sigResolver))
     	{{ "}" }}
 
     	// Public routes (no JWT)
     	auth := api.Group("/auth")
+    	// ── Idempotency for public auth routes (ak:/ip: scope only — no Uid
+    	// pre-authentication; see issue #73) ─────────────────────────────────
+    	if cfg.Idempotency.Enabled {{ "{" }}
+    		auth.Use(middleware.Idempotency(cfg.Idempotency))
+    	{{ "}" }}
     	auth.POST("/login", authHandler.Login)
     	auth.POST("/refresh", authHandler.Refresh)
 
     	// Protected routes (JWT required)
     	protected := api.Group("")
     	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
+    	// ── Idempotency for protected routes — registered after JWTAuth, so
+    	// Claims.Uid is available and idempotencyKey()'s ak_user_uuid:/
+    	// user_uuid: branches are reachable (see issue #73) ─────────────────
+    	if cfg.Idempotency.Enabled {{ "{" }}
+    		protected.Use(middleware.Idempotency(cfg.Idempotency))
+    	{{ "}" }}
 
     	// NOTE: Authz(rbacCli) is intentionally NOT registered here at the
     	// group level. Hertz's RouterGroup.combineHandlers always places a

@@ -410,115 +410,26 @@ go build ./... && go vet ./... && go test ./...
 
 ---
 
-### Task 2: base-hertz — remove dead `RateLimit` middleware and config
+### Task 2: ~~base-hertz — remove dead `RateLimit` middleware and config~~ — SKIPPED
 
-**Files:**
-- Delete: `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml`
-- Delete: `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml`
-- Modify: `base-hertz/hertz-template/internal_base_conf_conf_go.yaml`
-- Modify: `base-hertz/hertz-template/internal_pkg_middleware_signature_test_go.yaml`
+**Status: skipped during execution (2026-09-19).** The implementer found that
+`base-hertz`'s `RateLimit` middleware/config, though never wired into `server.go`/
+router, are load-bearing for a different reason: `ncgo` (a separate repository,
+`github.com/byx-darwin/ncgo`) ships a built-in default hertz layout that
+unconditionally generates `internal/repository/rate_limit_rule.go` (and its db
+schema/query/migration/seed files) for any hertz template without
+`skip_default_templates: true` — `base-hertz` doesn't set that flag and has no local
+override for that path. That embedded default file references
+`conf.RateLimitConfig`/`conf.RateLimitRuleConfig` directly, so removing those types
+from `base-hertz`'s `conf.go` breaks `go build` for any project generated with `--db`.
 
-**Interfaces:**
-- Consumes: nothing new.
-- Produces: `conf.Config` loses its `RateLimit` field and the `RateLimitConfig`/`StaticLimitConfig`/`RateLimitSourceConfig`/`RateLimitGRPCConfig`/`RateLimitDatabaseConfig`/`RateLimitPhaseConfig`/`RateLimitMatchConfig`/`RateLimitRuleConfig` types entirely. No other task in this plan touches base-hertz's conf.go, so there's no interface for a later task to pick up.
+Ruling (repo owner, 2026-09-19): keep `base-hertz`'s `RateLimit` code as-is. No files
+listed under this task are touched. See the design doc's "Design rejected during
+execution: removing base-hertz's `RateLimit` code" section for the full account. Task 5
+documents the limitation in the README instead of removing the code.
 
-- [ ] **Step 1: Confirm nothing else in base-hertz references these types**
+No commit for this task — nothing to fix-loop or review; move directly to Task 3.
 
-Run: `grep -rn "RateLimit\b" base-hertz/hertz-template/ base-hertz/README.md`
-Expected output (before this task): the 6 files/lines already catalogued in the design doc's "Current state" table — `internal_pkg_middleware_rate_limit_go.yaml`, `internal_pkg_middleware_rate_limit_test_go.yaml`, `internal_pkg_response_response_go.yaml` (keep — shared error-code catalog, `CodeRateLimited` is harmless even if this package never triggers it), `internal_base_conf_conf_go.yaml`, `internal_pkg_middleware_signature_test_go.yaml` (a comment, fix in Step 4), `README.md:15/70/236` (already correct — states no rate limiting; leave `:15`/`:236` as-is, `:70` is Task 6's job).
-
-- [ ] **Step 2: Delete the two dead-code files**
-
-```bash
-git rm base-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml
-git rm base-hertz/hertz-template/internal_pkg_middleware_rate_limit_test_go.yaml
-```
-
-- [ ] **Step 3: Remove `RateLimit` from `conf.go`**
-
-Edit `base-hertz/hertz-template/internal_base_conf_conf_go.yaml`:
-
-1. Remove the field from `Config`:
-```go
-        RateLimit RateLimitConfig `yaml:"rate_limit"`
-```
-(the line directly above `Idempotency IdempotencyConfig`).
-
-2. Remove these type definitions entirely (lines 119–187 in the current file — verify exact range with `grep -n "^    type RateLimitConfig struct" -A 70` before deleting, since line numbers shift after Step 2's file deletions don't apply here but other unrelated edits might have shifted them): `RateLimitConfig`, `StaticLimitConfig`, `RateLimitSourceConfig`, `RateLimitGRPCConfig`, `RateLimitDatabaseConfig`, `RateLimitPhaseConfig`, `RateLimitMatchConfig`, `RateLimitRuleConfig`. Stop before `type RedisConfig struct` — that one is shared and must stay.
-
-3. Remove this line from `applyRedisFallbacks()`:
-```go
-        c.RateLimit.Redis = mergeRedisConfig(c.RateLimit.Redis, c.Redis)
-```
-
-4. Remove this entire block from `Validate()`:
-```go
-        if c.RateLimit.Enabled {
-            switch c.RateLimit.Backend {
-            case "", "memory", "redis":
-            default:
-                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.backend must be memory or redis")
-            }
-            if c.RateLimit.Backend == "redis" && len(c.RateLimit.Redis.Addrs) == 0 {
-                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.redis.addrs is empty")
-            }
-            if c.RateLimit.Backend == "memory" && c.RateLimit.Memory.MaxEntries < 0 {
-                return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.memory.max_entries must not be negative")
-            }
-        }
-```
-
-- [ ] **Step 4: Fix the stale comment in `signature_test.go`**
-
-Edit `base-hertz/hertz-template/internal_pkg_middleware_signature_test_go.yaml`, change:
-
-```go
-    // TestSignatureAuth_ValidRequest_SetsClaimsAK is the #72 regression test:
-    // before this fix, a cryptographically-verified signature request never
-    // recorded its app key anywhere, so idempotency.go/rate_limit.go's
-    // claims.AK-scoped branches were unreachable dead code outside test
-    // fixtures — every real signature-authenticated request silently fell
-    // back to per-IP or header-trusted (unverified) scoping.
-```
-
-to:
-
-```go
-    // TestSignatureAuth_ValidRequest_SetsClaimsAK is the #72 regression test:
-    // before this fix, a cryptographically-verified signature request never
-    // recorded its app key anywhere, so idempotency.go's claims.AK-scoped
-    // branches were unreachable dead code outside test fixtures — every real
-    // signature-authenticated request silently fell back to per-IP or
-    // header-trusted (unverified) scoping. (base-hertz has no rate_limit.go
-    // — see issue #73.)
-```
-
-- [ ] **Step 5: Verify build**
-
-Generate a project from base-hertz (see Testing below) and run `go build ./... && go vet ./... && go test ./...`.
-Expected: PASS. If `go build` fails, it means something else in the template still references a removed type — search with `grep -rn "RateLimit" base-hertz/hertz-template/` and remove the remaining reference (there should be none left after Steps 2–4).
-
-- [ ] **Step 6: Confirm zero remaining references**
-
-Run: `grep -rn "RateLimit" base-hertz/hertz-template/`
-Expected: no output.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add -A base-hertz/hertz-template/
-git commit -m "fix(base-hertz): remove dead RateLimit middleware and config (#73)"
-```
-
-**Testing:**
-
-```bash
-cd /tmp && rm -rf base-hertz-test && mkdir base-hertz-test && cd base-hertz-test
-ncgo new --template-dir /Users/xs/Documents/workspce/github.com/byx-darwin/ncgo-templates/base-hertz --module github.com/test/base-hertz-test testsvc
-cd testsvc && go build ./... && go vet ./... && go test ./...
-```
-
-(Check `base-hertz/test/e2e_test.sh` for the exact working `ncgo new` invocation this repo currently uses.)
 
 ---
 
@@ -696,7 +607,15 @@ git add base-hertz/hertz-template/internal_router_service_go.yaml \
 git commit -m "fix(base-hertz): move Idempotency registration after JWTAuth (#73)"
 ```
 
-**Testing:** same generation steps as Task 2.
+**Testing:**
+
+```bash
+cd /tmp && rm -rf base-hertz-test && mkdir base-hertz-test && cd base-hertz-test
+ncgo new --template-dir /Users/xs/Documents/workspce/github.com/byx-darwin/ncgo-templates/base-hertz --module github.com/test/base-hertz-test testsvc
+cd testsvc && go build ./... && go vet ./... && go test ./...
+```
+
+(Check `base-hertz/test/e2e_test.sh` for the exact working `ncgo new` invocation this repo currently uses.)
 
 ---
 
@@ -934,7 +853,7 @@ Read the current line and its surrounding paragraph (`grep -n -B3 -A3 "tracked a
 
 with:
 
-> "`idempotency.go` now runs once, inside the JWT-protected route group (after both `SignatureAuth` and `JWTAuth` have run), so it reaches the full precedence — `ak_user_uuid:` when both are set, otherwise `user_uuid:`/`ak:`/`ip:` (issue #73). This template does not include rate limiting (see `ratelimit-hertz` for that)."
+> "`idempotency.go` now runs once, inside the JWT-protected route group (after both `SignatureAuth` and `JWTAuth` have run), so it reaches the full precedence — `ak_user_uuid:` when both are set, otherwise `user_uuid:`/`ak:`/`ip:` (issue #73). This template still has no user-facing rate limiting (see `ratelimit-hertz` for that); it does ship a `RateLimit` middleware and `RateLimitConfig`/`PreAuth`/`PostAuth` types that are never wired into `server.go` or the router — they exist only to satisfy a compile-time dependency from `ncgo`'s built-in default DB-repository scaffold (`internal/repository/rate_limit_rule.go`, generated regardless of this template's own files), not because this template offers rate limiting itself."
 
 - [ ] **Step 2: Update `ratelimit-hertz/README.md:270`**
 
@@ -966,7 +885,7 @@ git commit -m "docs: update AK/Uid reachability notes now that #73 is fixed"
 
 After all 5 tasks:
 
-- [ ] `grep -rn "RateLimit" base-hertz/` → zero hits (config/middleware fully removed; `README.md` mentions of "no rate limiting" are prose, not code — check they still read correctly).
+- [ ] Confirm `base-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml` and its config fields in `internal_base_conf_conf_go.yaml` are untouched (Task 2 was skipped) — `git diff main...HEAD -- base-hertz/hertz-template/internal_pkg_middleware_rate_limit_go.yaml base-hertz/hertz-template/internal_base_conf_conf_go.yaml` should show no changes from this branch.
 - [ ] For each of the 3 templates, generate a fresh project and run `go build ./... && go vet ./... && go test ./...` — all green.
 - [ ] Each package's existing `test/e2e_test.sh` — still green.
-- [ ] `git log --oneline` shows 5 commits matching the 5 tasks above.
+- [ ] `git log --oneline` shows commits for Tasks 1, 3, 4, 5 (Task 2 skipped, no commit expected).

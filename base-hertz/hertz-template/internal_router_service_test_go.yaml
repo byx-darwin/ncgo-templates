@@ -1,0 +1,115 @@
+# ncgo exported template — internal/router/service_test.go
+path: internal/router/service_test.go
+update_behavior:
+    type: skip
+body: |-
+    package router
+
+    import (
+        "bytes"
+        "os"
+        "path/filepath"
+        "testing"
+        "time"
+
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+        "github.com/golang-jwt/jwt/v5"
+    )
+
+    const testRouterConfYAML = `
+    env: test
+    auth:
+      token:
+        enabled: true
+        header: "Authorization"
+        signing_key: "router-test-secret"
+    idempotency:
+      enabled: true
+    `
+
+    func TestMain(m *testing.M) {
+        dir, err := os.MkdirTemp("", "base-hertz-router-test")
+        if err != nil {
+            panic(err)
+        }
+        path := filepath.Join(dir, "conf.yaml")
+        if err := os.WriteFile(path, []byte(testRouterConfYAML), 0o644); err != nil {
+            panic(err)
+        }
+        os.Setenv("CONFIG_PATH", path)
+        code := m.Run()
+        os.RemoveAll(dir)
+        os.Exit(code)
+    }
+
+    func newRouterTestEngine(t *testing.T) *server.Hertz {
+        t.Helper()
+        h := server.New()
+        RegisterServiceRoutes(h)
+        return h
+    }
+
+    func newRouterTestJWT(t *testing.T, uid string) string {
+        t.Helper()
+        token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+            "uid": uid,
+            "exp": time.Now().Add(time.Hour).Unix(),
+        })
+        signed, err := token.SignedString([]byte("router-test-secret"))
+        if err != nil {
+            t.Fatalf("failed to sign test jwt: %v", err)
+        }
+        return signed
+    }
+
+    // TestIdempotency_DifferentUsers_DoNotCollide is the fix probe: before
+    // this task's fix, Idempotency was registered on `api`, before JWTAuth
+    // ever ran, so idempotencyKey() always fell back to ip:-scoped keys for
+    // every request from this test client (same IP). Two different
+    // JWT-authenticated users reusing the same X-Idempotency-Key value would
+    // collide on that ip: key — user B's request would not get an
+    // independent execution: it would either be rejected as a conflicting
+    // in-flight/mismatched fingerprint request, or (if bodies matched) get
+    // user A's cached response replayed verbatim. With the fix (Idempotency
+    // registered on `protected` after JWTAuth), each gets their own
+    // user_uuid:-scoped key, so user B's request executes independently.
+    //
+    // The two requests use different bodies (and therefore different
+    // idempotencyFingerprint() values) so that, under the bug, user B's
+    // request cannot be mistaken for a replay of user A's cached response —
+    // a same-fingerprint collision would produce a 200 with the
+    // X-Idempotency-Replayed header set, which a status-code-only assertion
+    // would not distinguish from an independent success. We assert both the
+    // status code AND the absence of that replay header.
+    func TestIdempotency_DifferentUsers_DoNotCollide(t *testing.T) {
+        h := newRouterTestEngine(t)
+        tokenA := newRouterTestJWT(t, "user-A")
+        tokenB := newRouterTestJWT(t, "user-B")
+        bodyA := []byte(`{"who":"A"}`)
+        bodyB := []byte(`{"who":"B"}`)
+
+        wA := ut.PerformRequest(h.Engine, "POST", "/api/v1/resources",
+            &ut.Body{Body: bytes.NewReader(bodyA), Len: len(bodyA)},
+            ut.Header{Key: "Authorization", Value: "Bearer " + tokenA},
+            ut.Header{Key: "X-Idempotency-Key", Value: "shared-key-123"},
+            ut.Header{Key: "Content-Type", Value: "application/json"},
+        )
+        if got := wA.Result().StatusCode(); got != consts.StatusOK {
+            t.Fatalf("user A: expected 200, got %d", got)
+        }
+
+        wB := ut.PerformRequest(h.Engine, "POST", "/api/v1/resources",
+            &ut.Body{Body: bytes.NewReader(bodyB), Len: len(bodyB)},
+            ut.Header{Key: "Authorization", Value: "Bearer " + tokenB},
+            ut.Header{Key: "X-Idempotency-Key", Value: "shared-key-123"},
+            ut.Header{Key: "Content-Type", Value: "application/json"},
+        )
+        if got := wB.Result().StatusCode(); got != consts.StatusOK {
+            t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes", got)
+        }
+        if replayed := string(wB.Result().Header.Peek("X-Idempotency-Replayed")); replayed != "" {
+            t.Fatalf("user B: response must not be a replay of user A's response, got X-Idempotency-Replayed=%q", replayed)
+        }
+    }

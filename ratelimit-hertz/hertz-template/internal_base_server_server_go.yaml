@@ -67,11 +67,14 @@ body: |-
             h.Use(provider.ServerMiddleware())
         }
 
-        // Rate-limit middleware — pre-auth & post-auth phases (memory/redis backend)
+        // Rate-limit middleware — pre-auth phase only (engine-level, IP-based
+        // DoS mitigation before any routing work). post_auth phase is
+        // registered inside router.RegisterServiceRoutes, on the `protected`
+        // group after JWTAuth, so it can actually see Claims (see issue #73).
+        var rlResolver *ratelimit.Resolver
         if cfg.RateLimit.Enabled {
-            rlResolver := ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{})
+            rlResolver = ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{})
             h.Use(middleware.RateLimit("pre_auth", cfg.RateLimit, cfg.RateLimit.PreAuth, rlResolver))
-            h.Use(middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, rlResolver))
         }
 
         // Optional structured logging wiring (after `ncgo add infra logging`):
@@ -125,7 +128,7 @@ body: |-
         router.GeneratedRegister(h)
 
         // Register custom service routes with JWT/signature middleware
-        router.RegisterServiceRoutes(h)
+        router.RegisterServiceRoutes(h, rlResolver)
 
         // Start server
         h.Spin()

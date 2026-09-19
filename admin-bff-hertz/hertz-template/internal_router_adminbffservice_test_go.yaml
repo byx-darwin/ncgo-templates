@@ -7,6 +7,7 @@ body: |
     package router
 
     import (
+    	"bytes"
     	"context"
     	"os"
     	"path/filepath"
@@ -21,6 +22,7 @@ body: |
     	"github.com/golang-jwt/jwt/v5"
 
     	"{{.Module}}/internal/pkg/ratelimit"
+    	api "{{.Module}}/kitex_gen/api/auth/v1"
     	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
     	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
     	rbacv1 "{{.Module}}/kitex_gen/api/rbac/v1"
@@ -36,6 +38,10 @@ body: |
     const testRouterConfYAML = `
     env: test
     grpc:
+      authority:
+        service_name: "authority"
+        host_ports:
+          - "127.0.0.1:8888"
       terminal_user:
         service_name: "userservice"
         host_ports:
@@ -45,6 +51,8 @@ body: |
         enabled: true
         header: "Authorization"
         signing_key: "router-test-secret"
+    idempotency:
+      enabled: true
     `
 
     // TestMain points conf.Get()'s lazy singleton at a config with
@@ -89,6 +97,14 @@ body: |
     	return &rbacv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
     {{ "}" }}
 
+    // CreateUser is a minimal canned-success override needed by the
+    // Idempotency tests below, which exercise POST /api/v1/users (a
+    // mutating protected route) rather than a GET route, since Idempotency's
+    // default method set (POST/PUT/PATCH/DELETE) never activates for GET.
+    func (f *fakeRouterRBACClient) CreateUser(ctx context.Context, req *rbacv1.CreateUserReq, callOptions ...callopt.Option) (*rbacv1.CreateUserResp, error) {{ "{" }}
+    	return &rbacv1.CreateUserResp{{ "{" }}User: &rbacv1.User{{ "{" }}Id: "new-user-id", Username: req.Username{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+
     // fakeRouterUserClient is a minimal fake userservice.Client. It embeds
     // the real interface (so any unexercised method panics via the nil
     // embedded Client, itself indicating a test bug) and overrides only
@@ -121,6 +137,22 @@ body: |
     	t.Helper()
     	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
     		"uid": "user-123",
+    		"exp": time.Now().Add(time.Hour).Unix(),
+    	{{ "}" }})
+    	signed, err := token.SignedString([]byte("router-test-secret"))
+    	if err != nil {{ "{" }}
+    		t.Fatalf("failed to sign test jwt: %v", err)
+    	{{ "}" }}
+    	return signed
+    {{ "}" }}
+
+    // newRouterTestJWTWithUid is like newRouterTestJWT but with a caller-
+    // supplied uid, used by the Idempotency tests below to simulate two
+    // distinct authenticated users.
+    func newRouterTestJWTWithUid(t *testing.T, uid string) string {{ "{" }}
+    	t.Helper()
+    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
+    		"uid": uid,
     		"exp": time.Now().Add(time.Hour).Unix(),
     	{{ "}" }})
     	signed, err := token.SignedString([]byte("router-test-secret"))
@@ -241,5 +273,96 @@ body: |
 
     	if resp.StatusCode() != consts.StatusOK {{ "{" }}
     		t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // fakeRouterAuthClient is a minimal fake authservice.Client for the
+    // Idempotency tests below — Login always succeeds so the test can focus
+    // on whether Idempotency dedupes the second identical request.
+    type fakeRouterAuthClient struct {{ "{" }}
+    	authservice.Client
+    	loginCalls int
+    {{ "}" }}
+
+    func (f *fakeRouterAuthClient) Login(ctx context.Context, req *api.LoginReq, callOptions ...callopt.Option) (*api.LoginResp, error) {{ "{" }}
+    	f.loginCalls++
+    	return &api.LoginResp{{ "{" }}AccessToken: "tok", RefreshToken: "rtok", ExpiresIn: 3600{{ "}" }}, nil
+    {{ "}" }}
+
+    func newRouterTestEngineWithAuth(t *testing.T, authCli authservice.Client, rbacCli rbacservice.Client) *route.Engine {{ "{" }}
+    	t.Helper()
+    	h := server.New()
+    	var ruleCli ruleservice.Client
+    	var resolver *ratelimit.Resolver
+    	userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
+    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli, resolver)
+    	return h.Engine
+    {{ "}" }}
+
+    // TestIdempotency_DifferentUsers_DoNotCollide is the fix probe for
+    // protected routes: before this task's fix, Idempotency was registered
+    // on `api`, before JWTAuth ever ran, so idempotencyKey() always fell
+    // back to ip:-scoped keys for every request from this test client (same
+    // IP). Two different JWT-authenticated users reusing the same
+    // X-Idempotency-Key value on a mutating request (POST /api/v1/users)
+    // would collide on that ip: key — and since their request bodies (and
+    // therefore fingerprints) differ, the second request would be rejected
+    // as an idempotency conflict (409) instead of being processed. With the
+    // fix (Idempotency registered on `protected` after JWTAuth), each user
+    // gets their own user_uuid:-scoped key, so both requests succeed and
+    // neither is served from the other's cached response.
+    func TestIdempotency_DifferentUsers_DoNotCollide(t *testing.T) {{ "{" }}
+    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+    	tokenA := newRouterTestJWTWithUid(t, "user-A")
+    	tokenB := newRouterTestJWTWithUid(t, "user-B")
+    	bodyA := []byte(`{{ "{" }}"username":"alice","password":"p","email":"alice@example.com"{{ "}" }}`)
+    	bodyB := []byte(`{{ "{" }}"username":"bob","password":"p","email":"bob@example.com"{{ "}" }}`)
+
+    	wA := ut.PerformRequest(engine, "POST", "/api/v1/users",
+    		&ut.Body{{ "{" }}Body: bytes.NewReader(bodyA), Len: len(bodyA){{ "}" }},
+    		ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + tokenA{{ "}" }},
+    		ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "shared-key-123"{{ "}" }},
+    		ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
+    	)
+    	if got := wA.Result().StatusCode(); got != consts.StatusOK {{ "{" }}
+    		t.Fatalf("user A: expected 200, got %d", got)
+    	{{ "}" }}
+
+    	wB := ut.PerformRequest(engine, "POST", "/api/v1/users",
+    		&ut.Body{{ "{" }}Body: bytes.NewReader(bodyB), Len: len(bodyB){{ "}" }},
+    		ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + tokenB{{ "}" }},
+    		ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "shared-key-123"{{ "}" }},
+    		ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
+    	)
+    	respB := wB.Result()
+    	if got := respB.StatusCode(); got != consts.StatusOK {{ "{" }}
+    		t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes", got)
+    	{{ "}" }}
+    	if replayed := respB.Header.Get("X-Idempotency-Replayed"); replayed != "" {{ "{" }}
+    		t.Errorf("user B response carries X-Idempotency-Replayed=%q — it must not be served from user A's cached response", replayed)
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestIdempotency_PublicLogin_StillDeduped confirms moving Idempotency
+    // off the shared `api` group didn't drop coverage for the public
+    // /auth/login route: two identical login requests with the same
+    // X-Idempotency-Key must still result in only one real Login RPC call.
+    func TestIdempotency_PublicLogin_StillDeduped(t *testing.T) {{ "{" }}
+    	authCli := &fakeRouterAuthClient{{ "{" }}{{ "}" }}
+    	engine := newRouterTestEngineWithAuth(t, authCli, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+    	body := []byte(`{{ "{" }}"username":"u","password":"p"{{ "}" }}`)
+
+    	for i := 0; i < 2; i++ {{ "{" }}
+    		w := ut.PerformRequest(engine, "POST", "/api/v1/auth/login",
+    			&ut.Body{{ "{" }}Body: bytes.NewReader(body), Len: len(body){{ "}" }},
+    			ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "login-key-1"{{ "}" }},
+    			ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
+    		)
+    		if got := w.Result().StatusCode(); got != consts.StatusOK {{ "{" }}
+    			t.Fatalf("request %d: expected 200, got %d", i, got)
+    		{{ "}" }}
+    	{{ "}" }}
+    	if authCli.loginCalls != 1 {{ "{" }}
+    		t.Errorf("loginCalls = %d, want 1 — the second identical request should have been deduped by Idempotency, not re-invoked the real Login RPC", authCli.loginCalls)
     	{{ "}" }}
     {{ "}" }}

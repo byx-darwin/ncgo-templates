@@ -1,0 +1,184 @@
+# ncgo exported template — internal/router/service_test.go
+path: internal/router/service_test.go
+update_behavior:
+    type: skip
+body: |-
+    package router
+
+    import (
+        "bytes"
+        "context"
+        "os"
+        "path/filepath"
+        "testing"
+        "time"
+
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+        "github.com/golang-jwt/jwt/v5"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/pkg/ratelimit"
+    )
+
+    // testRouterConfYAML enables auth.token (so JWTAuth enforces on protected
+    // routes), idempotency, and rate_limit.post_auth with a grpc source — the
+    // grpc source lets the test intercept the Lookup RateLimit builds via a
+    // fake ratelimit.GRPCClient, without needing the local rule matcher to
+    // actually rate-limit anything.
+    const testRouterConfYAML = `
+    env: test
+    auth:
+      token:
+        enabled: true
+        header: "Authorization"
+        signing_key: "router-test-secret"
+    idempotency:
+      enabled: true
+    rate_limit:
+      enabled: true
+      source:
+        type: grpc
+      grpc:
+        timeout_milliseconds: 200ms
+      post_auth:
+        enabled: true
+    `
+
+    func TestMain(m *testing.M) {
+        dir, err := os.MkdirTemp("", "ratelimit-hertz-router-test")
+        if err != nil {
+            panic(err)
+        }
+        path := filepath.Join(dir, "conf.yaml")
+        if err := os.WriteFile(path, []byte(testRouterConfYAML), 0o644); err != nil {
+            panic(err)
+        }
+        os.Setenv("CONFIG_PATH", path)
+        code := m.Run()
+        os.RemoveAll(dir)
+        os.Exit(code)
+    }
+
+    // capturingGRPCClient records the last Lookup RateLimit's resolver asked
+    // it to resolve, then reports "no rule found" so the request proceeds
+    // (letting the test inspect what identity was visible at that point,
+    // independent of whether any rule actually fires).
+    type capturingGRPCClient struct {
+        lastLookup ratelimit.Lookup
+        called     bool
+    }
+
+    func (c *capturingGRPCClient) ResolveRateLimitRule(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {
+        c.called = true
+        c.lastLookup = lookup
+        return nil, false, nil
+    }
+
+    func newRouterTestEngine(t *testing.T, capture *capturingGRPCClient) *server.Hertz {
+        t.Helper()
+        cfg := conf.Get()
+        resolver := ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{
+            GRPC: ratelimit.ResolveFunc(capture.ResolveRateLimitRule),
+        })
+        h := server.New()
+        RegisterServiceRoutes(h, resolver)
+        return h
+    }
+
+    func newRouterTestJWT(t *testing.T, uid string) string {
+        t.Helper()
+        token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+            "uid": uid,
+            "exp": time.Now().Add(time.Hour).Unix(),
+        })
+        signed, err := token.SignedString([]byte("router-test-secret"))
+        if err != nil {
+            t.Fatalf("failed to sign test jwt: %v", err)
+        }
+        return signed
+    }
+
+    // TestPostAuthRateLimit_ProtectedRoute_SeesUserUUID is the fix probe:
+    // before this task's fix, RateLimit("post_auth", ...) was registered
+    // engine-level in server.go, before router.RegisterServiceRoutes ever
+    // ran JWTAuth — so Claims (and therefore Lookup.UserUUID) was always
+    // empty at that point despite the "post_auth" name. With the fix,
+    // post_auth is registered on `protected` after JWTAuth, so a valid JWT's
+    // uid must reach the resolver's Lookup.
+    func TestPostAuthRateLimit_ProtectedRoute_SeesUserUUID(t *testing.T) {
+        capture := &capturingGRPCClient{}
+        h := newRouterTestEngine(t, capture)
+        jwtToken := newRouterTestJWT(t, "user-123")
+
+        w := ut.PerformRequest(h.Engine, "GET", "/api/v1/resources",
+            nil, ut.Header{Key: "Authorization", Value: "Bearer " + jwtToken})
+        resp := w.Result()
+
+        if resp.StatusCode() != consts.StatusOK {
+            t.Fatalf("expected 200, got %d", resp.StatusCode())
+        }
+        if !capture.called {
+            t.Fatal("expected RateLimit(\"post_auth\", ...) to call the resolver, but it never did")
+        }
+        if capture.lastLookup.UserUUID != "user-123" {
+            t.Errorf("Lookup.UserUUID = %q, want %q — post_auth rate limiting ran before identity was known", capture.lastLookup.UserUUID, "user-123")
+        }
+    }
+
+    // TestIdempotency_DifferentUsers_DoNotCollide is the Idempotency fix
+    // probe: before this task's fix, Idempotency was registered on `api`,
+    // before JWTAuth ever ran, so idempotencyKey() always fell back to
+    // ip:-scoped keys for every request through this test client (same IP).
+    // Two different JWT-authenticated users reusing the same
+    // X-Idempotency-Key value would collide on that ip: key.
+    //
+    // The two requests below deliberately use DIFFERENT bodies (and
+    // therefore different idempotencyFingerprint() values, since the
+    // fingerprint hashes method+path+query+body — it does not include the
+    // scoping key). This is what makes the test discriminate the bug from
+    // the fix:
+    //   - Pre-fix (ip:-scoped key shared by both users): same key, but
+    //     DIFFERENT fingerprints -> idempotency.go's
+    //     `existing.Fingerprint != fingerprint` branch fires ->
+    //     CodeIdempotencyConflict -> HTTP 409 for user B.
+    //   - Fixed (user_uuid:-scoped key, distinct per user): B's key never
+    //     collides with A's at all -> B's own handler runs -> HTTP 200,
+    //     with no X-Idempotency-Replayed header.
+    // (Using identical bodies would NOT discriminate: pre-fix, same key +
+    // same fingerprint would hit the idempotencyStateCompleted branch and
+    // silently replay user A's cached 200 response for user B, which also
+    // reports status 200 — indistinguishable from the fixed behavior by
+    // status code alone.)
+    func TestIdempotency_DifferentUsers_DoNotCollide(t *testing.T) {
+        h := newRouterTestEngine(t, &capturingGRPCClient{})
+        tokenA := newRouterTestJWT(t, "user-A")
+        tokenB := newRouterTestJWT(t, "user-B")
+        bodyA := []byte(`{"who":"A"}`)
+        bodyB := []byte(`{"who":"B"}`)
+
+        wA := ut.PerformRequest(h.Engine, "POST", "/api/v1/resources",
+            &ut.Body{Body: bytes.NewReader(bodyA), Len: len(bodyA)},
+            ut.Header{Key: "Authorization", Value: "Bearer " + tokenA},
+            ut.Header{Key: "X-Idempotency-Key", Value: "shared-key-123"},
+            ut.Header{Key: "Content-Type", Value: "application/json"},
+        )
+        if got := wA.Result().StatusCode(); got != consts.StatusOK {
+            t.Fatalf("user A: expected 200, got %d", got)
+        }
+
+        wB := ut.PerformRequest(h.Engine, "POST", "/api/v1/resources",
+            &ut.Body{Body: bytes.NewReader(bodyB), Len: len(bodyB)},
+            ut.Header{Key: "Authorization", Value: "Bearer " + tokenB},
+            ut.Header{Key: "X-Idempotency-Key", Value: "shared-key-123"},
+            ut.Header{Key: "Content-Type", Value: "application/json"},
+        )
+        respB := wB.Result()
+        if got := respB.StatusCode(); got != consts.StatusOK {
+            t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes (pre-fix: 409 conflict from a shared ip:-scoped key)", got)
+        }
+        if replayed := respB.Header.Get("X-Idempotency-Replayed"); replayed != "" {
+            t.Errorf("user B: response was replayed from user A's cache (X-Idempotency-Replayed=%q) — keys are colliding across users", replayed)
+        }
+    }

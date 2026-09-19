@@ -89,17 +89,17 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) BanUser(ctx context.Context, req *userv1.BanUserReq) (*userv1.BanUserResp, error) {{ "{" }}
-    	err := h.admin.BanUser(ctx, req.Uid)
+    	err := h.admin.BanUser(ctx, req.Uid, req.OperatorUid)
     	return &userv1.BanUserResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) UnbanUser(ctx context.Context, req *userv1.UnbanUserReq) (*userv1.UnbanUserResp, error) {{ "{" }}
-    	err := h.admin.UnbanUser(ctx, req.Uid)
+    	err := h.admin.UnbanUser(ctx, req.Uid, req.OperatorUid)
     	return &userv1.UnbanUserResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) ForceLogout(ctx context.Context, req *userv1.ForceLogoutReq) (*userv1.ForceLogoutResp, error) {{ "{" }}
-    	err := h.admin.ForceLogout(ctx, req.Uid)
+    	err := h.admin.ForceLogout(ctx, req.Uid, req.OperatorUid)
     	return &userv1.ForceLogoutResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
 
@@ -141,7 +141,7 @@ body: |-
     {{ "}" }}
 
     func (h *UserServiceHandlerImpl) ResetPassword(ctx context.Context, req *userv1.ResetPasswordReq) (*userv1.ResetPasswordResp, error) {{ "{" }}
-    	err := h.admin.ResetPassword(ctx, req.Uid, req.NewPassword)
+    	err := h.admin.ResetPassword(ctx, req.Uid, req.NewPassword, req.OperatorUid)
     	return &userv1.ResetPasswordResp{{ "{" }}{{ "}" }}, err
     {{ "}" }}
 

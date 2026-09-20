@@ -9,19 +9,26 @@ body: |
     import (
     	"context"
     	"testing"
+    	"time"
 
     	"github.com/cloudwego/hertz/pkg/app"
     	"github.com/cloudwego/hertz/pkg/protocol"
     	"github.com/cloudwego/kitex/client/callopt"
 
+    	config "github.com/byx-darwin/go-tools/go-framework/config"
+
+    	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/ratelimit"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     type fakeUserClient struct {{ "{" }}
     	userservice.Client
-    	registerFn func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error)
-    	loginFn    func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error)
+    	registerFn             func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error)
+    	loginFn                func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error)
+    	requestPasswordResetFn func(ctx context.Context, req *userv1.RequestPasswordResetReq) (*userv1.RequestPasswordResetResp, error)
+    	confirmPasswordResetFn func(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error)
     {{ "}" }}
 
     func (f *fakeUserClient) Register(ctx context.Context, req *userv1.RegisterReq, callOptions ...callopt.Option) (*userv1.RegisterResp, error) {{ "{" }}
@@ -29,6 +36,18 @@ body: |
     {{ "}" }}
     func (f *fakeUserClient) Login(ctx context.Context, req *userv1.LoginReq, callOptions ...callopt.Option) (*userv1.LoginResp, error) {{ "{" }}
     	return f.loginFn(ctx, req)
+    {{ "}" }}
+    func (f *fakeUserClient) RequestPasswordReset(ctx context.Context, req *userv1.RequestPasswordResetReq, callOptions ...callopt.Option) (*userv1.RequestPasswordResetResp, error) {{ "{" }}
+    	if f.requestPasswordResetFn == nil {{ "{" }}
+    		return &userv1.RequestPasswordResetResp{{ "{" }}{{ "}" }}, nil
+    	{{ "}" }}
+    	return f.requestPasswordResetFn(ctx, req)
+    {{ "}" }}
+    func (f *fakeUserClient) ConfirmPasswordReset(ctx context.Context, req *userv1.ConfirmPasswordResetReq, callOptions ...callopt.Option) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
+    	if f.confirmPasswordResetFn == nil {{ "{" }}
+    		return &userv1.ConfirmPasswordResetResp{{ "{" }}{{ "}" }}, nil
+    	{{ "}" }}
+    	return f.confirmPasswordResetFn(ctx, req)
     {{ "}" }}
 
     func newTestContext(method, path, body string) *app.RequestContext {{ "{" }}
@@ -39,6 +58,45 @@ body: |
     	return c
     {{ "}" }}
 
+    // newTestContextFromIP behaves like newTestContext but also sets
+    // X-Forwarded-For, which Hertz's default ClientIP() reads without any
+    // extra ClientIPOptions configuration — this is how these tests control
+    // c.ClientIP() for the identifier+IP dual-key checks below.
+    func newTestContextFromIP(method, path, body, ip string) *app.RequestContext {{ "{" }}
+    	c := app.NewContext(0)
+    	req := protocol.NewRequest(method, path, nil)
+    	req.SetBody([]byte(body))
+    	req.Header.Set("X-Forwarded-For", ip)
+    	req.CopyTo(&c.Request)
+    	return c
+    {{ "}" }}
+
+    // identifierRateLimitTestDeps builds a resolver/store/cfg triple wired for
+    // a single phase ("password_reset_request" or "password_reset_confirm")
+    // with an "ip_identifier" rule allowing maxRequests before throttling.
+    func identifierRateLimitTestDeps(phase string, maxRequests int) (*ratelimit.Resolver, ratelimit.Store, conf.RateLimitConfig) {{ "{" }}
+    	phaseCfg := conf.RateLimitPhaseConfig{{ "{" }}
+    		Enabled: true,
+    		DefaultRule: conf.RateLimitRuleConfig{{ "{" }}
+    			Enabled:       true,
+    			KeyBy:         []string{{ "{" }}"ip_identifier"{{ "}" }},
+    			Strategy:      "fixed_window",
+    			WindowSeconds: config.Duration{{ "{" }}Duration: time.Hour{{ "}" }},
+    			MaxRequests:   maxRequests,
+    		{{ "}" }},
+    	{{ "}" }}
+    	rlCfg := conf.RateLimitConfig{{ "{" }}KeyPrefix: "test"{{ "}" }}
+    	switch phase {{ "{" }}
+    	case "password_reset_request":
+    		rlCfg.PasswordResetRequestIdentifier = phaseCfg
+    	case "password_reset_confirm":
+    		rlCfg.PasswordResetConfirmIdentifier = phaseCfg
+    	{{ "}" }}
+    	resolver := ratelimit.NewResolver(rlCfg, ratelimit.Options{{ "{" }}{{ "}" }})
+    	store := ratelimit.NewStore(conf.RateLimitConfig{{ "{" }}Backend: "memory", KeyPrefix: "test"{{ "}" }}, nil)
+    	return resolver, store, rlCfg
+    {{ "}" }}
+
     func TestAuthHandler_Register_Success(t *testing.T) {{ "{" }}
     	cli := &fakeUserClient{{ "{" }}registerFn: func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {{ "{" }}
     		if req.Username != "alice" || req.Password != "hunter22" {{ "{" }}
@@ -46,7 +104,7 @@ body: |
     		{{ "}" }}
     		return &userv1.RegisterResp{{ "{" }}Uid: "uid-1"{{ "}" }}, nil
     	{{ "}" }}{{ "}" }}
-    	h := NewAuthHandler(cli)
+    	h := NewAuthHandler(cli, nil, nil, conf.RateLimitConfig{{ "{" }}{{ "}" }})
     	c := newTestContext("POST", "/auth/register", `{{ "{" }}"username":"alice","password":"hunter22"{{ "}" }}`)
     	h.Register(context.Background(), c)
     	if c.Response.StatusCode() != 200 {{ "{" }}
@@ -58,7 +116,7 @@ body: |
     	cli := &fakeUserClient{{ "{" }}loginFn: func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {{ "{" }}
     		return &userv1.LoginResp{{ "{" }}Uid: "uid-1", Token: "jwt-token"{{ "}" }}, nil
     	{{ "}" }}{{ "}" }}
-    	h := NewAuthHandler(cli)
+    	h := NewAuthHandler(cli, nil, nil, conf.RateLimitConfig{{ "{" }}{{ "}" }})
     	c := newTestContext("POST", "/auth/login", `{{ "{" }}"username":"alice","password":"hunter22"{{ "}" }}`)
     	h.Login(context.Background(), c)
     	if c.Response.StatusCode() != 200 {{ "{" }}
@@ -67,10 +125,76 @@ body: |
     {{ "}" }}
 
     func TestAuthHandler_Register_InvalidJSON(t *testing.T) {{ "{" }}
-    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }})
+    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, nil, nil, conf.RateLimitConfig{{ "{" }}{{ "}" }})
     	c := newTestContext("POST", "/auth/register", `not-json`)
     	h.Register(context.Background(), c)
     	if c.Response.StatusCode() == 200 {{ "{" }}
     		t.Fatal("expected non-200 for invalid JSON body")
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs is the Issue
+    // #78 regression: rotating the client IP must NOT bypass per-account
+    // throttling once the identifier dimension is in play.
+    func TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs(t *testing.T) {{ "{" }}
+    	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_request", 1)
+    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, resolver, store, cfg)
+
+    	body := `{{ "{" }}"identifier":"alice@example.com","channel":"email"{{ "}" }}`
+
+    	c1 := newTestContextFromIP("POST", "/auth/password-reset/request", body, "10.0.0.1")
+    	h.RequestPasswordReset(context.Background(), c1)
+    	if c1.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("first request: expected 200, got %d: %s", c1.Response.StatusCode(), c1.Response.Body())
+    	{{ "}" }}
+
+    	// Same identifier, DIFFERENT IP: must still be throttled.
+    	c2 := newTestContextFromIP("POST", "/auth/password-reset/request", body, "10.0.0.2")
+    	h.RequestPasswordReset(context.Background(), c2)
+    	if c2.Response.StatusCode() == 200 {{ "{" }}
+    		t.Fatalf("second request from a different IP but the same identifier: expected throttling, got 200: %s", c2.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestRequestPasswordResetDoesNotCrossThrottleDifferentIdentifiers ensures
+    // the new dimension doesn't over-throttle: two different accounts hitting
+    // the same IP must not share a counter.
+    func TestRequestPasswordResetDoesNotCrossThrottleDifferentIdentifiers(t *testing.T) {{ "{" }}
+    	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_request", 1)
+    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, resolver, store, cfg)
+
+    	c1 := newTestContextFromIP("POST", "/auth/password-reset/request", `{{ "{" }}"identifier":"alice@example.com","channel":"email"{{ "}" }}`, "10.0.0.1")
+    	h.RequestPasswordReset(context.Background(), c1)
+    	if c1.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("alice: expected 200, got %d: %s", c1.Response.StatusCode(), c1.Response.Body())
+    	{{ "}" }}
+
+    	// Same IP, DIFFERENT identifier: must NOT be throttled by alice's count.
+    	c2 := newTestContextFromIP("POST", "/auth/password-reset/request", `{{ "{" }}"identifier":"bob@example.com","channel":"email"{{ "}" }}`, "10.0.0.1")
+    	h.RequestPasswordReset(context.Background(), c2)
+    	if c2.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("bob: expected 200 (independent identifier), got %d: %s", c2.Response.StatusCode(), c2.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestConfirmPasswordResetThrottlesSameIdentifierAcrossIPs mirrors the
+    // request-phase regression above, using confirmPasswordResetReq.Phone as
+    // the identifier — that struct has no email field.
+    func TestConfirmPasswordResetThrottlesSameIdentifierAcrossIPs(t *testing.T) {{ "{" }}
+    	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_confirm", 1)
+    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, resolver, store, cfg)
+
+    	body := `{{ "{" }}"credential":"123456","new_password":"hunter22","phone":"+15550001111"{{ "}" }}`
+
+    	c1 := newTestContextFromIP("POST", "/auth/password-reset/confirm", body, "10.0.0.1")
+    	h.ConfirmPasswordReset(context.Background(), c1)
+    	if c1.Response.StatusCode() != 200 {{ "{" }}
+    		t.Fatalf("first request: expected 200, got %d: %s", c1.Response.StatusCode(), c1.Response.Body())
+    	{{ "}" }}
+
+    	c2 := newTestContextFromIP("POST", "/auth/password-reset/confirm", body, "10.0.0.2")
+    	h.ConfirmPasswordReset(context.Background(), c2)
+    	if c2.Response.StatusCode() == 200 {{ "{" }}
+    		t.Fatalf("second request from a different IP but the same phone: expected throttling, got 200: %s", c2.Response.Body())
     	{{ "}" }}
     {{ "}" }}

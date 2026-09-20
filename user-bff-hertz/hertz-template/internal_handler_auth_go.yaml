@@ -13,18 +13,27 @@ body: |
 
     	"github.com/cloudwego/hertz/pkg/app"
 
+    	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/pkg/middleware"
+    	"{{.Module}}/internal/pkg/ratelimit"
     	"{{.Module}}/internal/pkg/response"
     	userv1 "{{.Module}}/kitex_gen/api/user/v1"
     	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     type AuthHandler struct {{ "{" }}
-    	userCli userservice.Client
+    	userCli  userservice.Client
+    	resolver *ratelimit.Resolver
+    	store    ratelimit.Store
+    	cfg      conf.RateLimitConfig
     {{ "}" }}
 
-    func NewAuthHandler(userCli userservice.Client) *AuthHandler {{ "{" }}
-    	return &AuthHandler{{ "{" }}userCli: userCli{{ "}" }}
+    // NewAuthHandler builds the auth handler. resolver/store/cfg back the
+    // identifier-scoped rate-limit check that RequestPasswordReset and
+    // ConfirmPasswordReset run after parsing their request bodies — see
+    // docs/superpowers/specs/2026-09-20-ratelimit-identifier-dimension-design.md.
+    func NewAuthHandler(userCli userservice.Client, resolver *ratelimit.Resolver, store ratelimit.Store, cfg conf.RateLimitConfig) *AuthHandler {{ "{" }}
+    	return &AuthHandler{{ "{" }}userCli: userCli, resolver: resolver, store: store, cfg: cfg{{ "}" }}
     {{ "}" }}
 
     type registerReq struct {{ "{" }}
@@ -104,6 +113,9 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
+    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_request", h.cfg.PasswordResetRequestIdentifier, strings.TrimSpace(req.Identifier)) {{ "{" }}
+    		return
+    	{{ "}" }}
     	if _, err := h.userCli.RequestPasswordReset(ctx, &userv1.RequestPasswordResetReq{{ "{" }}Identifier: req.Identifier, Channel: req.Channel{{ "}" }}); err != nil {{ "{" }}
     		response.Err(c, err)
     		return
@@ -125,9 +137,44 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
+    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_confirm", h.cfg.PasswordResetConfirmIdentifier, strings.TrimSpace(req.Phone)) {{ "{" }}
+    		return
+    	{{ "}" }}
     	if _, err := h.userCli.ConfirmPasswordReset(ctx, &userv1.ConfirmPasswordResetReq{{ "{" }}Credential: req.Credential, NewPassword: req.NewPassword, Phone: req.Phone{{ "}" }}); err != nil {{ "{" }}
     		response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
+    {{ "}" }}
+
+    // checkIdentifierRateLimit runs the identifier-scoped fine-grained
+    // rate-limit check for phase, using identifier (already trimmed by the
+    // caller) alongside the caller's IP. It writes the rate-limited error
+    // response and returns false when the request must be rejected;
+    // otherwise it returns true and writes nothing. A disabled phaseCfg or an
+    // empty resolver/store (e.g. not wired up by the caller) is treated as
+    // "allow" — this mirrors the middleware's own FailOpen-style behavior
+    // for the coarse IP check, applied here to the fine-grained check.
+    func (h *AuthHandler) checkIdentifierRateLimit(ctx context.Context, c *app.RequestContext, phase string, phaseCfg conf.RateLimitPhaseConfig, identifier string) bool {{ "{" }}
+    	if !phaseCfg.Enabled || h.resolver == nil || h.store == nil || identifier == "" {{ "{" }}
+    		return true
+    	{{ "}" }}
+    	lookup := ratelimit.Lookup{{ "{" }}
+    		Phase:      phase,
+    		ClientIP:   c.ClientIP(),
+    		Identifier: identifier,
+    	{{ "}" }}
+    	allowed, err := ratelimit.Check(ctx, h.resolver, h.store, h.cfg, lookup)
+    	if err != nil {{ "{" }}
+    		if h.cfg.FailOpen {{ "{" }}
+    			return true
+    		{{ "}" }}
+    		response.ErrorCode(c, response.CodeCacheUnavailable)
+    		return false
+    	{{ "}" }}
+    	if !allowed {{ "{" }}
+    		response.ErrorCode(c, response.CodeRateLimited)
+    		return false
+    	{{ "}" }}
+    	return true
     {{ "}" }}

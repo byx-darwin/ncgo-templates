@@ -21,7 +21,8 @@ body: |
     func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, userCli userservice.Client, codeStore oauthcode.Store, resolver *ratelimit.Resolver) {{ "{" }}
     	cfg := conf.Get()
 
-    	authHandler := handler.NewAuthHandler(userCli)
+    	rateLimitStore := ratelimit.NewStore(cfg.RateLimit, nil)
+    	authHandler := handler.NewAuthHandler(userCli, resolver, rateLimitStore, cfg.RateLimit)
     	oauthHandler := handler.NewOAuthHandler(userCli, codeStore, cfg.OAuthRedirect, cfg.OAuthCode.TTLSeconds.Duration)
 
     	h.Use(middleware.CORS(cfg.CORS))

@@ -16,6 +16,7 @@ body: |-
     	"github.com/cloudwego/hertz/pkg/app"
     	"github.com/cloudwego/hertz/pkg/protocol"
     	"github.com/cloudwego/hertz/pkg/protocol/consts"
+    	"github.com/redis/go-redis/v9"
 
     	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/pkg/ratelimit"
@@ -255,6 +256,48 @@ body: |-
     	}
     	if mwCfg.PoolSize != 20 {
     		t.Fatalf("unexpected redis pool options: %+v", mwCfg)
+    	}
+    }
+
+    func TestRateLimitWithStoreSkipsRedisDialForMemoryBackend(t *testing.T) {
+    	original := sharedRedisClient
+    	defer func() { sharedRedisClient = original }()
+    	called := false
+    	sharedRedisClient = func(cfg conf.RedisConfig) redis.UniversalClient {
+    		called = true
+    		return nil
+    	}
+
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "memory", KeyPrefix: "test", PreAuth: phase, Redis: conf.RedisConfig{Addrs: []string{"127.0.0.1:6379"}}}
+    	RateLimit("pre_auth", cfg, phase, nil)
+
+    	if called {
+    		t.Fatalf("sharedRedisClient was called for a memory-backend config; want no Redis dial")
+    	}
+    }
+
+    func TestRateLimitWithStoreDialsRedisForRedisBackend(t *testing.T) {
+    	original := sharedRedisClient
+    	defer func() { sharedRedisClient = original }()
+    	calls := 0
+    	var gotCfg conf.RedisConfig
+    	sharedRedisClient = func(cfg conf.RedisConfig) redis.UniversalClient {
+    		calls++
+    		gotCfg = cfg
+    		return nil
+    	}
+
+    	phase := conf.RateLimitPhaseConfig{Enabled: true, DefaultRule: conf.RateLimitRuleConfig{Enabled: true, KeyBy: []string{"ip"}, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 5}}
+    	redisCfg := conf.RedisConfig{Addrs: []string{"127.0.0.1:6379"}, DB: 3}
+    	cfg := conf.RateLimitConfig{Enabled: true, Backend: "redis", KeyPrefix: "test", PreAuth: phase, Redis: redisCfg}
+    	RateLimit("pre_auth", cfg, phase, nil)
+
+    	if calls != 1 {
+    		t.Fatalf("sharedRedisClient calls = %d, want 1", calls)
+    	}
+    	if gotCfg.DB != 3 || len(gotCfg.Addrs) != 1 || gotCfg.Addrs[0] != "127.0.0.1:6379" {
+    		t.Fatalf("sharedRedisClient called with unexpected config: %+v", gotCfg)
     	}
     }
 

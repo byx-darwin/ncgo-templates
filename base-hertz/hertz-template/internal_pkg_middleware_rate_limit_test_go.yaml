@@ -23,8 +23,8 @@ body: |
     	"github.com/cloudwego/hertz/pkg/protocol/consts"
     	"github.com/redis/go-redis/v9"
 
-    	"github.com/acme/scratch/internal/base/conf"
-    	"github.com/acme/scratch/internal/pkg/ratelimit"
+    	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/ratelimit"
     )
 
     func TestRateLimitRejectsAfterBurst(t *testing.T) {{ "{" }}

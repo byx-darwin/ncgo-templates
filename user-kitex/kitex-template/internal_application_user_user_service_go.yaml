@@ -555,8 +555,18 @@ body: |-
     // cannot distinguish them (see design doc's anti-enumeration section).
     // phone is required and checked only when the matched token's Channel
     // is "sms"; it is ignored entirely for "email" tokens (Issue #75).
+    //
+    // The credential is consumed atomically up front via ConsumeValid,
+    // closing a TOCTOU race where two concurrent requests carrying the same
+    // still-valid credential could both pass a plain read-then-check before
+    // either marked the token used (Issue #77). One consequence: if the SMS
+    // phone check below fails, or setPassword itself errors, the credential
+    // has already been burned and cannot be retried — the caller must
+    // request a new reset. This trade-off was chosen deliberately so that,
+    // under concurrency, at most one caller can ever complete a reset with a
+    // given credential.
     func (s *Service) ConfirmPasswordReset(ctx context.Context, credential, phone, newPassword string) error {{ "{" }}
-    	tok, err := s.resetRepo.GetValid(ctx, hashCredential(credential))
+    	tok, err := s.resetRepo.ConsumeValid(ctx, hashCredential(credential))
     	if err != nil {{ "{" }}
     		if !errors.Is(err, passwordreset.ErrNotFound) {{ "{" }}
     			log.Printf("user: ConfirmPasswordReset lookup failed: %v", err)
@@ -587,14 +597,5 @@ body: |-
     			return errors.New("user: reset credential is invalid or expired")
     		{{ "}" }}
     	{{ "}" }}
-    	if err := s.setPassword(ctx, tok.UserID.String(), nil, newPassword, "user.password_reset_confirmed", "", "", ""); err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	if err := s.resetRepo.MarkUsed(ctx, tok.ID); err != nil {{ "{" }}
-    		// Best-effort: the password was already changed above, so this
-    		// failure is non-fatal, but log it so a stuck "still valid" token
-    		// row doesn't go unnoticed.
-    		log.Printf("user: ConfirmPasswordReset MarkUsed failed: %v", err)
-    	{{ "}" }}
-    	return nil
+    	return s.setPassword(ctx, tok.UserID.String(), nil, newPassword, "user.password_reset_confirmed", "", "", "")
     {{ "}" }}

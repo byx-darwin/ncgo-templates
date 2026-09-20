@@ -130,6 +130,17 @@ body: |-
       PasswordChange RateLimitPhaseConfig  `yaml:"password_change"`
       PasswordResetRequest RateLimitPhaseConfig `yaml:"password_reset_request"`
       PasswordResetConfirm RateLimitPhaseConfig `yaml:"password_reset_confirm"`
+      // PasswordResetRequestIdentifier/PasswordResetConfirmIdentifier back a
+      // second, independent rate-limit check run inside the handler (after
+      // body parsing) keyed by account identifier (email/phone) alone —
+      // deliberately NOT dual-keyed with IP: rotating the client IP must
+      // not create a fresh counter bucket, or it would defeat the exact
+      // per-account throttle this field exists to close. They are separate
+      // from PasswordResetRequest/PasswordResetConfirm above, which
+      // continue to govern the middleware's existing IP-only coarse
+      // limiting, unchanged — see docs/superpowers/specs/2026-09-20-ratelimit-identifier-dimension-design.md.
+      PasswordResetRequestIdentifier RateLimitPhaseConfig `yaml:"password_reset_request_identifier"`
+      PasswordResetConfirmIdentifier RateLimitPhaseConfig `yaml:"password_reset_confirm_identifier"`
       Memory       MemoryCacheConfig       `yaml:"memory"`
       Redis        RedisConfig             `yaml:"redis"`
   }
@@ -442,6 +453,28 @@ body: |-
                   DefaultRule: RateLimitRuleConfig{
                       Enabled:          true,
                       KeyBy:            []string{"ip"},
+                      Strategy:         "fixed_window",
+                      WindowSeconds:    config.Duration{Duration: 3600 * time.Second},
+                      MaxRequests:      10,
+                      ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
+                  },
+              },
+              PasswordResetRequestIdentifier: RateLimitPhaseConfig{
+                  Enabled: true,
+                  DefaultRule: RateLimitRuleConfig{
+                      Enabled:          true,
+                      KeyBy:            []string{"identifier"},
+                      Strategy:         "fixed_window",
+                      WindowSeconds:    config.Duration{Duration: 3600 * time.Second},
+                      MaxRequests:      5,
+                      ClientTTLSeconds: config.Duration{Duration: 300 * time.Second},
+                  },
+              },
+              PasswordResetConfirmIdentifier: RateLimitPhaseConfig{
+                  Enabled: true,
+                  DefaultRule: RateLimitRuleConfig{
+                      Enabled:          true,
+                      KeyBy:            []string{"identifier"},
                       Strategy:         "fixed_window",
                       WindowSeconds:    config.Duration{Duration: 3600 * time.Second},
                       MaxRequests:      10,

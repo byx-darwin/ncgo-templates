@@ -88,6 +88,34 @@ body: |-
     	}
     }
 
+    func TestBuildKeyByIdentifier(t *testing.T) {
+    	lookup := Lookup{Identifier: "alice@example.com"}
+    	if got, want := BuildKey(lookup, []string{"identifier"}, "test"), "test:identifier:alice@example.com"; got != want {
+    		t.Fatalf("key = %q, want %q", got, want)
+    	}
+    }
+
+    func TestBuildKeyByIPIdentifier(t *testing.T) {
+    	lookup := Lookup{ClientIP: "10.0.0.1", Identifier: "alice@example.com"}
+    	if got, want := BuildKey(lookup, []string{"ip_identifier"}, "test"), "test:ip_identifier:10.0.0.1:alice@example.com"; got != want {
+    		t.Fatalf("key = %q, want %q", got, want)
+    	}
+    }
+
+    func TestBuildKeyIPIdentifierFallsBackWhenIdentifierEmpty(t *testing.T) {
+    	lookup := Lookup{ClientIP: "10.0.0.1"}
+    	if got, want := BuildKey(lookup, []string{"ip_identifier", "ip"}, "test"), "test:ip:10.0.0.1"; got != want {
+    		t.Fatalf("key = %q, want %q", got, want)
+    	}
+    }
+
+    func TestBuildKeyIdentifierFallsBackWhenEmpty(t *testing.T) {
+    	lookup := Lookup{ClientIP: "10.0.0.1"}
+    	if got, want := BuildKey(lookup, []string{"identifier", "ip"}, "test"), "test:ip:10.0.0.1"; got != want {
+    		t.Fatalf("key = %q, want %q", got, want)
+    	}
+    }
+
     func TestMemoryStoreEvictsLRU(t *testing.T) {
     	store := NewStore(conf.RateLimitConfig{Backend: "memory", Memory: conf.MemoryCacheConfig{MaxEntries: 1}}, nil)
     	rule := conf.RateLimitRuleConfig{Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{Duration: 60 * time.Second}, MaxRequests: 1, ClientTTLSeconds: config.Duration{Duration: 60 * time.Second}}

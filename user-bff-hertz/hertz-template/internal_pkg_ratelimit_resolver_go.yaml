@@ -18,13 +18,14 @@ body: |
     )
 
     type Lookup struct {{ "{" }}
-    	Service  string
-    	Phase    string
-    	AppKey   string
-    	Method   string
-    	Path     string
-    	UserUUID string
-    	ClientIP string
+    	Service    string
+    	Phase      string
+    	AppKey     string
+    	Method     string
+    	Path       string
+    	UserUUID   string
+    	ClientIP   string
+    	Identifier string
     {{ "}" }}
 
     type ResolvedRule struct {{ "{" }}
@@ -129,6 +130,10 @@ body: |
     		return r.cfg.PasswordResetRequest
     	case "password_reset_confirm":
     		return r.cfg.PasswordResetConfirm
+    	case "password_reset_request_identifier":
+    		return r.cfg.PasswordResetRequestIdentifier
+    	case "password_reset_confirm_identifier":
+    		return r.cfg.PasswordResetConfirmIdentifier
     	default:
     		return r.cfg.PreAuth
     	{{ "}" }}
@@ -399,6 +404,7 @@ body: |
     	lookup.Path = strings.TrimSpace(lookup.Path)
     	lookup.UserUUID = strings.TrimSpace(lookup.UserUUID)
     	lookup.ClientIP = strings.TrimSpace(lookup.ClientIP)
+    	lookup.Identifier = strings.TrimSpace(lookup.Identifier)
     	return lookup
     {{ "}" }}
 

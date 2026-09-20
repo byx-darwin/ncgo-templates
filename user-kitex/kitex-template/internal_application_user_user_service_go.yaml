@@ -561,10 +561,17 @@ body: |-
     		if !errors.Is(err, passwordreset.ErrNotFound) {{ "{" }}
     			log.Printf("user: ConfirmPasswordReset lookup failed: %v", err)
     		{{ "}" }}
+    		// The token lookup itself failed, so the caller's identity is not
+    		// known here — record the failure without an actor/target rather
+    		// than guessing, to avoid attributing it to the wrong account.
+    		// Action is identical across every ConfirmPasswordReset failure
+    		// branch and carries no detail, preserving anti-enumeration.
+    		_ = s.audit.Write(ctx, audit.Entry{{ "{" }}Action: "user.password_reset_confirm.failure"{{ "}" }})
     		return errors.New("user: reset credential is invalid or expired")
     	{{ "}" }}
     	if tok.Channel == "sms" {{ "{" }}
     		if phone == "" {{ "{" }}
+    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: tok.UserID.String(), Target: tok.UserID.String(), Action: "user.password_reset_confirm.failure"{{ "}" }})
     			return errors.New("user: reset credential is invalid or expired")
     		{{ "}" }}
     		u, err := s.repo.GetByID(ctx, tok.UserID)
@@ -572,9 +579,11 @@ body: |-
     			if !errors.Is(err, user.ErrNotFound) {{ "{" }}
     				log.Printf("user: ConfirmPasswordReset phone lookup failed: %v", err)
     			{{ "}" }}
+    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: tok.UserID.String(), Target: tok.UserID.String(), Action: "user.password_reset_confirm.failure"{{ "}" }})
     			return errors.New("user: reset credential is invalid or expired")
     		{{ "}" }}
     		if u.Phone != phone {{ "{" }}
+    			_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: tok.UserID.String(), Target: tok.UserID.String(), Action: "user.password_reset_confirm.failure"{{ "}" }})
     			return errors.New("user: reset credential is invalid or expired")
     		{{ "}" }}
     	{{ "}" }}

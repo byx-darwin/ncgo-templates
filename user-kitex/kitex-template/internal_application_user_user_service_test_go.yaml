@@ -463,14 +463,27 @@ body: |-
     {{ "}" }}
 
     func TestConfirmPasswordReset_UnknownCredential_ReturnsGenericError(t *testing.T) {{ "{" }}
-    	svc, _, _, _, _ := newTestServiceWithReset()
+    	svc, _, _, _, aw := newTestServiceWithReset()
     	if err := svc.ConfirmPasswordReset(context.Background(), "no-such-token", "", "brand-new-password-1"); err == nil {{ "{" }}
     		t.Fatal("expected an error for unknown credential")
+    	{{ "}" }}
+    	if len(aw.Entries()) != 1 {{ "{" }}
+    		t.Fatalf("expected exactly 1 audit entry, got %d", len(aw.Entries()))
+    	{{ "}" }}
+    	entry := aw.Entries()[0]
+    	if entry.Action != "user.password_reset_confirm.failure" {{ "{" }}
+    		t.Fatalf("expected action %q, got %q", "user.password_reset_confirm.failure", entry.Action)
+    	{{ "}" }}
+    	if entry.ActorUID != "" || entry.Target != "" {{ "{" }}
+    		t.Fatalf("expected no actor/target for an unknown credential (identity is not known), got ActorUID=%q Target=%q", entry.ActorUID, entry.Target)
+    	{{ "}" }}
+    	if entry.DetailJSON != "" {{ "{" }}
+    		t.Fatalf("expected no detail that could leak the failure reason, got %q", entry.DetailJSON)
     	{{ "}" }}
     {{ "}" }}
 
     func TestConfirmPasswordReset_ReusedCredential_Rejected(t *testing.T) {{ "{" }}
-    	svc, _, es, _, _ := newTestServiceWithReset()
+    	svc, _, es, _, aw := newTestServiceWithReset()
     	ctx := context.Background()
     	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "dave", Password: "correct horse battery staple"{{ "}" }})
     	uid, _ := parseUID(regOut.Uid)
@@ -484,6 +497,18 @@ body: |-
     	{{ "}" }}
     	if err := svc.ConfirmPasswordReset(ctx, token, "", "another-password-2"); err == nil {{ "{" }}
     		t.Fatal("expected reused credential to be rejected")
+    	{{ "}" }}
+    	found := false
+    	for _, e := range aw.Entries() {{ "{" }}
+    		if e.Action == "user.password_reset_confirm.failure" {{ "{" }}
+    			found = true
+    			if e.ActorUID != "" || e.Target != "" {{ "{" }}
+    				t.Fatalf("expected no actor/target for a reused/unknown credential, got ActorUID=%q Target=%q", e.ActorUID, e.Target)
+    			{{ "}" }}
+    		{{ "}" }}
+    	{{ "}" }}
+    	if !found {{ "{" }}
+    		t.Fatal("expected a user.password_reset_confirm.failure audit entry on reuse")
     	{{ "}" }}
     {{ "}" }}
 
@@ -516,7 +541,7 @@ body: |-
     {{ "}" }}
 
     func TestConfirmPasswordReset_SMSChannel_MissingPhone_ReturnsGenericError(t *testing.T) {{ "{" }}
-    	svc, _, _, ss, _ := newTestServiceWithReset()
+    	svc, _, _, ss, aw := newTestServiceWithReset()
     	ctx := context.Background()
     	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "frank", Password: "correct horse battery staple"{{ "}" }})
     	uid, _ := parseUID(regOut.Uid)
@@ -528,10 +553,27 @@ body: |-
     	if err := svc.ConfirmPasswordReset(ctx, code, "", "brand-new-password-1"); err == nil {{ "{" }}
     		t.Fatal("expected an error when phone is missing for an sms-channel token")
     	{{ "}" }}
+    	// RequestPasswordReset above already wrote a user.password_reset_requested
+    	// entry, so filter by action instead of asserting the total count.
+    	var entry *audit.Entry
+    	for i := range aw.Entries() {{ "{" }}
+    		if aw.Entries()[i].Action == "user.password_reset_confirm.failure" {{ "{" }}
+    			entry = &aw.Entries()[i]
+    		{{ "}" }}
+    	{{ "}" }}
+    	if entry == nil {{ "{" }}
+    		t.Fatalf("expected a user.password_reset_confirm.failure audit entry, got %+v", aw.Entries())
+    	{{ "}" }}
+    	if entry.ActorUID != regOut.Uid {{ "{" }}
+    		t.Fatalf("expected ActorUID %q (token's owning user is known), got %q", regOut.Uid, entry.ActorUID)
+    	{{ "}" }}
+    	if entry.DetailJSON != "" {{ "{" }}
+    		t.Fatalf("expected no detail that could leak the failure reason, got %q", entry.DetailJSON)
+    	{{ "}" }}
     {{ "}" }}
 
     func TestConfirmPasswordReset_SMSChannel_WrongPhone_ReturnsGenericError(t *testing.T) {{ "{" }}
-    	svc, _, _, ss, _ := newTestServiceWithReset()
+    	svc, _, _, ss, aw := newTestServiceWithReset()
     	ctx := context.Background()
     	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "grace", Password: "correct horse battery staple"{{ "}" }})
     	uid, _ := parseUID(regOut.Uid)
@@ -542,6 +584,23 @@ body: |-
 
     	if err := svc.ConfirmPasswordReset(ctx, code, "+15550009999", "brand-new-password-1"); err == nil {{ "{" }}
     		t.Fatal("expected an error when phone does not match the token's owning account")
+    	{{ "}" }}
+    	// RequestPasswordReset above already wrote a user.password_reset_requested
+    	// entry, so filter by action instead of asserting the total count.
+    	var entry *audit.Entry
+    	for i := range aw.Entries() {{ "{" }}
+    		if aw.Entries()[i].Action == "user.password_reset_confirm.failure" {{ "{" }}
+    			entry = &aw.Entries()[i]
+    		{{ "}" }}
+    	{{ "}" }}
+    	if entry == nil {{ "{" }}
+    		t.Fatalf("expected a user.password_reset_confirm.failure audit entry, got %+v", aw.Entries())
+    	{{ "}" }}
+    	if entry.ActorUID != regOut.Uid {{ "{" }}
+    		t.Fatalf("expected ActorUID %q (token's owning user is known), got %q", regOut.Uid, entry.ActorUID)
+    	{{ "}" }}
+    	if entry.DetailJSON != "" {{ "{" }}
+    		t.Fatalf("expected no detail that could leak the failure reason, got %q", entry.DetailJSON)
     	{{ "}" }}
     {{ "}" }}
 

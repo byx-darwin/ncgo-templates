@@ -8,6 +8,7 @@ body: |-
     import (
     	"context"
     	"net/url"
+    	"sync"
     	"testing"
     	"time"
 
@@ -509,6 +510,45 @@ body: |-
     	{{ "}" }}
     	if !found {{ "{" }}
     		t.Fatal("expected a user.password_reset_confirm.failure audit entry on reuse")
+    	{{ "}" }}
+    {{ "}" }}
+
+    // TestConfirmPasswordReset_ConcurrentCalls_OnlyOneSucceeds is the
+    // regression test for Issue #77 (TOCTOU race on password-reset token
+    // redemption): two goroutines racing to redeem the same still-valid
+    // credential must not both succeed. Run with `go test -race` to also
+    // catch any data-race regression in ConsumeValid's locking.
+    func TestConfirmPasswordReset_ConcurrentCalls_OnlyOneSucceeds(t *testing.T) {{ "{" }}
+    	svc, _, es, _, _ := newTestServiceWithReset()
+    	ctx := context.Background()
+    	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "frank", Password: "correct horse battery staple"{{ "}" }})
+    	uid, _ := parseUID(regOut.Uid)
+    	u, _ := svc.repo.GetByID(ctx, uid)
+    	u.Email = "frank@example.com"
+    	_ = svc.RequestPasswordReset(ctx, "frank@example.com", "email")
+    	token := extractTokenFromLink(t, es.Sent()[0].Link)
+
+    	const attempts = 2
+    	errs := make([]error, attempts)
+    	var wg sync.WaitGroup
+    	wg.Add(attempts)
+    	for i := 0; i < attempts; i++ {{ "{" }}
+    		i := i
+    		go func() {{ "{" }}
+    			defer wg.Done()
+    			errs[i] = svc.ConfirmPasswordReset(ctx, token, "", "concurrent-new-password")
+    		{{ "}" }}()
+    	{{ "}" }}
+    	wg.Wait()
+
+    	successes := 0
+    	for _, err := range errs {{ "{" }}
+    		if err == nil {{ "{" }}
+    			successes++
+    		{{ "}" }}
+    	{{ "}" }}
+    	if successes != 1 {{ "{" }}
+    		t.Fatalf("expected exactly 1 successful redemption out of %d concurrent calls, got %d (errs=%v)", attempts, successes, errs)
     	{{ "}" }}
     {{ "}" }}
 

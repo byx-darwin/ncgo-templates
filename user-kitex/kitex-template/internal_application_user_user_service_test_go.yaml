@@ -519,7 +519,7 @@ body: |-
     // credential must not both succeed. Run with `go test -race` to also
     // catch any data-race regression in ConsumeValid's locking.
     func TestConfirmPasswordReset_ConcurrentCalls_OnlyOneSucceeds(t *testing.T) {{ "{" }}
-    	svc, _, es, _, _ := newTestServiceWithReset()
+    	svc, _, es, _, aw := newTestServiceWithReset()
     	ctx := context.Background()
     	regOut, _ := svc.Register(ctx, RegisterInput{{ "{" }}Username: "frank", Password: "correct horse battery staple"{{ "}" }})
     	uid, _ := parseUID(regOut.Uid)
@@ -528,6 +528,7 @@ body: |-
     	_ = svc.RequestPasswordReset(ctx, "frank@example.com", "email")
     	token := extractTokenFromLink(t, es.Sent()[0].Link)
 
+    	start := make(chan struct{{ "{" }}{{ "}" }})
     	const attempts = 2
     	errs := make([]error, attempts)
     	var wg sync.WaitGroup
@@ -536,9 +537,11 @@ body: |-
     		i := i
     		go func() {{ "{" }}
     			defer wg.Done()
+    			<-start
     			errs[i] = svc.ConfirmPasswordReset(ctx, token, "", "concurrent-new-password")
     		{{ "}" }}()
     	{{ "}" }}
+    	close(start)
     	wg.Wait()
 
     	successes := 0
@@ -549,6 +552,20 @@ body: |-
     	{{ "}" }}
     	if successes != 1 {{ "{" }}
     		t.Fatalf("expected exactly 1 successful redemption out of %d concurrent calls, got %d (errs=%v)", attempts, successes, errs)
+    	{{ "}" }}
+    	for _, err := range errs {{ "{" }}
+    		if err != nil && err.Error() != "user: reset credential is invalid or expired" {{ "{" }}
+    			t.Fatalf("expected the losing call's error to be the generic anti-enumeration message, got %q", err.Error())
+    		{{ "}" }}
+    	{{ "}" }}
+    	confirmed := 0
+    	for _, e := range aw.Entries() {{ "{" }}
+    		if e.Action == "user.password_reset_confirmed" {{ "{" }}
+    			confirmed++
+    		{{ "}" }}
+    	{{ "}" }}
+    	if confirmed != 1 {{ "{" }}
+    		t.Fatalf("expected exactly 1 user.password_reset_confirmed audit entry, got %d (entries=%+v)", confirmed, aw.Entries())
     	{{ "}" }}
     {{ "}" }}
 
@@ -641,6 +658,13 @@ body: |-
     	{{ "}" }}
     	if entry.DetailJSON != "" {{ "{" }}
     		t.Fatalf("expected no detail that could leak the failure reason, got %q", entry.DetailJSON)
+    	{{ "}" }}
+
+    	// The credential is consumed by ConsumeValid before the phone check
+    	// runs (Issue #77's accepted trade-off), so it cannot be redeemed
+    	// afterward even with the correct phone.
+    	if err := svc.ConfirmPasswordReset(ctx, code, "+15550003333", "another-password-2"); err == nil {{ "{" }}
+    		t.Fatal("expected credential to already be consumed after the wrong-phone attempt")
     	{{ "}" }}
     {{ "}" }}
 

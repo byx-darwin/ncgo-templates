@@ -61,7 +61,8 @@ body: |
     // newTestContextFromIP behaves like newTestContext but also sets
     // X-Forwarded-For, which Hertz's default ClientIP() reads without any
     // extra ClientIPOptions configuration — this is how these tests control
-    // c.ClientIP() for the identifier+IP dual-key checks below.
+    // c.ClientIP() to prove the identifier-scoped check below does NOT vary
+    // with it (that's the whole point of the fix).
     func newTestContextFromIP(method, path, body, ip string) *app.RequestContext {{ "{" }}
     	c := app.NewContext(0)
     	req := protocol.NewRequest(method, path, nil)
@@ -73,13 +74,16 @@ body: |
 
     // identifierRateLimitTestDeps builds a resolver/store/cfg triple wired for
     // a single phase ("password_reset_request" or "password_reset_confirm")
-    // with an "ip_identifier" rule allowing maxRequests before throttling.
+    // with an "identifier"-keyed rule allowing maxRequests before throttling.
+    // Deliberately keyed by "identifier" alone (not "ip_identifier"): the
+    // whole point of this check is that rotating the IP must not open a
+    // fresh counter — see TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs.
     func identifierRateLimitTestDeps(phase string, maxRequests int) (*ratelimit.Resolver, ratelimit.Store, conf.RateLimitConfig) {{ "{" }}
     	phaseCfg := conf.RateLimitPhaseConfig{{ "{" }}
     		Enabled: true,
     		DefaultRule: conf.RateLimitRuleConfig{{ "{" }}
     			Enabled:       true,
-    			KeyBy:         []string{{ "{" }}"ip_identifier"{{ "}" }},
+    			KeyBy:         []string{{ "{" }}"identifier"{{ "}" }},
     			Strategy:      "fixed_window",
     			WindowSeconds: config.Duration{{ "{" }}Duration: time.Hour{{ "}" }},
     			MaxRequests:   maxRequests,

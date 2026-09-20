@@ -130,6 +130,10 @@ body: |
     		return r.cfg.PasswordResetRequest
     	case "password_reset_confirm":
     		return r.cfg.PasswordResetConfirm
+    	case "password_reset_request_identifier":
+    		return r.cfg.PasswordResetRequestIdentifier
+    	case "password_reset_confirm_identifier":
+    		return r.cfg.PasswordResetConfirmIdentifier
     	default:
     		return r.cfg.PreAuth
     	{{ "}" }}

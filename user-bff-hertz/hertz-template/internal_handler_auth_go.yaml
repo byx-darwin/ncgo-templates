@@ -113,7 +113,7 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_request", h.cfg.PasswordResetRequestIdentifier, strings.TrimSpace(req.Identifier)) {{ "{" }}
+    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_request_identifier", h.cfg.PasswordResetRequestIdentifier, strings.TrimSpace(req.Identifier)) {{ "{" }}
     		return
     	{{ "}" }}
     	if _, err := h.userCli.RequestPasswordReset(ctx, &userv1.RequestPasswordResetReq{{ "{" }}Identifier: req.Identifier, Channel: req.Channel{{ "}" }}); err != nil {{ "{" }}
@@ -137,7 +137,7 @@ body: |
     		response.ErrorCode(c, response.CodeRequestParamInvalid)
     		return
     	{{ "}" }}
-    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_confirm", h.cfg.PasswordResetConfirmIdentifier, strings.TrimSpace(req.Phone)) {{ "{" }}
+    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_confirm_identifier", h.cfg.PasswordResetConfirmIdentifier, strings.TrimSpace(req.Phone)) {{ "{" }}
     		return
     	{{ "}" }}
     	if _, err := h.userCli.ConfirmPasswordReset(ctx, &userv1.ConfirmPasswordResetReq{{ "{" }}Credential: req.Credential, NewPassword: req.NewPassword, Phone: req.Phone{{ "}" }}); err != nil {{ "{" }}

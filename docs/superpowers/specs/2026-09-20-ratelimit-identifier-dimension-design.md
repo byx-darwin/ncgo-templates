@@ -147,6 +147,18 @@ different thresholds (e.g. IP flood protection could stay generous while
 per-account throttling stays tight). Explicit config is easier to review
 and tune than relying on `BuildKey`'s fallback semantics for correctness.
 
+Both new phase fields' default rule uses `KeyBy: []string{"identifier"}` —
+**deliberately not** `"ip_identifier"`. `"ip_identifier"` requires both the
+IP and the identifier to match to hit the same counter, so rotating the IP
+with a fixed identifier produces a *different* key and would not stop the
+exact bypass this Issue is about. `"identifier"` alone is what makes the
+per-account throttle immune to IP rotation (verified by
+`TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs` in Task 4's
+tests, added during implementation after this exact mistake was caught by
+that test). `"ip_identifier"` remains a supported `BuildKey` dimension for
+other call sites that legitimately want a per-(IP, identifier) pair limit —
+it is not used by this Issue's own config wiring.
+
 Defaults (mirroring the existing password-reset defaults) and
 `validateRateLimitPhase` calls are extended for the two new fields at the
 same place the existing ones are set up (`NewDefaultConfig`-equivalent

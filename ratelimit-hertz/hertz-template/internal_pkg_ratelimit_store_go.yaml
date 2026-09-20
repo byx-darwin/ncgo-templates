@@ -231,6 +231,14 @@ body: |-
     			if lookup.AppKey != "" {
     				return joinKeyParts(prefix, "ak_method_path", lookup.AppKey, lookup.Method, lookup.Path)
     			}
+    		case "identifier":
+    			if lookup.Identifier != "" {
+    				return joinKeyParts(prefix, "identifier", lookup.Identifier)
+    			}
+    		case "ip_identifier":
+    			if lookup.ClientIP != "" && lookup.Identifier != "" {
+    				return joinKeyParts(prefix, "ip_identifier", lookup.ClientIP, lookup.Identifier)
+    			}
     		case "ip":
     			if lookup.ClientIP != "" {
     				return joinKeyParts(prefix, "ip", lookup.ClientIP)
@@ -267,4 +275,24 @@ body: |-
     		return rule.WindowSeconds.Duration
     	}
     	return 300 * time.Second
+    }
+
+    // Check resolves the rule for lookup against resolver, builds its counter
+    // key, and consults store. It returns (true, nil) when the resolved rule
+    // is disabled (no limiting applied). This is the same
+    // Resolve -> NormalizeRule -> BuildKey -> Store.Allow sequence the
+    // rate-limit middleware runs inline; Check exists for call sites outside
+    // the middleware (e.g. handler-level identifier checks) that want the
+    // same behavior without duplicating it.
+    func Check(ctx context.Context, resolver *Resolver, store Store, cfg conf.RateLimitConfig, lookup Lookup) (bool, error) {
+    	resolved, err := resolver.Resolve(ctx, lookup)
+    	if err != nil {
+    		return false, err
+    	}
+    	rule := NormalizeRule(resolved.Rule)
+    	if !rule.Enabled {
+    		return true, nil
+    	}
+    	key := BuildKey(lookup, rule.KeyBy, cfg.KeyPrefix)
+    	return store.Allow(ctx, key, rule)
     }

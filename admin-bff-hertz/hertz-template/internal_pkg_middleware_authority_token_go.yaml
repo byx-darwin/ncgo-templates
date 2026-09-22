@@ -1,0 +1,36 @@
+# ncgo exported template — internal/pkg/middleware/authority_token.go
+path: internal/pkg/middleware/authority_token.go
+update_behavior:
+    type: cover
+body: |
+    package middleware
+
+    import (
+        "context"
+
+        goerror "github.com/byx-darwin/go-tools/go-common/error"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/pkg/response"
+        authv1 "{{.Module}}/kitex_gen/api/auth/v1"
+        authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
+    )
+
+    // AuthorityJWTVerifier validates the signature locally and checks the
+    // authority's revocation state before accepting a protected request.
+    type AuthorityJWTVerifier struct {{ "{" }}
+        Config conf.TokenConfig
+        Client authservice.Client
+    {{ "}" }}
+
+    func (v AuthorityJWTVerifier) VerifyToken(ctx context.Context, token string) (*Claims, error) {{ "{" }}
+        claims, err := (JWTVerifier{{ "{" }}Config: v.Config{{ "}" }}).VerifyToken(ctx, token)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        checked, err := v.Client.ValidateToken(ctx, &authv1.ValidateTokenReq{{ "{" }}AccessToken: token{{ "}" }})
+        if err != nil || checked == nil || !checked.Valid || checked.Uid != claims.Uid {{ "{" }}
+            return nil, goerror.In("token").Code(response.CodeTokenInvalid).Public(response.MsgFromCode(response.CodeTokenInvalid)).New("token rejected by authority")
+        {{ "}" }}
+        return claims, nil
+    {{ "}" }}

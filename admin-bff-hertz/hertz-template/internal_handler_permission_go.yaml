@@ -26,7 +26,7 @@ body: |
     {{ "}" }}
 
     func (h *PermissionHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	resp, err := h.rbacCli.ListPermissions(ctx, &api.ListPermissionsReq{{ "{" }}{{ "}" }})
+        resp, err := h.rbacCli.ListPermissions(ctx, &api.ListPermissionsReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

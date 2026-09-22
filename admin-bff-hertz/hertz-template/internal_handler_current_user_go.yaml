@@ -33,14 +33,31 @@ body: |
     	{{ "}" }}
 
     	resp, err := h.rbacCli.GetUserMenuTree(ctx, &api.GetUserMenuTreeReq{{ "{" }}
-    		UserId: claims.Uid,
+            Uid: claims.Uid,
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
 
-    	response.OK(c, resp.Menus)
+        menus := make([]map[string]interface{{ "{" }}{{ "}" }}, 0, len(resp.Roots))
+        for _, root := range resp.Roots {{ "{" }}
+            menus = append(menus, menuNodeJSON(root))
+        {{ "}" }}
+        response.OK(c, menus)
+    {{ "}" }}
+
+    func menuNodeJSON(node *api.MenuNode) map[string]interface{{ "{" }}{{ "}" }} {{ "{" }}
+        menu := node.Menu
+        children := make([]map[string]interface{{ "{" }}{{ "}" }}, 0, len(node.Children))
+        for _, child := range node.Children {{ "{" }}
+            children = append(children, menuNodeJSON(child))
+        {{ "}" }}
+        return map[string]interface{{ "{" }}{{ "}" }}{{ "{" }}
+            "id": menu.Id, "name": menu.Name, "path": menu.Path,
+            "icon": menu.Icon, "parent_id": menu.ParentId, "order": menu.Sort,
+            "children": children,
+        {{ "}" }}
     {{ "}" }}
 
     func (h *CurrentUserHandler) GetPerms(ctx context.Context, c *app.RequestContext) {{ "{" }}
@@ -51,12 +68,12 @@ body: |
     	{{ "}" }}
 
     	resp, err := h.rbacCli.GetUserPermCodes(ctx, &api.GetUserPermCodesReq{{ "{" }}
-    		UserId: claims.Uid,
+            Uid: claims.Uid,
     	{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
 
-    	response.OK(c, resp.PermCodes)
+        response.OK(c, resp.Codes)
     {{ "}" }}

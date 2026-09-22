@@ -11,6 +11,7 @@ service AuthService {
   rpc Login(LoginReq) returns (LoginResp);
   rpc Refresh(RefreshReq) returns (RefreshResp);
   rpc Logout(LogoutReq) returns (LogoutResp);
+  rpc ValidateToken(ValidateTokenReq) returns (ValidateTokenResp);
 }
 
 message LoginReq {
@@ -35,9 +36,19 @@ message RefreshResp {
 }
 
 message LogoutReq {
-  string user_id = 1;
+  string access_token = 1;
 }
 
 message LogoutResp {
   bool success = 1;
+}
+
+message ValidateTokenReq {
+  string access_token = 1;
+}
+
+message ValidateTokenResp {
+  string uid = 1;
+  repeated string roles = 2;
+  bool valid = 3;
 }

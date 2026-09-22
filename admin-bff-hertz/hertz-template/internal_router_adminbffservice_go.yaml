@@ -52,7 +52,7 @@ body: |
 
     	// Protected routes (JWT required)
     	protected := api.Group("")
-    	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
+        protected.Use(middleware.TokenAuth(cfg.Auth.Token, middleware.AuthorityJWTVerifier{{ "{" }}Config: cfg.Auth.Token, Client: rbacAuthCli{{ "}" }}))
     	// ── Idempotency for protected routes — registered after JWTAuth, so
     	// Claims.Uid is available and idempotencyKey()'s ak_user_uuid:/
     	// user_uuid: branches are reachable (see issue #73) ─────────────────

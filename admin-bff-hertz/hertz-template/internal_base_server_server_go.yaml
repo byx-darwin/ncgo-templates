@@ -18,6 +18,7 @@ body: |
         hertzobs "github.com/byx-darwin/go-tools/go-framework/hertz/observability"
 
         "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/handler/health"
         "{{.Module}}/internal/pkg/middleware"
         "{{.Module}}/internal/pkg/ratelimit"
         "{{.Module}}/internal/pkg/response"
@@ -127,6 +128,7 @@ body: |
         {{ "}" }})
 
         // Register routes
+        health.Register(h)
         router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli, userCli, resolver)
 
         // Start server

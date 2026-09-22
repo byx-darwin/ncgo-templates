@@ -123,7 +123,7 @@ body: |
     func newRouterTestEngine(t *testing.T, rbacCli rbacservice.Client) *route.Engine {{ "{" }}
     	t.Helper()
     	h := server.New()
-    	var authCli authservice.Client
+        authCli := &fakeRouterAuthClient{{ "{" }}{{ "}" }}
     	var ruleCli ruleservice.Client
     	var resolver *ratelimit.Resolver
     	userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
@@ -287,6 +287,18 @@ body: |
     func (f *fakeRouterAuthClient) Login(ctx context.Context, req *api.LoginReq, callOptions ...callopt.Option) (*api.LoginResp, error) {{ "{" }}
     	f.loginCalls++
     	return &api.LoginResp{{ "{" }}AccessToken: "tok", RefreshToken: "rtok", ExpiresIn: 3600{{ "}" }}, nil
+    {{ "}" }}
+
+    func (f *fakeRouterAuthClient) ValidateToken(ctx context.Context, req *api.ValidateTokenReq, callOptions ...callopt.Option) (*api.ValidateTokenResp, error) {{ "{" }}
+        claims := jwt.MapClaims{{ "{" }}{{ "}" }}
+        token, err := jwt.ParseWithClaims(req.AccessToken, claims, func(token *jwt.Token) (interface{{ "{" }}{{ "}" }}, error) {{ "{" }}
+            return []byte("router-test-secret"), nil
+        {{ "}" }})
+        if err != nil || !token.Valid {{ "{" }}
+            return &api.ValidateTokenResp{{ "{" }}Valid: false{{ "}" }}, nil
+        {{ "}" }}
+        uid, _ := claims["uid"].(string)
+        return &api.ValidateTokenResp{{ "{" }}Uid: uid, Valid: uid != ""{{ "}" }}, nil
     {{ "}" }}
 
     func newRouterTestEngineWithAuth(t *testing.T, authCli authservice.Client, rbacCli rbacservice.Client) *route.Engine {{ "{" }}

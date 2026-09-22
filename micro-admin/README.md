@@ -83,8 +83,8 @@ make sqlc
 DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
 
 # Seed initial data (admin user, roles, permissions)
-DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" \
-  psql -f scripts/seed.sql
+psql "postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" \
+  -v ON_ERROR_STOP=1 -f ../../scripts/seed.sql
 
 cd ../..
 ```
@@ -292,9 +292,9 @@ The authority service creates the following tables:
 The `scripts/seed.sql` creates:
 
 - **Admin user**: username=`admin`, password=`Admin@123` (Argon2id hash)
-- **Super admin role**: code=`super_admin`
+- **Roles**: `admin` (assigned to the admin user) and `super_admin`
 - **All permissions**: user/role/permission/menu/rate_limit CRUD
-- **Casbin policies**: Admin user → super_admin role → all permissions
+- **Casbin policies**: Admin user UUID → `admin` role → all permissions
 
 ## Security
 

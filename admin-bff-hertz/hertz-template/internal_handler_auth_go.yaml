@@ -9,6 +9,7 @@ body: |
     import (
     	"context"
     	"encoding/json"
+        "strings"
 
     	"github.com/cloudwego/hertz/pkg/app"
 
@@ -79,13 +80,14 @@ body: |
     {{ "}" }}
 
     func (h *AuthHandler) Logout(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	claims, ok := middleware.GetClaims(c)
+        _, ok := middleware.GetClaims(c)
     	if !ok {{ "{" }}
     		response.ErrorCode(c, response.CodeUnauthorized)
     		return
     	{{ "}" }}
 
-    	_, err := h.rbacCli.Logout(ctx, &api.LogoutReq{{ "{" }}UserId: claims.Uid{{ "}" }})
+        accessToken := strings.TrimPrefix(string(c.GetHeader("Authorization")), "Bearer ")
+        _, err := h.rbacCli.Logout(ctx, &api.LogoutReq{{ "{" }}AccessToken: accessToken{{ "}" }})
     	if err != nil {{ "{" }}
     		response.ErrorCode(c, response.CodeInternalError)
     		return

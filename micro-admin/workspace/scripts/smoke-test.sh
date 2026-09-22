@@ -1,72 +1,69 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Auto-detect BFF address
-BFF_PORT=8080
-BFF_IP=$(lsof -i :$BFF_PORT -P -n 2>/dev/null | grep LISTEN | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || echo "127.0.0.1")
-BFF_URL="http://${BFF_IP}:${BFF_PORT}"
+BFF_URL=${BFF_URL:-http://127.0.0.1:8080}
+for tool in curl jq; do
+  command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
+done
 
-echo "==> Smoke test: Happy path (BFF_URL=$BFF_URL)"
-
-check_response() {
-    local resp="$1"
-    local label="$2"
-    if [ -z "$resp" ]; then
-        echo "FAIL: $label - empty response"
-        exit 1
-    fi
-    # Check for HTTP-level error (code != 200 means business error)
-    local code=$(echo "$resp" | jq -r '.code // empty')
-    if [ "$code" != "200" ] && [ "$code" != "0" ]; then
-        echo "FAIL: $label - error code $code"
-        echo "Response: $resp"
-        exit 1
-    fi
+request() {
+  local method=$1 path=$2 payload=${3:-}
+  local args=(-fsS -X "$method" "$BFF_URL$path")
+  if [ -n "${TOKEN:-}" ]; then args+=(-H "Authorization: Bearer $TOKEN"); fi
+  if [ -n "$payload" ]; then args+=(-H 'Content-Type: application/json' -d "$payload"); fi
+  local result
+  result=$(curl "${args[@]}") || { echo "HTTP request failed: $method $path" >&2; exit 1; }
+  if ! jq -e '(.code == 0 or .code == 200)' >/dev/null <<<"$result"; then
+    echo "Unexpected response for $method $path: $result" >&2
+    exit 1
+  fi
+  printf '%s\n' "$result"
 }
 
-# 1. Login
-echo "  [1/4] Login (admin-bff → rbac-rpc)..."
-LOGIN_RESP=$(curl -s -X POST $BFF_URL/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin@123"}')
-TOKEN=$(echo $LOGIN_RESP | jq -r '.data.access_token')
-if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-    echo "FAIL: login failed - no token"
-    echo "Response: $LOGIN_RESP"
-    exit 1
-fi
-echo "  ✓ Login successful"
+echo '==> Checking login, menus, permissions, and resource lists'
+login=$(request POST /api/v1/auth/login '{"username":"admin","password":"Admin@123"}')
+TOKEN=$(jq -r '.data.access_token // empty' <<<"$login")
+test -n "$TOKEN" || { echo 'Login returned no access token' >&2; exit 1; }
+menus=$(request GET /api/v1/me/menus)
+jq -e '.data | arrays | length > 0' >/dev/null <<<"$menus"
+jq -e '.data | .. | objects | select(.path? == "/system/user")' >/dev/null <<<"$menus"
+perms=$(request GET /api/v1/me/perms)
+jq -e '.data | arrays | length > 0' >/dev/null <<<"$perms"
+for resource in users roles permissions; do
+  result=$(request GET "/api/v1/$resource?page=1&page_size=20")
+  jq -e '.data | arrays | length > 0' >/dev/null <<<"$result"
+done
 
-# 2. Get current user menus
-echo "  [2/4] Get menus (admin-bff → rbac-rpc)..."
-MENUS=$(curl -s -H "Authorization: Bearer $TOKEN" $BFF_URL/api/v1/me/menus)
-check_response "$MENUS" "get menus"
-echo "  ✓ Menus retrieved"
+echo '==> Checking user, role, permission, and rate rule writes'
+suffix="$$"
+user=$(request POST /api/v1/users "{\"username\":\"smoke_$suffix\",\"password\":\"Test@12345\",\"email\":\"smoke_$suffix@example.com\"}")
+user_id=$(jq -r '.data.id // .data.user.id // empty' <<<"$user")
+test -n "$user_id" || { echo "User response has no ID: $user" >&2; exit 1; }
+request PUT "/api/v1/users/$user_id" '{"nickname":"Smoke Updated"}' >/dev/null
 
-# 3. Create user (JWT + RBAC Authz)
-echo "  [3/4] Create user (admin-bff → rbac-rpc with Authz)..."
-CREATE_USER=$(curl -s -X POST $BFF_URL/api/v1/users \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"testuser","password":"test123","email":"test@example.com"}')
-check_response "$CREATE_USER" "create user"
-echo "  ✓ User created"
+role=$(request POST /api/v1/roles "{\"code\":\"smoke_$suffix\",\"name\":\"Smoke Role\"}")
+role_id=$(jq -r '.data.id // .data.role.id // empty' <<<"$role")
+test -n "$role_id" || { echo "Role response has no ID: $role" >&2; exit 1; }
+request PUT "/api/v1/roles/$role_id" '{"name":"Smoke Role Updated"}' >/dev/null
 
-# 4. Create rate-limit rule (admin-bff → rule-rpc)
-echo "  [4/4] Create rate-limit rule (admin-bff → rule-rpc)..."
-CREATE_RULE=$(curl -s -X POST $BFF_URL/api/v1/rate-limit-rules \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"api-limit","limit":100,"window":"1m"}')
-check_response "$CREATE_RULE" "create rate-limit rule"
-echo "  ✓ Rate-limit rule created"
+permission=$(request POST /api/v1/permissions "{\"code\":\"smoke:$suffix\",\"type\":\"button\",\"name\":\"Smoke Permission\"}")
+permission_id=$(jq -r '.data.id // .data.permission.id // empty' <<<"$permission")
+test -n "$permission_id" || { echo "Permission response has no ID: $permission" >&2; exit 1; }
+request PUT "/api/v1/permissions/$permission_id" '{"name":"Smoke Permission Updated"}' >/dev/null
 
-echo ""
-echo "==> Smoke test: PASSED"
-echo ""
-echo "==> Verified:"
-echo "  ✓ Postgres connection (users, menus data)"
-echo "  ✓ Redis connection (token store)"
-echo "  ✓ JWT auth (login → token → protected routes)"
-echo "  ✓ Cross-service RPC (admin-bff → rbac-rpc, admin-bff → rule-rpc)"
-echo "  ✓ RBAC authorization (Casbin enforcement)"
+rule=$(request POST /api/v1/rate-limit-rules "{\"service\":\"admin\",\"phase\":\"pre_auth\",\"method\":\"GET\",\"path\":\"/api/v1/smoke-$suffix\",\"match_kind\":\"exact\",\"path_pattern\":\"/api/v1/smoke-$suffix\",\"config\":{\"enabled\":true,\"key_by\":[\"ip\"],\"strategy\":\"fixed_window\",\"window_seconds\":60,\"max_requests\":100}}")
+rule_id=$(jq -r '.data.id // empty' <<<"$rule")
+test -n "$rule_id" || { echo "Create rule response has no ID: $rule" >&2; exit 1; }
+rules=$(request GET /api/v1/rate-limit-rules)
+jq -e --argjson id "$rule_id" '.data[] | select(.id == $id)' >/dev/null <<<"$rules"
+
+request DELETE "/api/v1/rate-limit-rules/$rule_id" >/dev/null
+request DELETE "/api/v1/permissions/$permission_id" >/dev/null
+request DELETE "/api/v1/roles/$role_id" >/dev/null
+request DELETE "/api/v1/users/$user_id" >/dev/null
+
+echo '==> Checking logout revocation'
+request POST /api/v1/auth/logout '{}' >/dev/null
+status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BFF_URL/api/v1/me/perms")
+test "$status" = 401 || { echo "Revoked token returned HTTP $status" >&2; exit 1; }
+echo '==> Smoke test passed'

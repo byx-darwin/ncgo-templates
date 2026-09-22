@@ -1,4 +1,4 @@
-.PHONY: help check build clean dev test infra-up infra-down
+.PHONY: help check build clean dev test prepare infra-up infra-down
 
 help:
 	@echo "micro-admin workspace commands:"
@@ -7,6 +7,7 @@ help:
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make dev       - Start all services in dev mode"
 	@echo "  make test      - Run E2E tests (hermetic + integration)"
+	@echo "  make prepare   - Generate BFF clients and database/i18n code"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  make infra-up    - Start postgres + redis"
@@ -48,6 +49,9 @@ dev:
 
 test:
 	@./scripts/e2e-test.sh
+
+prepare:
+	@./scripts/prepare.sh
 
 infra-up:
 	@docker compose -f compose.infra.yaml up -d

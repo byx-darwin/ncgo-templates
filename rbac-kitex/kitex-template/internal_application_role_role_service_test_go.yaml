@@ -125,11 +125,11 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", "user:create", "POST"); !allowed {{ "{" }}
-    		t.Fatal("Enforce(admin, user:create, POST) = false, want true")
+        if allowed, _ := e.Enforce("admin", "user:create", "execute"); !allowed {{ "{" }}
+            t.Fatal("Enforce(admin, user:create, execute) = false, want true")
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", "user:delete", "DELETE"); allowed {{ "{" }}
-    		t.Fatal("Enforce(admin, user:delete, DELETE) = true, want false")
+        if allowed, _ := e.Enforce("admin", "user:delete", "execute"); allowed {{ "{" }}
+            t.Fatal("Enforce(admin, user:delete, execute) = true, want false")
     	{{ "}" }}
     	entries := aud.Entries()
     	if len(entries) == 0 || entries[0].Action != "role.grant_permissions" {{ "{" }}
@@ -176,8 +176,8 @@ body: |
     	if _, err := e.AddRoleForUser("alice", "admin"); err != nil {{ "{" }}
     		t.Fatalf("AddRoleForUser: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", "user:create", "POST"); !allowed {{ "{" }}
-    		t.Fatal("precondition: Enforce(admin, user:create, POST) = false, want true")
+        if allowed, _ := e.Enforce("admin", "user:create", "execute"); !allowed {{ "{" }}
+            t.Fatal("precondition: Enforce(admin, user:create, execute) = false, want true")
     	{{ "}" }}
     	roles, err := e.GetRolesForUser("alice")
     	if err != nil || len(roles) != 1 {{ "{" }}
@@ -192,8 +192,8 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("NewEnforcer: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e2.Enforce("admin", "user:create", "POST"); allowed {{ "{" }}
-    		t.Fatal("Enforce(admin, user:create, POST) after Delete = true, want false")
+        if allowed, _ := e2.Enforce("admin", "user:create", "execute"); allowed {{ "{" }}
+            t.Fatal("Enforce(admin, user:create, execute) after Delete = true, want false")
     	{{ "}" }}
     	roles, err = e2.GetRolesForUser("alice")
     	if err != nil {{ "{" }}

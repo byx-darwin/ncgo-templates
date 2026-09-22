@@ -33,6 +33,7 @@ INSERT INTO permissions (code, type, name, path, method, sort, status) VALUES
 ('user:create', 'api', 'Create User', '/api/v1/users', 'POST', 3, 1),
 ('user:update', 'api', 'Update User', '/api/v1/users/:id', 'PUT', 4, 1),
 ('user:delete', 'api', 'Delete User', '/api/v1/users/:id', 'DELETE', 5, 1),
+('user:approve', 'button', 'Approve DingTalk User', NULL, NULL, 6, 1),
 ('role', 'menu', 'Role Management', '/system/role', NULL, 2, 1),
 ('role:list', 'api', 'List Roles', '/api/v1/roles', 'GET', 1, 1),
 ('role:read', 'api', 'Read Roles', '/api/v1/roles', 'GET', 1, 1),

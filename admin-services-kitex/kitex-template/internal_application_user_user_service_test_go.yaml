@@ -197,7 +197,7 @@ body: |
     	{{ "}" }}
     	repo.roleDefs[1] = &role.Role{{ "{" }}ID: 1, Code: "admin", Name: "Admin"{{ "}" }}
     	repo.rolesByID[created.ID] = nil
-    	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
+        if _, err := e.AddPolicy("admin", "user:create", "execute"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
 
@@ -211,8 +211,8 @@ body: |
     	if len(roles) != 1 || roles[0].Code != "admin" {{ "{" }}
     		t.Fatalf("roles = %+v, want [admin]", roles)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce(created.UUID, "user:create", "POST"); !allowed {{ "{" }}
-    		t.Fatal("Enforce(uid, user:create, POST) = false, want true")
+        if allowed, _ := e.Enforce(created.UUID, "user:create", "execute"); !allowed {{ "{" }}
+            t.Fatal("Enforce(uid, user:create, execute) = false, want true")
     	{{ "}" }}
     {{ "}" }}
 

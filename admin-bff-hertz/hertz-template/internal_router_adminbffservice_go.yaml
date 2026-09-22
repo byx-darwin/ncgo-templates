@@ -24,6 +24,7 @@ body: |
     	cfg := conf.Get()
 
     	authHandler := handler.NewAuthHandler(rbacAuthCli)
+        dingHandler := handler.NewDingTalkHandler(rbacAuthCli)
     	userHandler := handler.NewUserHandler(rbacCli)
     	roleHandler := handler.NewRoleHandler(rbacCli)
     	permHandler := handler.NewPermissionHandler(rbacCli)
@@ -49,6 +50,8 @@ body: |
     	{{ "}" }}
     	auth.POST("/login", authHandler.Login)
     	auth.POST("/refresh", authHandler.Refresh)
+        auth.POST("/dingtalk/login", dingHandler.Login)
+        auth.POST("/dingtalk/apply", dingHandler.Apply)
 
     	// Protected routes (JWT required)
     	protected := api.Group("")
@@ -79,28 +82,33 @@ body: |
     	me.GET("/perms", currentUserHandler.GetPerms)
 
     	// RBAC management
-    	users := protected.Group("/users")
-    	users.GET("", middleware.RequirePermission("user:list"), middleware.Authz(rbacCli), userHandler.List)
+            dingApplications := protected.Group("/rbac/dingtalk-applications")
+        dingApplications.GET("", middleware.RequirePermission("user:approve"), middleware.Authz(rbacCli), dingHandler.List)
+        dingApplications.POST("/:id/approve", middleware.RequirePermission("user:approve"), middleware.Authz(rbacCli), dingHandler.Approve)
+        dingApplications.POST("/:id/reject", middleware.RequirePermission("user:approve"), middleware.Authz(rbacCli), dingHandler.Reject)
+
+        users := protected.Group("/users")
+        users.GET("", middleware.RequirePermission("user:read"), middleware.Authz(rbacCli), userHandler.List)
     	users.GET("/:id", middleware.RequirePermission("user:read"), middleware.Authz(rbacCli), userHandler.Get)
     	users.POST("", middleware.RequirePermission("user:create"), middleware.Authz(rbacCli), userHandler.Create)
     	users.PUT("/:id", middleware.RequirePermission("user:update"), middleware.Authz(rbacCli), userHandler.Update)
     	users.DELETE("/:id", middleware.RequirePermission("user:delete"), middleware.Authz(rbacCli), userHandler.Delete)
 
     	roles := protected.Group("/roles")
-    	roles.GET("", middleware.RequirePermission("role:list"), middleware.Authz(rbacCli), roleHandler.List)
+        roles.GET("", middleware.RequirePermission("role:read"), middleware.Authz(rbacCli), roleHandler.List)
     	roles.POST("", middleware.RequirePermission("role:create"), middleware.Authz(rbacCli), roleHandler.Create)
     	roles.PUT("/:id", middleware.RequirePermission("role:update"), middleware.Authz(rbacCli), roleHandler.Update)
     	roles.DELETE("/:id", middleware.RequirePermission("role:delete"), middleware.Authz(rbacCli), roleHandler.Delete)
 
     	perms := protected.Group("/permissions")
-    	perms.GET("", middleware.RequirePermission("permission:list"), middleware.Authz(rbacCli), permHandler.List)
+        perms.GET("", middleware.RequirePermission("permission:read"), middleware.Authz(rbacCli), permHandler.List)
     	perms.GET("/:id", middleware.RequirePermission("permission:read"), middleware.Authz(rbacCli), permHandler.Get)
     	perms.POST("", middleware.RequirePermission("permission:create"), middleware.Authz(rbacCli), permHandler.Create)
     	perms.PUT("/:id", middleware.RequirePermission("permission:update"), middleware.Authz(rbacCli), permHandler.Update)
     	perms.DELETE("/:id", middleware.RequirePermission("permission:delete"), middleware.Authz(rbacCli), permHandler.Delete)
 
     	menus := protected.Group("/menus")
-    	menus.GET("", middleware.RequirePermission("menu:list"), middleware.Authz(rbacCli), menuHandler.List)
+        menus.GET("", middleware.RequirePermission("menu:read"), middleware.Authz(rbacCli), menuHandler.List)
 
     	// Rate limit rules management
     	rules := protected.Group("/rate-limit-rules")

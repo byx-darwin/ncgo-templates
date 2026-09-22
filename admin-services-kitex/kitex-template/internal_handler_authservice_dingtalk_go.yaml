@@ -1,0 +1,39 @@
+path: internal/handler/authservice/dingtalk.go
+update_behavior:
+    type: cover
+body: |
+    package authservicehandler
+
+    import (
+     "context"
+     "time"
+
+     dingtalk "{{.Module}}/internal/application/dingtalk"
+     "{{.Module}}/internal/pkg/rpcerror"
+     v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+    func (s *AuthServiceImpl) LoginByDingtalk(ctx context.Context, req *v1.DingtalkIdentityReq) (*v1.DingtalkLoginResp,error) {{ "{" }}
+     found,access,refresh,ttl,err:=s.dingtalk.Login(ctx,req.UnionId)
+     if err!=nil{{ "{" }}return nil,rpcerror.ToBizError(err){{ "}" }}
+     return &v1.DingtalkLoginResp{{ "{" }}Found:found,AccessToken:access,RefreshToken:refresh,ExpiresIn:ttl{{ "}" }},nil
+    {{ "}" }}
+    func (s *AuthServiceImpl) SubmitDingtalkApplication(ctx context.Context,req *v1.DingtalkIdentityReq)(*v1.DingtalkApplicationResp,error){{ "{" }}
+     a,err:=s.dingtalk.Apply(ctx,req.UnionId,req.Name,req.Avatar,req.Mobile);if err!=nil{{ "{" }}return nil,rpcerror.ToBizError(err){{ "}" }}
+     return &v1.DingtalkApplicationResp{{ "{" }}Application:toProtoApplication(a){{ "}" }},nil
+    {{ "}" }}
+    func (s *AuthServiceImpl) ListDingtalkApplications(ctx context.Context,req *v1.ListDingtalkApplicationsReq)(*v1.ListDingtalkApplicationsResp,error){{ "{" }}
+     apps,total,err:=s.dingtalk.List(ctx,req.ReviewerId,req.Status,req.Page,req.PageSize);if err!=nil{{ "{" }}return nil,rpcerror.ToBizError(err){{ "}" }}
+     out:=make([]*v1.DingtalkApplication,0,len(apps));for i:=range apps{{ "{" }}out=append(out,toProtoApplication(&apps[i])){{ "}" }}
+     return &v1.ListDingtalkApplicationsResp{{ "{" }}Applications:out,Total:total{{ "}" }},nil
+    {{ "}" }}
+    func (s *AuthServiceImpl) ApproveDingtalkApplication(ctx context.Context,req *v1.ApproveDingtalkApplicationReq)(*v1.DingtalkApplicationResp,error){{ "{" }}
+     a,err:=s.dingtalk.Approve(ctx,req.ReviewerId,req.Id,req.RoleIds);if err!=nil{{ "{" }}return nil,rpcerror.ToBizError(err){{ "}" }}
+     return &v1.DingtalkApplicationResp{{ "{" }}Application:toProtoApplication(a){{ "}" }},nil
+    {{ "}" }}
+    func (s *AuthServiceImpl) RejectDingtalkApplication(ctx context.Context,req *v1.RejectDingtalkApplicationReq)(*v1.DingtalkApplicationResp,error){{ "{" }}
+     a,err:=s.dingtalk.Reject(ctx,req.ReviewerId,req.Id,req.Reason);if err!=nil{{ "{" }}return nil,rpcerror.ToBizError(err){{ "}" }}
+     return &v1.DingtalkApplicationResp{{ "{" }}Application:toProtoApplication(a){{ "}" }},nil
+    {{ "}" }}
+    func toProtoApplication(a *dingtalk.Application)*v1.DingtalkApplication{{ "{" }}
+     if a==nil{{ "{" }}return nil{{ "}" }};return &v1.DingtalkApplication{{ "{" }}Id:a.ID,UnionId:a.UnionID,Name:a.Name,Avatar:a.Avatar,Mobile:a.Mobile,Status:a.Status,UserId:a.UserID,Reason:a.Reason,CreatedAt:a.CreatedAt.Format(time.RFC3339){{ "}" }}
+    {{ "}" }}

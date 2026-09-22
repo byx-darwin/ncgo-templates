@@ -11,6 +11,7 @@ body: |
     	"context"
 
     	authsvc "{{.Module}}/internal/application/auth"
+        dingtalk "{{.Module}}/internal/application/dingtalk"
     	"{{.Module}}/internal/pkg/rpcerror"
     	v1 "{{.Module}}/kitex_gen/api/admin/v1"
     )
@@ -18,11 +19,12 @@ body: |
     // AuthServiceImpl implements the Kitex-generated AuthService server interface.
     type AuthServiceImpl struct {{ "{" }}
     	auth *authsvc.Service
+        dingtalk *dingtalk.Service
     {{ "}" }}
 
     // NewAuthServiceImpl creates a Kitex handler with its auth dependency.
-    func NewAuthServiceImpl(authSvc *authsvc.Service) *AuthServiceImpl {{ "{" }}
-    	return &AuthServiceImpl{{ "{" }}auth: authSvc{{ "}" }}
+    func NewAuthServiceImpl(authSvc *authsvc.Service, ding *dingtalk.Service) *AuthServiceImpl {{ "{" }}
+            return &AuthServiceImpl{{ "{" }}auth: authSvc, dingtalk: ding{{ "}" }}
     {{ "}" }}
 
     // Login implements the AuthService RPC method.

@@ -86,10 +86,14 @@ body: |
     	rbacservice.Client
     	allowed        bool
     	lastEnforceUid string
+        lastEnforceObj string
+        lastEnforceAct string
     {{ "}" }}
 
     func (f *fakeRouterRBACClient) Enforce(ctx context.Context, req *rbacv1.EnforceReq, callOptions ...callopt.Option) (*rbacv1.EnforceResp, error) {{ "{" }}
     	f.lastEnforceUid = req.Uid
+        f.lastEnforceObj = req.Obj
+        f.lastEnforceAct = req.Act
     	return &rbacv1.EnforceResp{{ "{" }}Allowed: f.allowed{{ "}" }}, nil
     {{ "}" }}
 
@@ -189,7 +193,8 @@ body: |
     // TestAuthz_AllowedPermission_Returns200 is the companion positive case:
     // an RBAC-allowed request must still reach the real handler and succeed.
     func TestAuthz_AllowedPermission_Returns200(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+        client := &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }}
+        engine := newRouterTestEngine(t, client)
     	jwtToken := newRouterTestJWT(t)
 
     	w := ut.PerformRequest(engine, "GET", "/api/v1/users",
@@ -199,6 +204,9 @@ body: |
     	if resp.StatusCode() != consts.StatusOK {{ "{" }}
     		t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/users, got %d", resp.StatusCode())
     	{{ "}" }}
+        if client.lastEnforceObj != "user:read" || client.lastEnforceAct != "execute" {{ "{" }}
+            t.Fatalf("Enforce(obj, act) = (%q, %q), want (user:read, execute)", client.lastEnforceObj, client.lastEnforceAct)
+        {{ "}" }}
     {{ "}" }}
 
     // TestAuthz_UsesRealJWTIdentity_PropagatesUidToRBAC is the AC #3

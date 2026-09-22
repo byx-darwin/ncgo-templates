@@ -141,7 +141,7 @@ body: |
     // the request path).
     func ratelimitResolveFunc(ruleCli ruleservice.Client) ratelimit.ResolveFunc {{ "{" }}
         return func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
-            resp, err := ruleCli.ListRules(ctx, &ratelimitv1.ListRulesReq{{ "{" }}Page: 1, PageSize: 200{{ "}" }})
+            resp, err := ruleCli.ListRules(ctx, &ratelimitv1.ListRulesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
             if err != nil {{ "{" }}
                 return nil, false, err
             {{ "}" }}
@@ -159,7 +159,7 @@ body: |
                     Enabled:       rule.Enabled,
                     Strategy:      rule.Strategy,
                     WindowSeconds: gfconfig.Duration{{ "{" }}Duration: time.Duration(rule.WindowSeconds) * time.Second{{ "}" }},
-                    MaxRequests:   int(rule.Limit),
+                    MaxRequests:   int(rule.MaxRequests),
                 {{ "}" }}, true, nil
             {{ "}" }}
             return nil, false, nil

@@ -190,7 +190,7 @@ body: |
     		klog.CtxErrorf(ctx, "role.grant_permissions: remove existing casbin policies for role %s failed: %v", r.Code, err)
     	{{ "}" }}
     	for _, p := range perms {{ "{" }}
-    		if _, err := s.enforcer.AddPolicy(r.Code, p.Code, p.Method); err != nil {{ "{" }}
+            if _, err := s.enforcer.AddPolicy(r.Code, p.Code, "execute"); err != nil {{ "{" }}
     			return err
     		{{ "}" }}
     	{{ "}" }}

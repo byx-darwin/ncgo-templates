@@ -105,6 +105,25 @@ body: |
     	return access, refresh, int32(s.accessTTL.Seconds()), nil
     {{ "}" }}
 
+    // UserByUUID resolves a bound DingTalk account for SSO login.
+    func (s *Service) UserByUUID(ctx context.Context, uid string) (*user.User, error) {{ "{" }}
+        return s.users.GetByUUID(ctx, uid)
+    {{ "}" }}
+
+    // IssueForUser issues a token pair after an external identity was verified.
+    func (s *Service) IssueForUser(ctx context.Context, u *user.User) (string, string, int32, error) {{ "{" }}
+        if u == nil || u.Status == user.StatusDisabled {{ "{" }} return "", "", 0, ErrInvalidCredentials {{ "}" }}
+        roles, err := s.roleCodes(ctx, u.ID)
+        if err != nil {{ "{" }} return "", "", 0, err {{ "}" }}
+        access, err := s.jwt.Sign(u.UUID, roles, s.accessTTL)
+        if err != nil {{ "{" }} return "", "", 0, err {{ "}" }}
+        refresh, err := newRefreshToken()
+        if err != nil {{ "{" }} return "", "", 0, err {{ "}" }}
+        if err := s.tokens.SetRefresh(ctx, u.UUID, refresh, s.refreshTTL); err != nil {{ "{" }} return "", "", 0, err {{ "}" }}
+        _ = s.audit.Write(ctx, u.UUID, "auth.dingtalk.login", u.Username, "{}")
+        return access, refresh, int32(s.accessTTL.Seconds()), nil
+    {{ "}" }}
+
     // Refresh rotates a refresh token and issues a new access token.
     func (s *Service) Refresh(ctx context.Context, refreshToken string) (access, refresh string, err error) {{ "{" }}
     	uid, err := s.tokens.GetRefresh(ctx, refreshToken)

@@ -24,6 +24,7 @@ body: |
     	"github.com/byx-darwin/go-tools/go-framework/kitex/observability"
 
     	authsvc "{{.Module}}/internal/application/auth"
+        dingtalk "{{.Module}}/internal/application/dingtalk"
     	menusvc "{{.Module}}/internal/application/menu"
     	permsvc "{{.Module}}/internal/application/permission"
     	rbacsvc "{{.Module}}/internal/application/rbac"
@@ -206,7 +207,7 @@ body: |
     	opts = append(opts, extraOptions...)
 
     	// ── Create server on AuthService, then register RBACService + RuleService ─
-    	svr := authservice.NewServer(authhandler.NewAuthServiceImpl(authAppSvc), opts...)
+            svr := authservice.NewServer(authhandler.NewAuthServiceImpl(authAppSvc, dingtalk.New(pool, authAppSvc, enforcer)), opts...)
 
     	if err := rbacservice.RegisterService(svr, rbachandler.NewRBACServiceImpl(userSvc, roleSvc, permSvc, menuQuerySvc, rbacSvc)); err != nil {{ "{" }}
     		log.Fatalf("register rbacservice: %v", err)

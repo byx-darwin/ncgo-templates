@@ -137,7 +137,7 @@ GET /api/v1/me/perms      # Get current user's permissions
 #### User Management
 
 ```
-GET    /api/v1/users      # permission: user:list
+GET    /api/v1/users      # permission: user:read
 GET    /api/v1/users/:id  # permission: user:read
 POST   /api/v1/users      # permission: user:create
 PUT    /api/v1/users/:id  # permission: user:update
@@ -147,7 +147,7 @@ DELETE /api/v1/users/:id  # permission: user:delete
 #### Role Management
 
 ```
-GET    /api/v1/roles      # permission: role:list
+GET    /api/v1/roles      # permission: role:read
 POST   /api/v1/roles      # permission: role:create
 PUT    /api/v1/roles/:id  # permission: role:update
 DELETE /api/v1/roles/:id  # permission: role:delete
@@ -156,7 +156,7 @@ DELETE /api/v1/roles/:id  # permission: role:delete
 #### Permission Management
 
 ```
-GET    /api/v1/permissions      # permission: permission:list
+GET    /api/v1/permissions      # permission: permission:read
 GET    /api/v1/permissions/:id  # permission: permission:read
 POST   /api/v1/permissions      # permission: permission:create
 PUT    /api/v1/permissions/:id  # permission: permission:update
@@ -166,7 +166,7 @@ DELETE /api/v1/permissions/:id  # permission: permission:delete
 #### Menu Management
 
 ```
-GET /api/v1/menus  # permission: menu:list
+GET /api/v1/menus  # permission: menu:read
 ```
 
 #### Rate Limit Rules Management
@@ -245,21 +245,19 @@ Standard naming convention: `resource:action`
 
 | Code | Description |
 |------|-------------|
-| `user:list` | List users |
-| `user:read` | Get user detail |
+| `user:read` | List users and get user detail |
 | `user:create` | Create user |
 | `user:update` | Update user |
 | `user:delete` | Delete user |
-| `role:list` | List roles |
 | `role:create` | Create role |
 | `role:update` | Update role |
 | `role:delete` | Delete role |
-| `permission:list` | List permissions |
-| `permission:read` | Get permission detail |
+| `role:read` | List roles |
+| `permission:read` | List permissions and get permission detail |
 | `permission:create` | Create permission |
 | `permission:update` | Update permission |
 | `permission:delete` | Delete permission |
-| `menu:list` | List menus |
+| `menu:read` | List menus |
 | `rate_limit:list` | List rate limit rules |
 | `rate_limit:create` | Create rate limit rule |
 | `rate_limit:update` | Update rate limit rule |
@@ -290,6 +288,8 @@ e = some(where (p.eft == allow))
 [matchers]
 m = g(r.sub, p.sub) && r.obj == p.obj && r.act == p.act
 ```
+
+RBAC policies use `act = "execute"`; the permission code identifies the action. The HTTP method stored on an API permission is route metadata.
 
 ## Project Structure
 

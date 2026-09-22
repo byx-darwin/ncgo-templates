@@ -12,7 +12,7 @@ body: |
       http:
         port: "8080"
         network: "tcp"
-        mode: 0
+        mode: 1
       registry:
         name: "{{ToLower .ServiceName}}"
       # 链路追踪（go-framework OTLP gRPC → Jaeger/collector）
@@ -84,7 +84,7 @@ body: |
         - "*"
     # 限流配置
     rate_limit:
-      enabled: true
+      enabled: false
       # 可选：仅当需要覆盖顶层 redis 连接时填写；留空则复用顶层 redis
       # 结构与顶层 redis 完全一致
       redis: {{ "{" }}{{ "}" }}
@@ -99,6 +99,13 @@ body: |
           max_requests: 10
     # 鉴权配置
     auth:
+      token:
+        enabled: true
+        header: "Authorization"
+        signing_key: "dev-secret-change-me"
+        issuer: ""
+        buffer_seconds: "300s"
+        expires_seconds: "3600s"
       public_paths:
         - /healthz
         - /readyz
@@ -143,7 +150,7 @@ body: |
         - 127.0.0.0/8
     # 配置中心：用于在本地文件之上叠加远程配置；默认关闭
     config_center:
-      enabled: true
+      enabled: false
     # RPC 客户端配置
     grpc:
       authority:
@@ -159,4 +166,4 @@ body: |
 
     # JWT 配置（与 rbac 一致）
     jwt:
-      secret: "your-256-bit-secret-for-jwt-token-signing"
+      secret: "dev-secret-change-me"

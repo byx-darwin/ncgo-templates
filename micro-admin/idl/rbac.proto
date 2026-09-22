@@ -22,6 +22,7 @@ service RBACService {
   rpc CreateRole(CreateRoleReq) returns (CreateRoleResp);
   rpc UpdateRole(UpdateRoleReq) returns (UpdateRoleResp);
   rpc DeleteRole(DeleteRoleReq) returns (DeleteRoleResp);
+  rpc AssignRolesToUser(AssignRolesToUserReq) returns (AssignRolesToUserResp);
 
   // Permission management
   rpc ListPermissions(ListPermissionsReq) returns (ListPermissionsResp);
@@ -29,13 +30,10 @@ service RBACService {
   rpc CreatePermission(CreatePermissionReq) returns (CreatePermissionResp);
   rpc UpdatePermission(UpdatePermissionReq) returns (UpdatePermissionResp);
   rpc DeletePermission(DeletePermissionReq) returns (DeletePermissionResp);
+  rpc GrantPermissionsToRole(GrantPermissionsToRoleReq) returns (GrantPermissionsToRoleResp);
 
   // Menu management
   rpc ListMenus(ListMenusReq) returns (ListMenusResp);
-
-  // Assignment operations
-  rpc AssignRolesToUser(AssignRolesToUserReq) returns (AssignRolesToUserResp);
-  rpc GrantPermissionsToRole(GrantPermissionsToRoleReq) returns (GrantPermissionsToRoleResp);
 
   // Current user operations
   rpc GetUserMenuTree(GetUserMenuTreeReq) returns (GetUserMenuTreeResp);
@@ -43,7 +41,7 @@ service RBACService {
 }
 
 message EnforceReq {
-  string sub = 1;
+  string uid = 1;
   string obj = 2;
   string act = 3;
 }
@@ -56,9 +54,12 @@ message EnforceResp {
 message User {
   string id = 1;
   string username = 2;
-  string email = 3;
-  bool active = 4;
-  repeated string roles = 5;
+  int32 status = 3;
+  repeated string roles = 4;
+  string nickname = 5;
+  string avatar = 6;
+  string email = 7;
+  string phone = 8;
 }
 
 message ListUsersReq {
@@ -82,8 +83,10 @@ message GetUserResp {
 message CreateUserReq {
   string username = 1;
   string password = 2;
-  string email = 3;
-  repeated string roles = 4;
+  string nickname = 3;
+  string avatar = 4;
+  string email = 5;
+  string phone = 6;
 }
 
 message CreateUserResp {
@@ -92,10 +95,12 @@ message CreateUserResp {
 
 message UpdateUserReq {
   string id = 1;
-  string username = 2;
-  string email = 3;
-  bool active = 4;
-  repeated string roles = 5;
+  optional string password = 2;
+  optional int32 status = 3;
+  optional string nickname = 4;
+  optional string avatar = 5;
+  optional string email = 6;
+  optional string phone = 7;
 }
 
 message UpdateUserResp {
@@ -113,9 +118,11 @@ message DeleteUserResp {
 // Role messages
 message Role {
   string id = 1;
-  string name = 2;
-  string description = 3;
-  repeated string permissions = 4;
+  string code = 2;
+  string name = 3;
+  int32 status = 4;
+  string remark = 5;
+  repeated string permissions = 6;
 }
 
 message ListRolesReq {
@@ -129,9 +136,9 @@ message ListRolesResp {
 }
 
 message CreateRoleReq {
-  string name = 1;
-  string description = 2;
-  repeated string permissions = 3;
+  string code = 1;
+  string name = 2;
+  string remark = 3;
 }
 
 message CreateRoleResp {
@@ -141,8 +148,8 @@ message CreateRoleResp {
 message UpdateRoleReq {
   string id = 1;
   string name = 2;
-  string description = 3;
-  repeated string permissions = 4;
+  optional int32 status = 3;
+  optional string remark = 4;
 }
 
 message UpdateRoleResp {
@@ -157,12 +164,31 @@ message DeleteRoleResp {
   bool success = 1;
 }
 
+message AssignRolesToUserReq {
+  string user_id = 1;
+  repeated string role_ids = 2;
+}
+
+message AssignRolesToUserResp {}
+
 // Permission messages
 message Permission {
   string id = 1;
   string code = 2;
-  string name = 3;
-  string description = 4;
+  string type = 3;
+  string name = 4;
+  string parent_id = 5;
+  string path = 6;
+  string icon = 7;
+  string route_name = 8;
+  string redirect = 9;
+  bool keep_alive = 10;
+  bool hide_in_menu = 11;
+  bool is_external = 12;
+  string method = 13;
+  int32 sort = 14;
+  int32 status = 15;
+  string description = 16;
 }
 
 message ListPermissionsReq {
@@ -185,8 +211,20 @@ message GetPermissionResp {
 
 message CreatePermissionReq {
   string code = 1;
-  string name = 2;
-  string description = 3;
+  string type = 2;
+  string name = 3;
+  string parent_id = 4;
+  string path = 5;
+  string icon = 6;
+  string route_name = 7;
+  string redirect = 8;
+  bool keep_alive = 9;
+  bool hide_in_menu = 10;
+  bool is_external = 11;
+  string method = 12;
+  int32 sort = 13;
+  int32 status = 14;
+  string description = 15;
 }
 
 message CreatePermissionResp {
@@ -195,9 +233,21 @@ message CreatePermissionResp {
 
 message UpdatePermissionReq {
   string id = 1;
-  string code = 2;
-  string name = 3;
-  string description = 4;
+  optional string code = 2;
+  optional string type = 3;
+  optional string name = 4;
+  optional string parent_id = 5;
+  optional string path = 6;
+  optional string icon = 7;
+  optional string route_name = 8;
+  optional string redirect = 9;
+  optional bool keep_alive = 10;
+  optional bool hide_in_menu = 11;
+  optional bool is_external = 12;
+  optional string method = 13;
+  optional int32 sort = 14;
+  optional int32 status = 15;
+  optional string description = 16;
 }
 
 message UpdatePermissionResp {
@@ -212,14 +262,28 @@ message DeletePermissionResp {
   bool success = 1;
 }
 
+message GrantPermissionsToRoleReq {
+  string role_id = 1;
+  repeated string permission_codes = 2;
+}
+
+message GrantPermissionsToRoleResp {}
+
 // Menu messages
 message Menu {
   string id = 1;
-  string name = 2;
-  string path = 3;
-  string icon = 4;
-  string parent_id = 5;
-  int32 order = 6;
+  string code = 2;
+  string name = 3;
+  string parent_id = 4;
+  string type = 5;
+  string path = 6;
+  string icon = 7;
+  string route_name = 8;
+  string redirect = 9;
+  bool keep_alive = 10;
+  bool hide_in_menu = 11;
+  bool is_external = 12;
+  int32 sort = 13;
 }
 
 message ListMenusReq {
@@ -233,23 +297,22 @@ message ListMenusResp {
 }
 
 message GetUserMenuTreeReq {
-  string user_id = 1;
+  string uid = 1;
+}
+
+message MenuNode {
+  Menu menu = 1;
+  repeated MenuNode children = 2;
 }
 
 message GetUserMenuTreeResp {
-  repeated Menu menus = 1;
+  repeated MenuNode roots = 1;
 }
 
 message GetUserPermCodesReq {
-  string user_id = 1;
+  string uid = 1;
 }
 
 message GetUserPermCodesResp {
-  repeated string perm_codes = 1;
+  repeated string codes = 1;
 }
-
-// Assignment messages
-message AssignRolesToUserReq { string user_id = 1; repeated string role_ids = 2; }
-message AssignRolesToUserResp {}
-message GrantPermissionsToRoleReq { string role_id = 1; repeated string permission_codes = 2; }
-message GrantPermissionsToRoleResp {}

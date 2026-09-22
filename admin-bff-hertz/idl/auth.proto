@@ -12,6 +12,11 @@ service AuthService {
   rpc Refresh(RefreshReq) returns (RefreshResp);
   rpc Logout(LogoutReq) returns (LogoutResp);
   rpc ValidateToken(ValidateTokenReq) returns (ValidateTokenResp);
+  rpc LoginByDingtalk(DingtalkIdentityReq) returns (DingtalkLoginResp);
+  rpc SubmitDingtalkApplication(DingtalkIdentityReq) returns (DingtalkApplicationResp);
+  rpc ListDingtalkApplications(ListDingtalkApplicationsReq) returns (ListDingtalkApplicationsResp);
+  rpc ApproveDingtalkApplication(ApproveDingtalkApplicationReq) returns (DingtalkApplicationResp);
+  rpc RejectDingtalkApplication(RejectDingtalkApplicationReq) returns (DingtalkApplicationResp);
 }
 
 message LoginReq {
@@ -52,3 +57,21 @@ message ValidateTokenResp {
   repeated string roles = 2;
   bool valid = 3;
 }
+message DingtalkIdentityReq { string union_id = 1; string name = 2; string avatar = 3; string mobile = 4; }
+message DingtalkLoginResp { bool found = 1; string access_token = 2; string refresh_token = 3; int32 expires_in = 4; }
+message DingtalkApplication {
+  string id = 1;
+  string union_id = 2;
+  string name = 3;
+  string avatar = 4;
+  string mobile = 5;
+  string status = 6;
+  string user_id = 7;
+  string reason = 8;
+  string created_at = 9;
+}
+message DingtalkApplicationResp { DingtalkApplication application = 1; }
+message ListDingtalkApplicationsReq { string status = 1; int32 page = 2; int32 page_size = 3; string reviewer_id = 4; }
+message ListDingtalkApplicationsResp { repeated DingtalkApplication applications = 1; int32 total = 2; }
+message ApproveDingtalkApplicationReq { string id = 1; repeated string role_ids = 2; string reviewer_id = 3; }
+message RejectDingtalkApplicationReq { string id = 1; string reason = 2; string reviewer_id = 3; }

@@ -145,10 +145,10 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
-    	if _, err := e.AddPolicy("admin", p.Code, "DELETE"); err != nil {{ "{" }}
+        if _, err := e.AddPolicy("admin", p.Code, "execute"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); !allowed {{ "{" }}
+        if allowed, _ := e.Enforce("admin", p.Code, "execute"); !allowed {{ "{" }}
     		t.Fatal("Enforce before update = false, want true")
     	{{ "}" }}
 
@@ -156,7 +156,7 @@ body: |
     	if _, err := svc.Update(ctx, UpdatePermissionInput{{ "{" }}ID: fmt.Sprint(p.ID), Code: &newCode{{ "}" }}); err != nil {{ "{" }}
     		t.Fatalf("Update: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", "user:delete", "DELETE"); allowed {{ "{" }}
+        if allowed, _ := e.Enforce("admin", "user:delete", "execute"); allowed {{ "{" }}
     		t.Fatal("Enforce for old code after update = true, want false")
     	{{ "}" }}
     {{ "}" }}
@@ -220,17 +220,17 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
-    	if _, err := e.AddPolicy("admin", p.Code, "DELETE"); err != nil {{ "{" }}
+        if _, err := e.AddPolicy("admin", p.Code, "execute"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); !allowed {{ "{" }}
+        if allowed, _ := e.Enforce("admin", p.Code, "execute"); !allowed {{ "{" }}
     		t.Fatal("Enforce before delete = false, want true")
     	{{ "}" }}
 
     	if err := svc.Delete(ctx, fmt.Sprint(p.ID)); err != nil {{ "{" }}
     		t.Fatalf("Delete: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", p.Code, "DELETE"); allowed {{ "{" }}
+        if allowed, _ := e.Enforce("admin", p.Code, "execute"); allowed {{ "{" }}
     		t.Fatal("Enforce after delete = true, want false")
     	{{ "}" }}
     {{ "}" }}
@@ -247,17 +247,17 @@ body: |
     	if err != nil {{ "{" }}
     		t.Fatalf("Create child: %v", err)
     	{{ "}" }}
-    	if _, err := e.AddPolicy("admin", child.Code, "DELETE"); err != nil {{ "{" }}
+        if _, err := e.AddPolicy("admin", child.Code, "execute"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", child.Code, "DELETE"); !allowed {{ "{" }}
+        if allowed, _ := e.Enforce("admin", child.Code, "execute"); !allowed {{ "{" }}
     		t.Fatal("Enforce before delete = false, want true")
     	{{ "}" }}
 
     	if err := svc.Delete(ctx, fmt.Sprint(parent.ID)); err != nil {{ "{" }}
     		t.Fatalf("Delete: %v", err)
     	{{ "}" }}
-    	if allowed, _ := e.Enforce("admin", child.Code, "DELETE"); allowed {{ "{" }}
+        if allowed, _ := e.Enforce("admin", child.Code, "execute"); allowed {{ "{" }}
     		t.Fatal("Enforce(child) after cascade delete = true, want false")
     	{{ "}" }}
     {{ "}" }}

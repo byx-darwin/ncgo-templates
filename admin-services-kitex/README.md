@@ -275,21 +275,19 @@ Standard naming: `resource:action`
 
 | Permission | Description |
 |------------|-------------|
-| `user:list` | List users |
-| `user:read` | Read user |
+| `user:read` | List and read users |
 | `user:create` | Create user |
 | `user:update` | Update user |
 | `user:delete` | Delete user |
-| `role:list` | List roles |
+| `role:read` | List roles |
 | `role:create` | Create role |
 | `role:update` | Update role |
 | `role:delete` | Delete role |
-| `permission:list` | List permissions |
-| `permission:read` | Read permission |
+| `permission:read` | List and read permissions |
 | `permission:create` | Create permission |
 | `permission:update` | Update permission |
 | `permission:delete` | Delete permission |
-| `menu:list` | List menus |
+| `menu:read` | List menus |
 | `rate_limit:list` | List rate limit rules |
 | `rate_limit:create` | Create rate limit rule |
 | `rate_limit:update` | Update rate limit rule |

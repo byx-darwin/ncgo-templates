@@ -6,68 +6,106 @@ option go_package = "{{.Module}}/kitex_gen/api/ratelimit/v1;ratelimitv1";
 
 import "api.proto";
 
-// RuleService handles rate limit rule management
 service RuleService {
-  rpc ListRules(ListRulesReq) returns (ListRulesResp);
+  rpc GetRule(GetRuleReq) returns (GetRuleResp);
   rpc CreateRule(CreateRuleReq) returns (CreateRuleResp);
   rpc UpdateRule(UpdateRuleReq) returns (UpdateRuleResp);
   rpc DeleteRule(DeleteRuleReq) returns (DeleteRuleResp);
+  rpc ListRules(ListRulesReq) returns (ListRulesResp);
 }
 
-message RateLimitRule {
-  string id = 1;
-  string name = 2;
-  string path_pattern = 3;
-  string method = 4;
-  int64 limit = 5;
-  int64 window_seconds = 6;
-  string strategy = 7;
-  bool enabled = 8;
+// ──────────────────────────────────────────────
+message GetRuleReq {
+  string service = 1;
+  string phase = 2;
+  string method = 3;
+  string path = 4;
+  optional string app_key = 5;
 }
+
+message GetRuleResp {
+  bool found = 1;
+  RateLimitRule rule = 2;
+}
+
+message CreateRuleReq {
+  string service = 1;
+  string phase = 2;
+  string method = 3;
+  string path = 4;
+  string match_kind = 5;
+  string path_pattern = 6;
+  optional string app_key = 7;
+  RateLimitConfig config = 8;
+}
+
+message RateLimitConfig {
+  int32 priority = 1;
+  bool enabled = 2;
+  repeated string key_by = 3;
+  string strategy = 4;
+  int32 window_seconds = 5;
+  int32 max_requests = 6;
+  double requests_per_second = 7;
+  int32 burst = 8;
+  int32 client_ttl_seconds = 9;
+}
+
+message CreateRuleResp {
+  int64 id = 1;
+}
+
+message UpdateRuleReq {
+  int64 id = 1;
+  optional bool enabled = 2;
+  optional int32 priority = 3;
+  repeated string key_by = 4;
+  optional string strategy = 5;
+  optional int32 window_seconds = 6;
+  optional int32 max_requests = 7;
+  optional double requests_per_second = 8;
+  optional int32 burst = 9;
+  optional int32 client_ttl_seconds = 10;
+}
+
+message UpdateRuleResp {}
+
+message DeleteRuleReq {
+  int64 id = 1;
+}
+
+message DeleteRuleResp {}
 
 message ListRulesReq {
-  int32 page = 1;
-  int32 page_size = 2;
+  optional string service = 1;
+  optional string phase = 2;
+  int32 page = 3;
+  int32 page_size = 4;
 }
 
 message ListRulesResp {
   repeated RateLimitRule rules = 1;
   int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
 }
 
-message CreateRuleReq {
-  string name = 1;
-  string path_pattern = 2;
-  string method = 3;
-  int64 limit = 4;
-  int64 window_seconds = 5;
-  string strategy = 6;
-  bool enabled = 7;
-}
-
-message CreateRuleResp {
-  RateLimitRule rule = 1;
-}
-
-message UpdateRuleReq {
-  string id = 1;
-  string name = 2;
-  string path_pattern = 3;
+message RateLimitRule {
+  int64 id = 1;
+  string service = 2;
+  string phase = 3;
   string method = 4;
-  int64 limit = 5;
-  int64 window_seconds = 6;
-  string strategy = 7;
-  bool enabled = 8;
-}
-
-message UpdateRuleResp {
-  RateLimitRule rule = 1;
-}
-
-message DeleteRuleReq {
-  string id = 1;
-}
-
-message DeleteRuleResp {
-  bool success = 1;
+  string match_kind = 5;
+  string path = 6;
+  string path_pattern = 7;
+  optional string app_key = 8;
+  int32 priority = 9;
+  bool enabled = 10;
+  repeated string key_by = 11;
+  string strategy = 12;
+  int32 window_seconds = 13;
+  int32 max_requests = 14;
+  double requests_per_second = 15;
+  int32 burst = 16;
+  int32 client_ttl_seconds = 17;
 }

@@ -1,0 +1,89 @@
+path: internal/handler/dingtalk.go
+update_behavior:
+    type: cover
+loop_service: true
+body: |
+    package handler
+
+    import (
+     "bytes"
+     "context"
+     "crypto/hmac"
+     "crypto/sha256"
+     "encoding/base64"
+     "encoding/json"
+     "errors"
+     "io"
+     "net/http"
+     "os"
+     "strconv"
+     "strings"
+     "time"
+
+     "github.com/cloudwego/hertz/pkg/app"
+     "github.com/cloudwego/hertz/pkg/protocol/consts"
+     "{{.Module}}/internal/pkg/middleware"
+     "{{.Module}}/internal/pkg/response"
+     api "{{.Module}}/kitex_gen/api/auth/v1"
+     authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
+    )
+
+    type dingProfile struct {{ "{" }} UnionID string `json:"unionId"`; Name string `json:"nick"`; Avatar string `json:"avatarUrl"`; Mobile string `json:"mobile"`; Expires int64 `json:"exp,omitempty"` {{ "}" }}
+    type DingTalkHandler struct {{ "{" }} rpc authservice.Client; key,secret,base string; http *http.Client {{ "}" }}
+    func NewDingTalkHandler(rpc authservice.Client)*DingTalkHandler{{ "{" }}
+     base:=os.Getenv("DINGTALK_API_BASE_URL");if base==""{{ "{" }}base="https://api.dingtalk.com"{{ "}" }}
+     return &DingTalkHandler{{ "{" }}rpc:rpc,key:os.Getenv("DINGTALK_APP_KEY"),secret:os.Getenv("DINGTALK_APP_SECRET"),base:strings.TrimRight(base,"/"),http:&http.Client{{ "{" }}Timeout:8*time.Second{{ "}" }}{{ "}" }}
+    {{ "}" }}
+    func (h *DingTalkHandler) enabled()bool{{ "{" }}return h.key!=""&&h.secret!=""{{ "}" }}
+    func (h *DingTalkHandler) Login(ctx context.Context,c *app.RequestContext){{ "{" }}
+     if !h.enabled(){{ "{" }}response.ErrorCode(c,response.CodeConfigInvalid);return{{ "}" }}
+     var input struct{{ "{" }}Code string `json:"code"`{{ "}" }};if json.Unmarshal(c.Request.Body(),&input)!=nil||input.Code==""{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     profile,err:=h.exchange(ctx,input.Code);if err!=nil{{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
+     result,err:=h.rpc.LoginByDingtalk(ctx,&api.DingtalkIdentityReq{{ "{" }}UnionId:profile.UnionID,Name:profile.Name,Avatar:profile.Avatar,Mobile:profile.Mobile{{ "}" }})
+     if err!=nil||result==nil{{ "{" }}response.ErrorCode(c,response.CodeInternalError);return{{ "}" }}
+     if result.Found{{ "{" }}response.OK(c,map[string]interface{{ "{" }}{{ "}" }}{{ "{" }}"found":true,"access_token":result.AccessToken,"refresh_token":result.RefreshToken,"expires_in":result.ExpiresIn{{ "}" }});return{{ "}" }}
+     profile.Expires=time.Now().Add(10*time.Minute).Unix()
+     payload,_:=json.Marshal(profile);body:=base64.RawURLEncoding.EncodeToString(payload)
+     mac:=hmac.New(sha256.New,[]byte(h.secret));mac.Write([]byte(body));sig:=base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+     response.OK(c,map[string]interface{{ "{" }}{{ "}" }}{{ "{" }}"found":false,"apply_token":body+"."+sig,"name":profile.Name,"avatar":profile.Avatar{{ "}" }})
+    {{ "}" }}
+    func (h *DingTalkHandler) Apply(ctx context.Context,c *app.RequestContext){{ "{" }}
+     if !h.enabled(){{ "{" }}response.ErrorCode(c,response.CodeConfigInvalid);return{{ "}" }}
+     var input struct{{ "{" }}Token string `json:"apply_token"`{{ "}" }};if json.Unmarshal(c.Request.Body(),&input)!=nil{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     parts:=strings.Split(input.Token,".");if len(parts)!=2{{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
+     sig,err:=base64.RawURLEncoding.DecodeString(parts[1]);if err!=nil{{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
+     mac:=hmac.New(sha256.New,[]byte(h.secret));mac.Write([]byte(parts[0]));if !hmac.Equal(sig,mac.Sum(nil)){{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
+     raw,err:=base64.RawURLEncoding.DecodeString(parts[0]);if err!=nil{{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
+     var profile dingProfile
+     if json.Unmarshal(raw,&profile)!=nil||profile.UnionID==""||profile.Expires<time.Now().Unix(){{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
+     result,err:=h.rpc.SubmitDingtalkApplication(ctx,&api.DingtalkIdentityReq{{ "{" }}UnionId:profile.UnionID,Name:profile.Name,Avatar:profile.Avatar,Mobile:profile.Mobile{{ "}" }});if err!=nil||result==nil||result.Application==nil{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     response.OK(c,result.Application)
+    {{ "}" }}
+    func (h *DingTalkHandler) List(ctx context.Context,c *app.RequestContext){{ "{" }}
+     claims,ok:=middleware.GetClaims(c);if !ok{{ "{" }}response.ErrorCode(c,response.CodeUnauthorized);return{{ "}" }}
+     page,_:=strconv.ParseInt(string(c.Query("page")),10,32);size,_:=strconv.ParseInt(string(c.Query("page_size")),10,32)
+     result,err:=h.rpc.ListDingtalkApplications(ctx,&api.ListDingtalkApplicationsReq{{ "{" }}ReviewerId:claims.Uid,Status:string(c.Query("status")),Page:int32(page),PageSize:int32(size){{ "}" }});if err!=nil||result==nil{{ "{" }}response.ErrorCode(c,response.CodePermissionDenied);return{{ "}" }}
+     response.OK(c,map[string]interface{{ "{" }}{{ "}" }}{{ "{" }}"applications":result.Applications,"total":result.Total{{ "}" }})
+    {{ "}" }}
+    func (h *DingTalkHandler) Approve(ctx context.Context,c *app.RequestContext){{ "{" }}
+     claims,ok:=middleware.GetClaims(c);if !ok{{ "{" }}response.ErrorCode(c,response.CodeUnauthorized);return{{ "}" }}
+     var input struct{{ "{" }}RoleIDs []string `json:"role_ids"`{{ "}" }};if json.Unmarshal(c.Request.Body(),&input)!=nil||len(input.RoleIDs)==0{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     result,err:=h.rpc.ApproveDingtalkApplication(ctx,&api.ApproveDingtalkApplicationReq{{ "{" }}Id:string(c.Param("id")),RoleIds:input.RoleIDs,ReviewerId:claims.Uid{{ "}" }});if err!=nil||result==nil||result.Application==nil{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     response.OK(c,result.Application)
+    {{ "}" }}
+    func (h *DingTalkHandler) Reject(ctx context.Context,c *app.RequestContext){{ "{" }}
+     claims,ok:=middleware.GetClaims(c);if !ok{{ "{" }}response.ErrorCode(c,response.CodeUnauthorized);return{{ "}" }}
+     var input struct{{ "{" }}Reason string `json:"reason"`{{ "}" }};if json.Unmarshal(c.Request.Body(),&input)!=nil||strings.TrimSpace(input.Reason)==""{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     result,err:=h.rpc.RejectDingtalkApplication(ctx,&api.RejectDingtalkApplicationReq{{ "{" }}Id:string(c.Param("id")),Reason:input.Reason,ReviewerId:claims.Uid{{ "}" }});if err!=nil||result==nil||result.Application==nil{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
+     response.OK(c,result.Application)
+    {{ "}" }}
+    func (h *DingTalkHandler) exchange(ctx context.Context,code string)(dingProfile,error){{ "{" }}
+     body,_:=json.Marshal(map[string]string{{ "{" }}"clientId":h.key,"clientSecret":h.secret,"code":code,"grantType":"authorization_code"{{ "}" }})
+     req,err:=http.NewRequestWithContext(ctx,http.MethodPost,h.base+"/v1.0/oauth2/userAccessToken",bytes.NewReader(body));if err!=nil{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},err{{ "}" }};req.Header.Set("Content-Type","application/json")
+     resp,err:=h.http.Do(req);if err!=nil{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},err{{ "}" }};defer resp.Body.Close();if resp.StatusCode!=http.StatusOK{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},errors.New("dingtalk token request rejected"){{ "}" }}
+     var token struct{{ "{" }}AccessToken string `json:"accessToken"`{{ "}" }};if err:=json.NewDecoder(io.LimitReader(resp.Body,1<<20)).Decode(&token);err!=nil{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},err{{ "}" }};if token.AccessToken==""{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},errors.New("empty dingtalk access token"){{ "}" }}
+     req,err=http.NewRequestWithContext(ctx,http.MethodGet,h.base+"/v1.0/contact/users/me",nil);if err!=nil{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},err{{ "}" }};req.Header.Set("x-acs-dingtalk-access-token",token.AccessToken)
+     resp,err=h.http.Do(req);if err!=nil{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},err{{ "}" }};defer resp.Body.Close();if resp.StatusCode!=http.StatusOK{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},errors.New("dingtalk profile request rejected"){{ "}" }}
+     var profile dingProfile;if err:=json.NewDecoder(io.LimitReader(resp.Body,1<<20)).Decode(&profile);err!=nil{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},err{{ "}" }};if profile.UnionID==""{{ "{" }}return dingProfile{{ "{" }}{{ "}" }},errors.New("missing dingtalk union id"){{ "}" }};return profile,nil
+    {{ "}" }}
+    var _=consts.StatusOK

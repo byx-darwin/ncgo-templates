@@ -32,11 +32,21 @@ Client → admin-bff-hertz (HTTP :8080)
 - `hz` (Hertz code generator)
 - `kitex` (Kitex code generator)
 - `sqlc` (SQL compiler)
+- `goose` (database migrations)
+- `jq` (HTTP smoke assertions)
 - `docker` + `docker compose` (for infrastructure)
 - `postgres` 15+ (or use docker-compose)
 - `redis` 7+ (or use docker-compose)
 
 ## Quick Start
+
+### DingTalk operations login
+
+The authority service includes the `000002_dingtalk.sql` migration. Apply all migrations before startup, then run `scripts/seed.sql` to grant the default admin `user:approve`.
+
+Set `DINGTALK_APP_KEY` and `DINGTALK_APP_SECRET` in the admin BFF process. The BFF exchanges the one-time authorization code and keeps the secret server side. For local tests, `DINGTALK_API_BASE_URL` may point to a mock server; otherwise it defaults to `https://api.dingtalk.com`. Without credentials, password login remains available.
+
+Build `ncgo-admin-web-template` with `DINGTALK_APP_KEY` and `DINGTALK_REDIRECT_URI`, and register the exact callback URI with the DingTalk application. A new identity submits an application; a user with `user:approve` and `role:read` assigns a role under **用户管理 → 钉钉申请**. After approval, the applicant scans again. The public application endpoint accepts a signed ten-minute `apply_token`, rather than a caller-supplied UnionID.
 
 ### 1. Create Workspace
 
@@ -74,17 +84,24 @@ make infra-up
 docker compose -f compose.infra.yaml up -d
 ```
 
+Run `make prepare` once after adding both services. It enables the authority
+database in the generated development config, generates the BFF's four Kitex
+clients, runs `sqlc` and the BFF i18n generator, and resolves Go dependencies.
+
+```bash
+make prepare
+```
+
 ### 5. Initialize Database
 
 ```bash
 # Run migrations for authority service
 cd services/authority
-make sqlc
 DATABASE_URL="postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" make migrate-up
 
 # Seed initial data (admin user, roles, permissions)
-psql "postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable" \
-  -v ON_ERROR_STOP=1 -f ../../scripts/seed.sql
+docker compose -f ../../compose.infra.yaml exec -T postgres \
+  psql -U postgres -d micro_admin -v ON_ERROR_STOP=1 < ../../scripts/seed.sql
 
 cd ../..
 ```
@@ -94,29 +111,29 @@ cd ../..
 ```bash
 # Build authority service
 cd services/authority
-go mod tidy
 go build -o authority .
 cd ../..
 
 # Build admin BFF
 cd services/admin
-go mod tidy
 go build -o admin .
 cd ../..
 
-# Start services
-cd services/authority && GO_ENV=dev ./authority > /tmp/authority.log 2>&1 &
-cd ../admin && GO_ENV=dev ./admin > /tmp/admin.log 2>&1 &
-cd ../..
+# Start authority in one terminal
+(cd services/authority && GO_ENV=dev ./authority)
 
-sleep 3
+# Start BFF in another terminal
+(cd services/admin && GO_ENV=dev ./admin)
 ```
 
 ### 7. Test
 
 ```bash
-# Run smoke test
+# Run smoke test against running services
 bash scripts/smoke-test.sh
+
+# Or run fresh Docker-backed migrations, seed, unit tests, and HTTP smoke checks:
+make test
 
 # Or manually:
 
@@ -138,7 +155,7 @@ curl -X POST http://localhost:8080/api/v1/users \
 curl -X POST http://localhost:8080/api/v1/rate-limit-rules \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"name":"api-limit","limit":100,"window":"1m"}'
+  -d '{"service":"admin","phase":"pre_auth","method":"GET","path":"/api/v1/example","match_kind":"exact","path_pattern":"/api/v1/example","config":{"enabled":true,"key_by":["ip"],"strategy":"fixed_window","window_seconds":60,"max_requests":100}}'
 ```
 
 ## Workspace Layout
@@ -152,6 +169,7 @@ my-admin/
 ├── .pre-commit-config.yaml # Git hooks
 ├── scripts/
 │   ├── e2e-test.sh        # E2E test runner
+│   ├── prepare.sh         # Generate clients and code for both services
 │   ├── smoke-test.sh      # Happy-path smoke test
 │   └── seed.sql           # Initial data (admin user, roles, permissions)
 └── services/
@@ -182,7 +200,7 @@ redis:
 auth:
   jwt_secret: "dev-secret-change-me"
   access_ttl_seconds: 3600
-  refresh_ttl_seconds: 86400
+  refresh_ttl_seconds: 604800
   token_store: "memory"  # or "redis"
 ```
 
@@ -194,6 +212,7 @@ Edit `services/admin/conf/dev/conf.yaml`:
 server:
   http:
     port: "8080"
+    mode: 1  # Listen on all interfaces so localhost reaches the BFF
 
 database:
   enabled: true
@@ -203,21 +222,20 @@ redis:
   addrs:
     - "127.0.0.1:6379"
 
-jwt:
-  secret: "dev-secret-change-me"  # Must match authority service
-  access_token_ttl_seconds: 3600
+auth:
+  token:
+    enabled: true
+    header: "Authorization"
+    signing_key: "dev-secret-change-me"  # Must match authority auth.jwt_secret
+  signature:
+    enabled: false
+    static_secret: ""
 
 grpc:
   authority:
     service_name: "authority"
     host_ports:
       - "127.0.0.1:8888"
-
-# Optional: Enable API signature
-auth:
-  signature:
-    enabled: false
-    static_secret: "your-app-secret"
 
 # Optional: Enable idempotency
 idempotency:
@@ -334,30 +352,30 @@ make test
 ./scripts/e2e-test.sh
 ```
 
-**Test Phases:**
-1. **Hermetic** (always runs) - Build + unit tests
-2. **Integration** (requires docker) - Start services + smoke test
+**Test phases:** generation, build, unit tests, fresh Docker database and Redis,
+migrations, seed, live services, then HTTP smoke checks. Docker and local
+ports 5432, 6379, 8888, and 8080 must be available.
 
 ### Smoke Test Steps
 
-1. Login (admin-bff → authority AuthService)
-2. Get menus (admin-bff → authority RBACService)
-3. Create user (admin-bff → authority RBACService with Authz)
-4. Create rate-limit rule (admin-bff → authority RuleService)
+1. Login, menus, permission codes, and resource lists
+2. User, role, permission, and rate-limit-rule create/update/delete
+3. Logout revocation
 
 ## Troubleshooting
 
 ### JWT Token Validation Failed
 
-Ensure `jwt.secret` matches in both services:
+Ensure BFF `auth.token.signing_key` matches authority `auth.jwt_secret`:
 ```yaml
 # services/authority/conf/dev/conf.yaml
 auth:
   jwt_secret: "dev-secret-change-me"
 
 # services/admin/conf/dev/conf.yaml
-jwt:
-  secret: "dev-secret-change-me"  # Must match!
+auth:
+  token:
+    signing_key: "dev-secret-change-me"
 ```
 
 ### Permission Denied

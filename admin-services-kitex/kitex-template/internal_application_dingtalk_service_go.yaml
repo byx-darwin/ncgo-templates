@@ -1,0 +1,105 @@
+path: internal/application/dingtalk/service.go
+update_behavior:
+    type: cover
+body: |
+    package dingtalk
+
+    import (
+     "context"
+     "crypto/rand"
+     "encoding/hex"
+     "errors"
+     "fmt"
+     "strconv"
+     "strings"
+     "time"
+
+     "github.com/google/uuid"
+     "github.com/jackc/pgx/v5"
+     "github.com/jackc/pgx/v5/pgxpool"
+
+     authsvc "{{.Module}}/internal/application/auth"
+     authinfra "{{.Module}}/internal/infrastructure/auth"
+    )
+
+    var ErrInvalid = errors.New("dingtalk: invalid request or state")
+    var ErrForbidden = errors.New("dingtalk: permission denied")
+
+    type PolicyReloader interface {{ "{" }} LoadPolicy() error {{ "}" }}
+    type Service struct {{ "{" }} pool *pgxpool.Pool; auth *authsvc.Service; policy PolicyReloader {{ "}" }}
+    func New(pool *pgxpool.Pool, auth *authsvc.Service, policy PolicyReloader) *Service {{ "{" }} return &Service{{ "{" }}pool:pool, auth:auth, policy:policy{{ "}" }} {{ "}" }}
+
+    type Application struct {{ "{" }}
+     ID, UnionID, Name, Avatar, Mobile, Status, UserID, Reason string
+     CreatedAt time.Time
+    {{ "}" }}
+    func (s *Service) Login(ctx context.Context, unionID string) (bool, string, string, int32, error) {{ "{" }}
+     if s.pool == nil || strings.TrimSpace(unionID)=="" {{ "{" }} return false,"","",0,ErrInvalid {{ "}" }}
+     var uid string
+     err:=s.pool.QueryRow(ctx, `SELECT u.uuid FROM dingtalk_bindings b JOIN users u ON u.id=b.user_id WHERE b.union_id=$1 AND u.status=1`,unionID).Scan(&uid)
+     if errors.Is(err,pgx.ErrNoRows) {{ "{" }} return false,"","",0,nil {{ "}" }}
+     if err!=nil {{ "{" }} return false,"","",0,err {{ "}" }}
+     u,err:=s.auth.UserByUUID(ctx,uid); if err!=nil {{ "{" }} return false,"","",0,err {{ "}" }}
+     access,refresh,ttl,err:=s.auth.IssueForUser(ctx,u)
+     return err==nil,access,refresh,ttl,err
+    {{ "}" }}
+    func (s *Service) Apply(ctx context.Context, unionID,name,avatar,mobile string) (*Application,error) {{ "{" }}
+     if s.pool==nil || strings.TrimSpace(unionID)=="" || strings.TrimSpace(name)=="" {{ "{" }}return nil,ErrInvalid{{ "}" }}
+     var bound bool
+     if err:=s.pool.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM dingtalk_bindings WHERE union_id=$1)`,unionID).Scan(&bound);err!=nil{{ "{" }}return nil,err{{ "}" }}; if bound{{ "{" }}return nil,ErrInvalid{{ "}" }}
+     var a Application
+     err:=s.pool.QueryRow(ctx,`INSERT INTO dingtalk_applications(union_id,name,avatar,mobile) VALUES($1,$2,$3,$4)
+     ON CONFLICT (union_id) WHERE status='pending' DO UPDATE SET name=EXCLUDED.name,avatar=EXCLUDED.avatar,mobile=EXCLUDED.mobile
+     RETURNING id::text,union_id,name,avatar,mobile,status,created_at`,unionID,name,avatar,mobile).Scan(&a.ID,&a.UnionID,&a.Name,&a.Avatar,&a.Mobile,&a.Status,&a.CreatedAt)
+     return &a,err
+    {{ "}" }}
+    func (s *Service) allowed(ctx context.Context, reviewer string) error {{ "{" }}
+     if reviewer=="" {{ "{" }}return ErrForbidden{{ "}" }}
+     var allowed bool
+     err:=s.pool.QueryRow(ctx,`SELECT EXISTS(SELECT 1 FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id JOIN role_permissions rp ON rp.role_id=r.id JOIN permissions p ON p.id=rp.permission_id WHERE u.uuid=$1 AND u.status=1 AND r.status=1 AND p.status=1 AND p.code='user:approve')`,reviewer).Scan(&allowed)
+     if err!=nil{{ "{" }}return err{{ "}" }};if !allowed{{ "{" }}return ErrForbidden{{ "}" }};return nil
+    {{ "}" }}
+    func (s *Service) List(ctx context.Context,reviewer,status string,page,size int32) ([]Application,int32,error) {{ "{" }}
+     if s.pool==nil{{ "{" }}return nil,0,ErrInvalid{{ "}" }};if err:=s.allowed(ctx,reviewer);err!=nil{{ "{" }}return nil,0,err{{ "}" }}
+     if status!=""&&status!="pending"&&status!="approved"&&status!="rejected" {{ "{" }}return nil,0,ErrInvalid{{ "}" }}
+     if page<1{{ "{" }}page=1{{ "}" }};if size<1||size>100{{ "{" }}size=20{{ "}" }}
+     var total int32
+     if err:=s.pool.QueryRow(ctx,`SELECT count(*) FROM dingtalk_applications WHERE ($1='' OR status=$1)`,status).Scan(&total);err!=nil{{ "{" }}return nil,0,err{{ "}" }}
+     rows,err:=s.pool.Query(ctx,`SELECT a.id::text,a.union_id,a.name,a.avatar,a.mobile,a.status,COALESCE(u.uuid,''),a.reason,a.created_at FROM dingtalk_applications a LEFT JOIN users u ON u.id=a.user_id WHERE ($1='' OR a.status=$1) ORDER BY a.created_at DESC LIMIT $2 OFFSET $3`,status,size,(page-1)*size)
+     if err!=nil{{ "{" }}return nil,0,err{{ "}" }};defer rows.Close()
+     out:=make([]Application,0)
+     for rows.Next(){{ "{" }}var a Application;if err:=rows.Scan(&a.ID,&a.UnionID,&a.Name,&a.Avatar,&a.Mobile,&a.Status,&a.UserID,&a.Reason,&a.CreatedAt);err!=nil{{ "{" }}return nil,0,err{{ "}" }};out=append(out,a){{ "}" }}
+     return out,total,rows.Err()
+    {{ "}" }}
+    func (s *Service) Approve(ctx context.Context,reviewer,id string,roleIDs []string) (*Application,error) {{ "{" }}
+     if s.pool==nil || len(roleIDs)==0{{ "{" }}return nil,ErrInvalid{{ "}" }};if err:=s.allowed(ctx,reviewer);err!=nil{{ "{" }}return nil,err{{ "}" }}
+     tx,err:=s.pool.Begin(ctx);if err!=nil{{ "{" }}return nil,err{{ "}" }};defer tx.Rollback(ctx)
+     var a Application
+     err=tx.QueryRow(ctx,`SELECT id::text,union_id,name,avatar,mobile,status,created_at FROM dingtalk_applications WHERE id=$1::bigint FOR UPDATE`,id).Scan(&a.ID,&a.UnionID,&a.Name,&a.Avatar,&a.Mobile,&a.Status,&a.CreatedAt)
+     if err!=nil{{ "{" }}return nil,err{{ "}" }};if a.Status!="pending"{{ "{" }}return nil,ErrInvalid{{ "}" }}
+     secret:=make([]byte,32);if _,err=rand.Read(secret);err!=nil{{ "{" }}return nil,err{{ "}" }};hash,err:=authinfra.HashPassword(hex.EncodeToString(secret));if err!=nil{{ "{" }}return nil,err{{ "}" }}
+     userUUID:=uuid.NewString();username:="dingtalk_"+userUUID
+     var userID int64
+     err=tx.QueryRow(ctx,`INSERT INTO users(uuid,username,password_hash,nickname,avatar,phone) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,userUUID,username,hash,a.Name,a.Avatar,a.Mobile).Scan(&userID)
+     if err!=nil{{ "{" }}return nil,err{{ "}" }}
+     if _,err=tx.Exec(ctx,`INSERT INTO dingtalk_bindings(union_id,user_id) VALUES($1,$2)`,a.UnionID,userID);err!=nil{{ "{" }}return nil,err{{ "}" }}
+     seen:=map[int64]bool{{ "{" }}{{ "}" }}
+     for _,raw:=range roleIDs {{ "{" }}roleID,e:=strconv.ParseInt(raw,10,64);if e!=nil||roleID<1{{ "{" }}return nil,ErrInvalid{{ "}" }};if seen[roleID]{{ "{" }}continue{{ "}" }};seen[roleID]=true
+      var code string
+      if e=tx.QueryRow(ctx,`SELECT code FROM roles WHERE id=$1 AND status=1`,roleID).Scan(&code);e!=nil{{ "{" }}return nil,ErrInvalid{{ "}" }}
+      if _,e=tx.Exec(ctx,`INSERT INTO user_roles(user_id,role_id) VALUES($1,$2)`,userID,roleID);e!=nil{{ "{" }}return nil,e{{ "}" }}
+      if _,e=tx.Exec(ctx,`INSERT INTO casbin_rule(ptype,v0,v1) VALUES('g',$1,$2) ON CONFLICT DO NOTHING`,userUUID,code);e!=nil{{ "{" }}return nil,e{{ "}" }}
+     {{ "}" }}
+     var reviewerID int64
+     if err=tx.QueryRow(ctx,`SELECT id FROM users WHERE uuid=$1`,reviewer).Scan(&reviewerID);err!=nil{{ "{" }}return nil,err{{ "}" }}
+     if _,err=tx.Exec(ctx,`UPDATE dingtalk_applications SET status='approved',user_id=$1,reviewer_id=$2,reviewed_at=now() WHERE id=$3::bigint`,userID,reviewerID,id);err!=nil{{ "{" }}return nil,err{{ "}" }}
+     if err=tx.Commit(ctx);err!=nil{{ "{" }}return nil,err{{ "}" }};a.Status="approved";a.UserID=userUUID
+     if err=s.policy.LoadPolicy();err!=nil{{ "{" }}return nil,fmt.Errorf("approval committed; reload policy: %w",err){{ "}" }}
+     return &a,nil
+    {{ "}" }}
+    func (s *Service) Reject(ctx context.Context,reviewer,id,reason string) (*Application,error) {{ "{" }}
+     if s.pool==nil||strings.TrimSpace(reason)==""{{ "{" }}return nil,ErrInvalid{{ "}" }};if err:=s.allowed(ctx,reviewer);err!=nil{{ "{" }}return nil,err{{ "}" }}
+     var a Application
+     err:=s.pool.QueryRow(ctx,`UPDATE dingtalk_applications SET status='rejected',reason=$1,reviewer_id=(SELECT id FROM users WHERE uuid=$2),reviewed_at=now() WHERE id=$3::bigint AND status='pending' RETURNING id::text,union_id,name,avatar,mobile,status,reason,created_at`,reason,reviewer,id).Scan(&a.ID,&a.UnionID,&a.Name,&a.Avatar,&a.Mobile,&a.Status,&a.Reason,&a.CreatedAt)
+     if errors.Is(err,pgx.ErrNoRows){{ "{" }}return nil,ErrInvalid{{ "}" }};return &a,err
+    {{ "}" }}

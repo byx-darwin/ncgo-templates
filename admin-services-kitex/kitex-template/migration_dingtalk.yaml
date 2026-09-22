@@ -1,0 +1,28 @@
+path: internal/db/migrations/000002_dingtalk.sql
+update_behavior:
+    type: cover
+body: |
+    -- +goose Up
+    CREATE TABLE dingtalk_bindings (
+      union_id TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE dingtalk_applications (
+      id BIGSERIAL PRIMARY KEY,
+      union_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      avatar TEXT NOT NULL DEFAULT '',
+      mobile TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+      user_id BIGINT REFERENCES users(id),
+      reviewer_id BIGINT REFERENCES users(id),
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      reviewed_at TIMESTAMPTZ
+    );
+    CREATE UNIQUE INDEX dingtalk_applications_pending_identity ON dingtalk_applications(union_id) WHERE status='pending';
+    CREATE INDEX dingtalk_applications_status_created ON dingtalk_applications(status,created_at DESC);
+    -- +goose Down
+    DROP TABLE IF EXISTS dingtalk_applications;
+    DROP TABLE IF EXISTS dingtalk_bindings;

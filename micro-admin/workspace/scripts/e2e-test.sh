@@ -1,128 +1,66 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "==> Phase 1: Hermetic tests (always run)"
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+export COMPOSE_PROJECT_NAME="micro_admin_test_$$"
+DATABASE_URL='postgres://postgres:postgres@localhost:5432/micro_admin?sslmode=disable'
+AUTHORITY_PID=''
+ADMIN_PID=''
 
-# Check if services directory exists and has services
-SERVICES_DIR="services"
-if [ ! -d "$SERVICES_DIR" ] || [ -z "$(ls -A "$SERVICES_DIR" 2>/dev/null | grep -v '\.gitkeep')" ]; then
-    echo "  No services found in workspace."
-    echo "  Add services with: ncgo add rpc <name> / ncgo add bff <name>"
-    echo "==> Phase 1: SKIPPED (no services to test)"
-else
-    # Build all services
-    echo "  Building all services..."
-    FAILED=0
-    for service_dir in "$SERVICES_DIR"/*/; do
-        if [ ! -d "$service_dir" ]; then
-            continue
-        fi
-        service_name=$(basename "$service_dir")
-        if [ ! -f "$service_dir/go.mod" ]; then
-            echo "    SKIP $service_name (no go.mod)"
-            continue
-        fi
-        echo "    Building $service_name..."
-        if ! (cd "$service_dir" && go build ./... 2>&1); then
-            echo "    FAIL: build $service_name"
-            FAILED=1
-        fi
-    done
+cleanup() {
+  if [ -n "$ADMIN_PID" ]; then kill "$ADMIN_PID" 2>/dev/null || true; fi
+  if [ -n "$AUTHORITY_PID" ]; then kill "$AUTHORITY_PID" 2>/dev/null || true; fi
+  if [ -n "$ADMIN_PID" ]; then wait "$ADMIN_PID" 2>/dev/null || true; fi
+  if [ -n "$AUTHORITY_PID" ]; then wait "$AUTHORITY_PID" 2>/dev/null || true; fi
+  docker compose -f compose.infra.yaml down -v >/dev/null 2>&1 || true
+  rm -f .authority-test .admin-test
+}
+trap cleanup EXIT
 
-    if [ $FAILED -eq 1 ]; then
-        echo "FAIL: build"
-        exit 1
-    fi
+for tool in docker curl jq goose; do
+  command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
+done
 
-    # Run unit tests
-    echo "  Running unit tests..."
-    for service_dir in "$SERVICES_DIR"/*/; do
-        if [ ! -d "$service_dir" ]; then
-            continue
-        fi
-        service_name=$(basename "$service_dir")
-        if [ ! -f "$service_dir/go.mod" ]; then
-            continue
-        fi
-        # Only run tests if there are test files
-        if find "$service_dir" -name "*_test.go" -print -quit | grep -q .; then
-            echo "    Testing $service_name..."
-            if ! (cd "$service_dir" && go test ./... -count=1 2>&1); then
-                echo "    FAIL: test $service_name"
-                FAILED=1
-            fi
-        fi
-    done
+./scripts/prepare.sh
 
-    if [ $FAILED -eq 1 ]; then
-        echo "FAIL: unit tests"
-        exit 1
-    fi
+echo '==> Building and testing authority'
+(cd services/authority && go build -o "$ROOT/.authority-test" . && go test ./...)
+echo '==> Building and testing BFF'
+(cd services/admin && go build -o "$ROOT/.admin-test" . && go test ./...)
 
-    echo "==> Phase 1: PASSED"
-fi
-echo ""
+echo '==> Starting fresh PostgreSQL and Redis containers'
+docker compose -f compose.infra.yaml up -d
+ready=0
+for _ in $(seq 1 30); do
+  if docker compose -f compose.infra.yaml exec -T postgres pg_isready -U postgres -d micro_admin >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+test "$ready" -eq 1 || { echo 'PostgreSQL did not become ready' >&2; exit 1; }
 
-# Phase 2: Integration tests (require docker)
-if [ ! -d "$SERVICES_DIR" ] || [ -z "$(ls -A "$SERVICES_DIR" 2>/dev/null | grep -v '\.gitkeep')" ]; then
-    echo "==> Phase 2: SKIPPED (no services to test)"
-elif command -v docker &>/dev/null; then
-    echo "==> Phase 2: Integration tests (docker available)"
+echo '==> Migrating and seeding authority database'
+(cd services/authority && DATABASE_URL="$DATABASE_URL" make migrate-up)
+docker compose -f compose.infra.yaml exec -T postgres \
+  psql -U postgres -d micro_admin -v ON_ERROR_STOP=1 < scripts/seed.sql
 
-    # Start infrastructure
-    echo "  Starting postgres + redis..."
-    docker compose up -d postgres redis
-    sleep 5  # Wait for database ready
+echo '==> Starting authority and BFF'
+(cd services/authority && GO_ENV=dev "$ROOT/.authority-test") > "$ROOT/authority-e2e.log" 2>&1 &
+AUTHORITY_PID=$!
+(cd services/admin && GO_ENV=dev "$ROOT/.admin-test") > "$ROOT/admin-e2e.log" 2>&1 &
+ADMIN_PID=$!
+ready=0
+for _ in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+test "$ready" -eq 1 || { cat admin-e2e.log authority-e2e.log >&2; exit 1; }
 
-    # Start services in background (if they exist)
-    echo "  Starting services..."
-    PIDS=""
-
-    if [ -d "services/rbac-rpc" ] && [ -f "services/rbac-rpc/go.mod" ]; then
-        cd services/rbac-rpc && go run . &
-        PIDS="$PIDS $!"
-        cd ../..
-    fi
-
-    if [ -d "services/admin-bff" ] && [ -f "services/admin-bff/go.mod" ]; then
-        cd services/admin-bff && go run . &
-        PIDS="$PIDS $!"
-        cd ../..
-    fi
-
-    if [ -d "services/rule-rpc" ] && [ -f "services/rule-rpc/go.mod" ]; then
-        cd services/rule-rpc && go run . &
-        PIDS="$PIDS $!"
-        cd ../..
-    fi
-
-    if [ -z "$PIDS" ]; then
-        echo "  No services with go.mod found, skipping integration tests"
-        echo "==> Phase 2: SKIPPED (no services to test)"
-    else
-        # Wait for services to start
-        sleep 10
-
-        # Run smoke test
-        echo "  Running smoke test..."
-        if ./scripts/smoke-test.sh; then
-            echo "==> Phase 2: PASSED"
-        else
-            echo "FAIL: smoke test"
-            kill $PIDS 2>/dev/null || true
-            docker compose down
-            exit 1
-        fi
-
-        # Cleanup
-        echo "  Cleaning up..."
-        kill $PIDS 2>/dev/null || true
-        docker compose down
-    fi
-else
-    echo "==> Phase 2: SKIPPED (docker not available)"
-    echo "skipped: integration tests require docker"
-fi
-
-echo ""
-echo "==> All E2E tests passed"
+echo '==> Running HTTP smoke test'
+BFF_URL=http://127.0.0.1:8080 ./scripts/smoke-test.sh
+echo '==> Full backend E2E passed'

@@ -29,22 +29,22 @@ body: |
     	if _, err := e.AddRoleForUser("1", "admin"); err != nil {{ "{" }}
     		t.Fatalf("AddRoleForUser: %v", err)
     	{{ "}" }}
-    	if _, err := e.AddPolicy("admin", "user:create", "POST"); err != nil {{ "{" }}
+        if _, err := e.AddPolicy("admin", "user:create", "execute"); err != nil {{ "{" }}
     		t.Fatalf("AddPolicy: %v", err)
     	{{ "}" }}
 
-    	allowed, err := svc.Enforce(ctx, "1", "user:create", "POST")
+        allowed, err := svc.Enforce(ctx, "1", "user:create", "execute")
     	if err != nil {{ "{" }}
     		t.Fatalf("Enforce: %v", err)
     	{{ "}" }}
     	if !allowed {{ "{" }}
-    		t.Fatal("Enforce(1, user:create, POST) = false, want true")
+            t.Fatal("Enforce(1, user:create, execute) = false, want true")
     	{{ "}" }}
-    	allowed, err = svc.Enforce(ctx, "1", "user:delete", "DELETE")
+        allowed, err = svc.Enforce(ctx, "1", "user:delete", "execute")
     	if err != nil {{ "{" }}
     		t.Fatalf("Enforce: %v", err)
     	{{ "}" }}
     	if allowed {{ "{" }}
-    		t.Fatal("Enforce(1, user:delete, DELETE) = true, want false")
+            t.Fatal("Enforce(1, user:delete, execute) = true, want false")
     	{{ "}" }}
     {{ "}" }}

@@ -94,6 +94,20 @@ jobs:
       - name: Install ncgo
         run: go install github.com/byx-darwin/ncgo@latest
 
+      # ncgo's interactive auto-install can leave a partially generated
+      # project on CI. Install every generator before rendering the template.
+      - name: Install Hertz generator
+        if: matrix.kind == 'hertz'
+        run: go install github.com/cloudwego/hertz/cmd/hz@v0.9.7
+
+      - name: Install Kitex generator
+        if: matrix.kind == 'kitex' || matrix.name == 'admin-bff-hertz' || matrix.name == 'user-bff-hertz'
+        run: go install github.com/cloudwego/kitex/tool/cmd/kitex@v0.16.3
+
+      - name: Install sqlc
+        if: matrix.kind == 'kitex' || matrix.db == 'postgres'
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
       - name: Render ${{ matrix.name }}
         run: |
           ncgo new scratch \
@@ -123,9 +137,7 @@ jobs:
       - name: Generate user database queries
         if: matrix.name == 'user-kitex'
         working-directory: /tmp/scratch-${{ matrix.name }}
-        run: |
-          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
-          make sqlc
+        run: make sqlc
 
       - name: Resolve generated dependencies
         working-directory: /tmp/scratch-${{ matrix.name }}

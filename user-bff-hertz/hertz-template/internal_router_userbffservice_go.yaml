@@ -8,6 +8,7 @@ body: |
 
     import (
     	"github.com/cloudwego/hertz/pkg/app/server"
+    	"github.com/redis/go-redis/v9"
 
     	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/handler"
@@ -21,14 +22,11 @@ body: |
     func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, userCli userservice.Client, codeStore oauthcode.Store, resolver *ratelimit.Resolver) {{ "{" }}
     	cfg := conf.Get()
 
-    	// nil here mirrors middleware.sharedRedisClient (internal_pkg_middleware_
-    	// redis_client_go.yaml), which is a hardcoded stub that always returns
-    	// nil regardless of cfg — the existing IP-based middleware's own store
-    	// is therefore ALSO always memory-backed today, pre-existing and
-    	// unrelated to this identifier-scoped store. If that stub is ever
-    	// wired to a real client, this call site must be updated to match, or
-    	// the two stores will silently diverge on backend (see PR #78 review).
-    	rateLimitStore := ratelimit.NewStore(cfg.RateLimit, nil)
+    	var rateLimitClient redis.UniversalClient
+    	if cfg.RateLimit.Backend == "redis" {{ "{" }}
+    		rateLimitClient = middleware.SharedRedisClient(cfg.RateLimit.Redis)
+    	{{ "}" }}
+    	rateLimitStore := ratelimit.NewStore(cfg.RateLimit, rateLimitClient)
     	authHandler := handler.NewAuthHandler(userCli, resolver, rateLimitStore, cfg.RateLimit)
     	oauthHandler := handler.NewOAuthHandler(userCli, codeStore, cfg.OAuthRedirect, cfg.OAuthCode.TTLSeconds.Duration)
 

@@ -2,9 +2,49 @@
 path: internal/pkg/middleware/redis_client.go
 update_behavior:
     type: cover
-body: |
+body: |-
     package middleware
 
-    import "github.com/redis/go-redis/v9"
+    import (
+    	"context"
+    	"encoding/json"
+    	"fmt"
+    	"sync"
 
-    func sharedRedisClient(cfg any) redis.UniversalClient {{ "{" }} return nil {{ "}" }}
+    	mwredis "github.com/byx-darwin/go-tools/go-middleware/redis"
+    	"github.com/redis/go-redis/v9"
+
+    	"{{.Module}}/internal/base/conf"
+    )
+
+    var (
+    	redisClientsMu sync.Mutex
+    	redisClients = map[string]redis.UniversalClient{{ "{" }}{{ "}" }}
+    )
+
+    // SharedRedisClient reuses a client for each Redis configuration. A Redis
+    // backend must fail at startup if its connection cannot be established;
+    // falling back to memory would break cross-replica consistency.
+    func SharedRedisClient(cfg conf.RedisConfig) redis.UniversalClient {{ "{" }}
+    	if len(cfg.Addrs) == 0 {{ "{" }}
+    		panic("redis backend requires at least one address")
+    	{{ "}" }}
+    	keyBytes, _ := json.Marshal(cfg)
+    	key := string(keyBytes)
+    	redisClientsMu.Lock()
+    	defer redisClientsMu.Unlock()
+    	if client := redisClients[key]; client != nil {{ "{" }}
+    		return client
+    	{{ "}" }}
+    	client, _, err := mwredis.NewUniversalClient(context.Background(), cfg.ToMiddlewareConfig())
+    	if err != nil {{ "{" }}
+    		panic(fmt.Errorf("connect redis backend: %w", err))
+    	{{ "}" }}
+    	redisClients[key] = client
+    	return client
+    {{ "}" }}
+
+    // The base template's signature nonce store uses this package-local name.
+    func sharedRedisClient(cfg conf.RedisConfig) redis.UniversalClient {{ "{" }}
+    	return SharedRedisClient(cfg)
+    {{ "}" }}

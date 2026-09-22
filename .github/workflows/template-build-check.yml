@@ -36,11 +36,12 @@ jobs:
           scripts/check-duplicate-template-paths.sh scripts/testdata/dup-check-fixture/clean
 
       - name: Check for duplicate path declarations
-        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template rbac-kitex/kitex-template admin-services-kitex/kitex-template rule-center/kitex-template
+        run: scripts/check-duplicate-template-paths.sh admin-bff-hertz/hertz-template rbac-kitex/kitex-template admin-services-kitex/kitex-template rule-center/kitex-template user-kitex/kitex-template user-bff-hertz/hertz-template base-hertz/hertz-template ratelimit-hertz/hertz-template
 
   build-check:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: rbac-kitex
@@ -55,12 +56,24 @@ jobs:
           - name: rule-center
             kind: kitex
             db: none
+          - name: user-kitex
+            kind: kitex
+            db: postgres
+          - name: user-bff-hertz
+            kind: hertz
+            db: none
+          - name: base-hertz
+            kind: hertz
+            db: none
+          - name: ratelimit-hertz
+            kind: hertz
+            db: none
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.26.x'
 
       # actions/setup-go does not export GOPATH into the environment for
       # later steps — it only ensures `go` and `$(go env GOPATH)/bin` are on
@@ -94,9 +107,29 @@ jobs:
         if: matrix.name == 'admin-bff-hertz'
         working-directory: /tmp/scratch-${{ matrix.name }}
         run: |
-          ncgo add kitex-client authority --idl idl/rbac.proto --service RBACService
-          ncgo add kitex-client auth --idl idl/auth.proto --service AuthService
+          ncgo add kitex-client authority --idl idl/rbac.proto --service RBACService || test -f kitex_gen/api/rbac/v1/rbac.pb.go
+          ncgo add kitex-client auth --idl idl/auth.proto --service AuthService || test -f kitex_gen/api/auth/v1/auth.pb.go
+          ncgo add kitex-client rulecenter --idl idl/rule_center.proto --service RuleService || test -f kitex_gen/api/ratelimit/v1/rule_center.pb.go
+          ncgo add kitex-client user --idl idl/user.proto --service UserService
+
+      - name: Generate user BFF RPC dependencies
+        if: matrix.name == 'user-bff-hertz'
+        working-directory: /tmp/scratch-${{ matrix.name }}
+        run: |
+          # The first client's tidy can fail until the second client exists.
+          ncgo add kitex-client user --idl idl/user.proto --service UserService || test -f kitex_gen/api/user/v1/user.pb.go
           ncgo add kitex-client rulecenter --idl idl/rule_center.proto --service RuleService
+
+      - name: Generate user database queries
+        if: matrix.name == 'user-kitex'
+        working-directory: /tmp/scratch-${{ matrix.name }}
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+          make sqlc
+
+      - name: Resolve generated dependencies
+        working-directory: /tmp/scratch-${{ matrix.name }}
+        run: go mod tidy
 
       - name: Build
         working-directory: /tmp/scratch-${{ matrix.name }}

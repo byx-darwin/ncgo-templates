@@ -120,6 +120,12 @@ oauth_redirect:
 
 `POST /auth/register` also runs through the `Idempotency` middleware when `idempotency.enabled: true`; both `/auth/register` and `/auth/login` run through `RateLimit` (`pre_auth` / `post_auth` phases respectively), `/auth/change-password` runs through `RateLimit`'s `password_change` phase (it verifies the caller's old password, so it must be throttled like a login), and `/auth/password-reset/request` / `/auth/password-reset/confirm` run through `RateLimit`'s `password_reset_request` / `password_reset_confirm` phases respectively.
 
+The password reset endpoints also apply identifier-scoped checks after parsing
+the request body. The confirm check uses the phone number alongside the IP
+check; this depends on the identifier dimension added in Issue #78. Failed
+SMS-code attempts count toward the limit. With `rate_limit.backend: redis`,
+both checks share Redis across replicas.
+
 > **Client contract:** while `idempotency.enabled: true` (the shipped `conf/dev/conf.yaml` default), every `POST /auth/register` request **must** carry an `X-Idempotency-Key` header — the middleware rejects a request without one with `400 {"code":10203,"msg":"idempotency_key_missing"}` before the handler runs. Set `idempotency.enabled: false`, or add `/auth/register` to `idempotency.skip_paths`, if you do not want that requirement.
 
 ## Seams

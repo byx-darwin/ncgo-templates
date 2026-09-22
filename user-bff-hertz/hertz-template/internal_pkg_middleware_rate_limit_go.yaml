@@ -11,6 +11,7 @@ body: |
     	"strings"
 
     	"github.com/cloudwego/hertz/pkg/app"
+    	"github.com/redis/go-redis/v9"
 
     	"{{.Module}}/internal/base/conf"
     	"{{.Module}}/internal/pkg/ratelimit"
@@ -25,7 +26,11 @@ body: |
     	cfg = ratelimit.NormalizeConfig(cfg)
     	skipper := PathSkipper(cfg.SkipPaths...)
     	if store == nil {{ "{" }}
-    		store = ratelimit.NewStore(cfg, sharedRedisClient(cfg.Redis))
+    		var redisClient redis.UniversalClient
+    		if cfg.Backend == "redis" {{ "{" }}
+    			redisClient = SharedRedisClient(cfg.Redis)
+    		{{ "}" }}
+    		store = ratelimit.NewStore(cfg, redisClient)
     	{{ "}" }}
     	if resolver == nil {{ "{" }}
     		resolver = ratelimit.NewResolver(cfg, ratelimit.Options{{ "{" }}{{ "}" }})

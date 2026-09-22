@@ -8,6 +8,7 @@ body: |
 
     import (
     	"context"
+    	"errors"
     	"testing"
     	"time"
 
@@ -181,24 +182,30 @@ body: |
     	{{ "}" }}
     {{ "}" }}
 
-    // TestConfirmPasswordResetThrottlesSameIdentifierAcrossIPs mirrors the
-    // request-phase regression above, using confirmPasswordResetReq.Phone as
-    // the identifier — that struct has no email field.
+    // The IP and phone dimensions were added by #78. Failed SMS-code
+    // attempts must count, even when the attacker rotates IP addresses.
     func TestConfirmPasswordResetThrottlesSameIdentifierAcrossIPs(t *testing.T) {{ "{" }}
     	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_confirm", 1)
-    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, resolver, store, cfg)
+    	calls := 0
+    	h := NewAuthHandler(&fakeUserClient{{ "{" }}confirmPasswordResetFn: func(context.Context, *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
+    		calls++
+    		return nil, errors.New("invalid SMS code")
+    	{{ "}" }}{{ "}" }}, resolver, store, cfg)
 
     	body := `{{ "{" }}"credential":"123456","new_password":"hunter22","phone":"+15550001111"{{ "}" }}`
 
     	c1 := newTestContextFromIP("POST", "/auth/password-reset/confirm", body, "10.0.0.1")
     	h.ConfirmPasswordReset(context.Background(), c1)
-    	if c1.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("first request: expected 200, got %d: %s", c1.Response.StatusCode(), c1.Response.Body())
+    	if calls != 1 {{ "{" }}
+    		t.Fatalf("first wrong-code attempt calls = %d, want 1", calls)
     	{{ "}" }}
 
     	c2 := newTestContextFromIP("POST", "/auth/password-reset/confirm", body, "10.0.0.2")
     	h.ConfirmPasswordReset(context.Background(), c2)
-    	if c2.Response.StatusCode() == 200 {{ "{" }}
-    		t.Fatalf("second request from a different IP but the same phone: expected throttling, got 200: %s", c2.Response.Body())
+    	if calls != 1 {{ "{" }}
+    		t.Fatalf("second wrong-code attempt reached the backend; calls = %d", calls)
+    	{{ "}" }}
+    	if c2.Response.StatusCode() != 429 {{ "{" }}
+    		t.Fatalf("second request from a different IP: status = %d, want 429", c2.Response.StatusCode())
     	{{ "}" }}
     {{ "}" }}

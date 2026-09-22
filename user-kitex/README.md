@@ -20,6 +20,19 @@ ncgo new user --module github.com/acme/user --kind kitex \
 > set `redis.enabled: true` and `redis.addr` in `conf.yaml` before exercising
 > those RPCs.
 
+### Upgrading an existing generated project
+
+After updating the password reset query template, run `make sqlc` before
+`go build` so `ConsumeValidPasswordResetToken` is generated. Custom
+implementations of `passwordreset.Repository` must implement the new
+`ConsumeValid` method. The `password_reset_tokens` table schema is unchanged,
+so this update needs no database migration.
+
+`SQLRepository.ConsumeValid` now returns the consumed token's `UsedAt` value,
+matching `MemoryRepository`. The template tests its timestamp mapping; a full
+SQL integration test needs a running PostgreSQL instance, which this template's
+test suite does not provision.
+
 ## Contents
 
 - `idl/user.proto` — `user.v1.UserService`:

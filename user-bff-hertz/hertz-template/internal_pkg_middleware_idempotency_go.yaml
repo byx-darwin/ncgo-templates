@@ -124,7 +124,7 @@ body: |
 
     func newIdempotencyStore(cfg conf.IdempotencyConfig) idempotencyStore {{ "{" }}
     	if cfg.Backend == "redis" {{ "{" }}
-    		return &redisIdempotencyStore{{ "{" }}client: sharedRedisClient(cfg.Redis){{ "}" }}
+    		return &redisIdempotencyStore{{ "{" }}client: SharedRedisClient(cfg.Redis){{ "}" }}
     	{{ "}" }}
     	return newMemoryIdempotencyStore(cfg.Memory.MaxEntries)
     {{ "}" }}

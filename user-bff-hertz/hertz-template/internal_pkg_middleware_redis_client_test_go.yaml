@@ -1,0 +1,71 @@
+# ncgo exported template — internal/pkg/middleware/redis_client_test.go
+path: internal/pkg/middleware/redis_client_test.go
+update_behavior:
+    type: cover
+body: |-
+    package middleware
+
+    import (
+    	"context"
+    	"testing"
+    	"time"
+
+    	"github.com/alicebob/miniredis/v2"
+    	config "github.com/byx-darwin/go-tools/go-framework/config"
+
+    	"{{.Module}}/internal/base/conf"
+    	"{{.Module}}/internal/pkg/ratelimit"
+    )
+
+    func TestRedisBackendsUseWorkingSharedClient(t *testing.T) {{ "{" }}
+    	mr, err := miniredis.Run()
+    	if err != nil {{ "{" }}
+    		t.Fatal(err)
+    	{{ "}" }}
+    	defer mr.Close()
+    	redisCfg := conf.RedisConfig{{ "{" }}Addrs: []string{{ "{" }}mr.Addr(){{ "}" }}{{ "}" }}
+    	client := SharedRedisClient(redisCfg)
+    	if client == nil || SharedRedisClient(redisCfg) != client {{ "{" }}
+    		t.Fatal("expected a reused Redis client")
+    	{{ "}" }}
+    	defer client.Close()
+
+    	limitCfg := conf.RateLimitConfig{{ "{" }}Backend: "redis", Redis: redisCfg{{ "}" }}
+    	store := ratelimit.NewStore(limitCfg, client)
+    	rule := conf.RateLimitRuleConfig{{ "{" }}Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: time.Minute{{ "}" }}, MaxRequests: 1{{ "}" }}
+    	allowed, err := store.Allow(context.Background(), "test:redis-limit", rule)
+    	if err != nil || !allowed {{ "{" }}
+    		t.Fatalf("first Redis limit check = %v, %v", allowed, err)
+    	{{ "}" }}
+    	allowed, err = store.Allow(context.Background(), "test:redis-limit", rule)
+    	if err != nil || allowed {{ "{" }}
+    		t.Fatalf("second Redis limit check = %v, %v; want denied", allowed, err)
+    	{{ "}" }}
+
+    	mr.FlushAll()
+    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: rule{{ "}" }}
+    	limitCfg.Enabled = true
+    	limitCfg.PreAuth = phase
+    	RateLimit("pre_auth", limitCfg, phase, nil)(context.Background(), newRateLimitContext("/redis-check"))
+    	if len(mr.Keys()) == 0 {{ "{" }}
+    		t.Fatal("Redis rate-limit middleware wrote no counter")
+    	{{ "}" }}
+
+    	idemStore := newIdempotencyStore(conf.IdempotencyConfig{{ "{" }}Backend: "redis", Redis: redisCfg{{ "}" }})
+    	redisIdem, ok := idemStore.(*redisIdempotencyStore)
+    	if !ok || redisIdem.client != client {{ "{" }}
+    		t.Fatal("idempotency must use the shared Redis client")
+    	{{ "}" }}
+    	if _, acquired, err := idemStore.Begin(context.Background(), "test:redis-idem", "fp", time.Minute); err != nil || !acquired {{ "{" }}
+    		t.Fatalf("Redis idempotency Begin acquired=%v err=%v", acquired, err)
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestMemoryBackendsDoNotDialRedis(t *testing.T) {{ "{" }}
+    	redisCfg := conf.RedisConfig{{ "{" }}Addrs: []string{{ "{" }}"127.0.0.1:1"{{ "}" }}{{ "}" }}
+    	if _, ok := newIdempotencyStore(conf.IdempotencyConfig{{ "{" }}Backend: "memory", Redis: redisCfg{{ "}" }}).(*memoryIdempotencyStore); !ok {{ "{" }}
+    		t.Fatal("memory idempotency must stay memory-backed")
+    	{{ "}" }}
+    	phase := conf.RateLimitPhaseConfig{{ "{" }}Enabled: true, DefaultRule: conf.RateLimitRuleConfig{{ "{" }}Enabled: true, Strategy: "fixed_window", WindowSeconds: config.Duration{{ "{" }}Duration: time.Minute{{ "}" }}, MaxRequests: 1{{ "}" }}{{ "}" }}
+    	_ = RateLimit("pre_auth", conf.RateLimitConfig{{ "{" }}Enabled: true, Backend: "memory", Redis: redisCfg, PreAuth: phase{{ "}" }}, phase, nil)
+    {{ "}" }}

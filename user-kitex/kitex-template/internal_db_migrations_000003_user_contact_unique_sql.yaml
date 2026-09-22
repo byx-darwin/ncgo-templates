@@ -1,0 +1,16 @@
+# Goose migration for internal/db/migrations/000003_user_contact_unique.sql
+path: internal/db/migrations/000003_user_contact_unique.sql
+update_behavior:
+  type: cover
+body: |-
+    -- +goose Up
+    -- Partial unique indexes: multiple empty-string emails/phones may
+    -- coexist (most users never set either), but any non-empty value must
+    -- be unique so GetByEmail/GetByPhone can resolve to exactly one
+    -- account.
+    CREATE UNIQUE INDEX idx_users_email_unique ON users (email) WHERE email <> '';
+    CREATE UNIQUE INDEX idx_users_phone_unique ON users (phone) WHERE phone <> '';
+
+    -- +goose Down
+    DROP INDEX IF EXISTS idx_users_phone_unique;
+    DROP INDEX IF EXISTS idx_users_email_unique;

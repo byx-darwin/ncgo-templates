@@ -86,6 +86,15 @@ else
   fail "schema missing users/user_identities tables"
 fi
 
+for migration in 000001_user 000002_audit_log 000003_user_contact_unique 000004_password_reset_tokens; do
+  file="$BASE_DIR/internal/db/migrations/$migration.sql"
+  if [ -f "$file" ] && grep -q '^-- +goose Up' "$file" && grep -q '^-- +goose Down' "$file"; then
+    log "$migration migration generated"
+  else
+    fail "$migration migration missing or incomplete"
+  fi
+done
+
 if [ -f "$BASE_DIR/internal/pkg/oauth/wechat.go" ] && [ -f "$BASE_DIR/internal/pkg/oauth/alipay.go" ] && \
    [ -f "$BASE_DIR/internal/pkg/oauth/github.go" ] && [ -f "$BASE_DIR/internal/pkg/oauth/google.go" ] && \
    [ -f "$BASE_DIR/internal/pkg/oauth/oidc.go" ]; then
@@ -109,6 +118,7 @@ if command -v pg_isready >/dev/null 2>&1 && [ -n "${POSTGRES_DSN:-}" ] && pg_isr
     && log "postgres sqlc gen ok" || fail "postgres make sqlc"
   go_build "$PG_DIR" "postgres"
   go_test  "$PG_DIR" "postgres" POSTGRES_DSN="$POSTGRES_DSN"
+  go_test  "$PG_DIR" "postgres repeat" POSTGRES_DSN="$POSTGRES_DSN"
   rm -rf "$(dirname "$PG_DIR")"
 else
   skip "postgres go test 部分（pg_isready / POSTGRES_DSN 不可用，仅验证 hermetic）"

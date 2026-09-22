@@ -14,8 +14,12 @@ ncgo new user --module github.com/acme/user --kind kitex \
   --template user-kitex --db postgres
 ```
 
-> The service always owns a PostgreSQL database (`users` + `user_identities`).
-> Run `make migrate-up` against the target database after scaffolding.
+> The service always owns a PostgreSQL database (`users`, `user_identities`,
+> `audit_log`, and `password_reset_tokens`). Initialize an empty database with
+> `make migrate-up DATABASE_URL="postgres://..."` after scaffolding. The
+> generated `migration/init.sh` runs the same Goose migrations. The files in
+> `internal/db/schema/` are sqlc's schema inputs; use
+> `internal/db/migrations/` for database changes.
 > OAuth CSRF state and the admin force-logout blacklist are Redis-backed —
 > set `redis.enabled: true` and `redis.addr` in `conf.yaml` before exercising
 > those RPCs.

@@ -1,0 +1,23 @@
+# Goose migration for internal/db/migrations/000002_audit_log.sql
+path: internal/db/migrations/000002_audit_log.sql
+update_behavior:
+  type: cover
+body: |-
+    -- +goose Up
+    CREATE TABLE audit_log (
+        id BIGSERIAL PRIMARY KEY,
+        actor_uid TEXT,
+        action TEXT NOT NULL,
+        target TEXT NOT NULL DEFAULT '',
+        ip_address TEXT NOT NULL DEFAULT '',
+        user_agent TEXT NOT NULL DEFAULT '',
+        detail_json TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX idx_audit_log_actor_created ON audit_log(actor_uid, created_at);
+    CREATE INDEX idx_audit_log_action_created ON audit_log(action, created_at);
+    CREATE INDEX idx_audit_log_target_created ON audit_log(target, created_at);
+
+    -- +goose Down
+    DROP TABLE IF EXISTS audit_log;

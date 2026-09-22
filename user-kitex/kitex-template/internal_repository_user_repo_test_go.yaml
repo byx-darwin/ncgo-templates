@@ -56,6 +56,11 @@ body: |
     	if err := repo.Create(ctx, u); err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
+        defer func() {{ "{" }}
+            if _, err := pool.Exec(ctx, "DELETE FROM users WHERE id = $1", u.ID); err != nil {{ "{" }}
+                t.Errorf("cleanup user: %v", err)
+            {{ "}" }}
+        {{ "}" }}()
     	if u.ID == uuid.Nil {{ "{" }}
     		t.Fatal("created user has nil id")
     	{{ "}" }}
@@ -104,6 +109,11 @@ body: |
     	if err := repo.Create(ctx, u2); err != nil {{ "{" }}
     		t.Fatalf("Create u2: %v", err)
     	{{ "}" }}
+        defer func() {{ "{" }}
+            if _, err := pool.Exec(ctx, "DELETE FROM users WHERE id = $1", u2.ID); err != nil {{ "{" }}
+                t.Errorf("cleanup u2: %v", err)
+            {{ "}" }}
+        {{ "}" }}()
     	byEmail, err := repo.GetByEmail(ctx, "integration@example.com")
     	if err != nil {{ "{" }}
     		t.Fatalf("GetByEmail: %v", err)
@@ -158,11 +168,16 @@ body: |
     	{{ "}" }}
     	u.Nickname = "Integration Nick"
     	u.Avatar = "https://example.com/avatar.png"
-    	u.Email = "integration@example.com"
+        u.Email = "integration-profile@example.com"
     	u.Phone = "+15551234567"
     	if err := repo.Create(ctx, u); err != nil {{ "{" }}
     		t.Fatalf("Create: %v", err)
     	{{ "}" }}
+        defer func() {{ "{" }}
+            if _, err := pool.Exec(ctx, "DELETE FROM users WHERE id = $1", u.ID); err != nil {{ "{" }}
+                t.Errorf("cleanup profile user: %v", err)
+            {{ "}" }}
+        {{ "}" }}()
 
     	got, err := repo.GetByID(ctx, u.ID)
     	if err != nil {{ "{" }}
@@ -174,8 +189,8 @@ body: |
     	if got.Avatar != "https://example.com/avatar.png" {{ "{" }}
     		t.Fatalf("GetByID.Avatar = %q, want %q", got.Avatar, "https://example.com/avatar.png")
     	{{ "}" }}
-    	if got.Email != "integration@example.com" {{ "{" }}
-    		t.Fatalf("GetByID.Email = %q, want %q", got.Email, "integration@example.com")
+        if got.Email != "integration-profile@example.com" {{ "{" }}
+            t.Fatalf("GetByID.Email = %q, want %q", got.Email, "integration-profile@example.com")
     	{{ "}" }}
     	if got.Phone != "+15551234567" {{ "{" }}
     		t.Fatalf("GetByID.Phone = %q, want %q", got.Phone, "+15551234567")

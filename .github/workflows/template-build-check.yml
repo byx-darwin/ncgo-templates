@@ -92,7 +92,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install ncgo
-        run: go install github.com/byx-darwin/ncgo@latest
+        # The latest tagged release (v1.0.3) lacks template generation fixes
+        # already present on ncgo/main. Pin the verified source revision.
+        run: go install github.com/byx-darwin/ncgo@e964198c816f
 
       # ncgo's interactive auto-install can leave a partially generated
       # project on CI. Install every generator before rendering the template.

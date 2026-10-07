@@ -15,7 +15,7 @@ for spec in 'authority:kitex:admin-services-kitex' 'admin:hertz:admin-bff-hertz'
     cd "$TASK_DIR/$service"
     make sqlc
     if [ "$service" = admin ]; then
-      for proto in auth rbac rule_center user; do
+      for proto in auth rbac rule_center user z_agent_event; do
         kitex -module example.com/micro-admin/admin -type protobuf -I idl "idl/$proto.proto"
       done
       make i18n

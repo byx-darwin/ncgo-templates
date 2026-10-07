@@ -167,3 +167,13 @@ body: |
     # JWT 配置（与 rbac 一致）
     jwt:
       secret: "dev-secret-change-me"
+
+    # Operational alerts persist even while the Agent is disconnected.
+    alerts_enabled: false
+    agent:
+      enabled: false
+      token: "" # Inject with AGENT_TOKEN, never use a browser JWT.
+      uid: "" # UUID of the dedicated, enabled machine user.
+      allowed_cidrs: [] # Raw TCP peer addresses; forwarding headers are ignored.
+      consumer_id: "" # Defaults to this instance's hostname.
+      revalidate_seconds: 300

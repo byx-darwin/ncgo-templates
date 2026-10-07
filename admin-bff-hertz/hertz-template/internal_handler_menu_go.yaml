@@ -27,19 +27,25 @@ body: |
     func (h *MenuHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
     	resp, err := h.rbacCli.ListMenus(ctx, &api.ListMenusReq{{ "{" }}{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
         nodes := make(map[string]*api.MenuNode, len(resp.Menus))
-        for _, m := range resp.Menus {{ "{" }} nodes[m.Id] = &api.MenuNode{{ "{" }}Menu: m{{ "}" }} {{ "}" }}
+        for _, m := range resp.Menus {{ "{" }}
+            nodes[m.Id] = &api.MenuNode{{ "{" }}Menu: m{{ "}" }}
+        {{ "}" }}
         roots := make([]*api.MenuNode, 0)
         for _, m := range resp.Menus {{ "{" }}
             n := nodes[m.Id]
             if parent, ok := nodes[m.ParentId]; ok && m.ParentId != m.Id {{ "{" }}
                 parent.Children = append(parent.Children, n)
-            {{ "}" }} else {{ "{" }} roots = append(roots, n) {{ "}" }}
+            {{ "}" }} else {{ "{" }}
+                roots = append(roots, n)
+            {{ "}" }}
         {{ "}" }}
         menus := make([]map[string]interface{{ "{}" }}, 0, len(roots))
-        for _, n := range roots {{ "{" }} menus = append(menus, menuNodeJSON(n)) {{ "}" }}
+        for _, n := range roots {{ "{" }}
+            menus = append(menus, menuNodeJSON(n))
+        {{ "}" }}
         response.OK(c, menus)
     {{ "}" }}

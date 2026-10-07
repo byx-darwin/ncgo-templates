@@ -43,7 +43,7 @@ echo '==> Generating BFF RPC clients, database code, and i18n catalog'
 (
   cd "$ADMIN"
   module=$(go list -m)
-  for proto in auth rbac rule_center user; do
+  for proto in auth rbac rule_center user z_agent_event; do
     kitex -module "$module" -type protobuf -I idl "idl/$proto.proto"
   done
   make sqlc

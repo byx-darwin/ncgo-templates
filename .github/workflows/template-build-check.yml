@@ -126,6 +126,7 @@ jobs:
           ncgo add kitex-client authority --idl idl/rbac.proto --service RBACService || test -f kitex_gen/api/rbac/v1/rbac.pb.go
           ncgo add kitex-client auth --idl idl/auth.proto --service AuthService || test -f kitex_gen/api/auth/v1/auth.pb.go
           ncgo add kitex-client rulecenter --idl idl/rule_center.proto --service RuleService || test -f kitex_gen/api/ratelimit/v1/rule_center.pb.go
+          ncgo add kitex-client agentevents --idl idl/z_agent_event.proto --service AgentEventService || test -f kitex_gen/api/admin/v1/z_agent_event.pb.go
           ncgo add kitex-client user --idl idl/user.proto --service UserService
 
       - name: Generate user BFF RPC dependencies

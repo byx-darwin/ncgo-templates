@@ -17,9 +17,11 @@ body: |
     	"github.com/bytedance/gopkg/cloud/metainfo"
     	"github.com/cloudwego/kitex/pkg/endpoint"
     	"github.com/cloudwego/kitex/pkg/klog"
+        "github.com/cloudwego/kitex/pkg/rpcinfo"
+        "github.com/cloudwego/kitex/pkg/serviceinfo"
 
+        "{{.Module}}/internal/pkg/rpcerror"
     	"github.com/byx-darwin/go-tools/go-framework/kitex/middleware/compat"
-    	"{{.Module}}/internal/pkg/rpcerror"
     )
 
     const (
@@ -60,6 +62,10 @@ body: |
     func RequestTimeout(timeout time.Duration) endpoint.Middleware {{ "{" }}
     	return func(next endpoint.Endpoint) endpoint.Endpoint {{ "{" }}
     		return func(ctx context.Context, req, resp interface{{ "{" }}{{ "}" }}) error {{ "{" }}
+                // Long-lived streams use cancellation and leases, not unary deadlines.
+                if ri := rpcinfo.GetRPCInfo(ctx); ri != nil && ri.Invocation() != nil && ri.Invocation().StreamingMode() == serviceinfo.StreamingBidirectional {{ "{" }}
+                    return next(ctx, req, resp)
+                {{ "}" }}
     			if timeout <= 0 {{ "{" }}
     				return next(ctx, req, resp)
     			{{ "}" }}

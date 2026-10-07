@@ -119,3 +119,4 @@ body: |-
     memory:
       max_entries: 1000
     redis: {}
+  alerts_enabled: false

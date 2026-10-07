@@ -40,7 +40,8 @@ body: |
      var input struct{{ "{" }}Code string `json:"code"`{{ "}" }};if json.Unmarshal(c.Request.Body(),&input)!=nil||input.Code==""{{ "{" }}response.ErrorCode(c,response.CodeRequestParamInvalid);return{{ "}" }}
      profile,err:=h.exchange(ctx,input.Code);if err!=nil{{ "{" }}response.ErrorCode(c,response.CodeAuthFailed);return{{ "}" }}
      result,err:=h.rpc.LoginByDingtalk(ctx,&api.DingtalkIdentityReq{{ "{" }}UnionId:profile.UnionID,Name:profile.Name,Avatar:profile.Avatar,Mobile:profile.Mobile{{ "}" }})
-     if err!=nil||result==nil{{ "{" }}response.ErrorCode(c,response.CodeInternalError);return{{ "}" }}
+     if err!=nil{{ "{" }}response.Err(c,err);return{{ "}" }}
+     if result==nil{{ "{" }}response.ErrorCode(c,response.CodeInternalError);return{{ "}" }}
      if result.Found{{ "{" }}response.OK(c,map[string]interface{{ "{" }}{{ "}" }}{{ "{" }}"found":true,"access_token":result.AccessToken,"refresh_token":result.RefreshToken,"expires_in":result.ExpiresIn{{ "}" }});return{{ "}" }}
      profile.Expires=time.Now().Add(10*time.Minute).Unix()
      payload,_:=json.Marshal(profile);body:=base64.RawURLEncoding.EncodeToString(payload)

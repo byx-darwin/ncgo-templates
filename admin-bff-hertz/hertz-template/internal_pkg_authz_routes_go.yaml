@@ -61,6 +61,9 @@ body: |
     {{ "}" }}
 
     var NonProtoExempt = []RoutePerm{{ "{" }}
+        // Machine routes enforce token, raw peer IP, account and RBAC themselves.
+        {{ "{" }}Method: "GET", Path: "/api/v1/agent/stream", Public: true{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/internal/v1/agent-events", Public: true{{ "}" }},
         {{ "{" }}Method: "GET", Path: "/ping", Public: true{{ "}" }},
         {{ "{" }}Method: "GET", Path: "/healthz", Public: true{{ "}" }},
         {{ "{" }}Method: "GET", Path: "/readyz", Public: true{{ "}" }},
@@ -69,7 +72,9 @@ body: |
     func Lookup(method, path string) (RoutePerm, bool) {{ "{" }}
         for _, routes := range [][]RoutePerm{{ "{" }}Routes, NonProtoExempt{{ "}" }} {{ "{" }}
             for _, rp := range routes {{ "{" }}
-                if rp.Method == method && rp.Path == path {{ "{" }} return rp, true {{ "}" }}
+                if rp.Method == method && rp.Path == path {{ "{" }}
+                    return rp, true
+                {{ "}" }}
             {{ "}" }}
         {{ "}" }}
         return RoutePerm{{ "{}" }}, false

@@ -1,0 +1,108 @@
+path: internal/pkg/agentauth/authenticator_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentauth
+
+    import (
+        "context"
+        "testing"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/protocol"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+        "github.com/cloudwego/kitex/client/callopt"
+
+        v1 "{{.Module}}/kitex_gen/api/rbac/v1"
+    )
+
+    type fakeAuthorizer struct {{ "{" }}
+        user         *v1.User
+        allowed      bool
+        getUserCalls int
+        enforceCalls int
+        lastUID      string
+        lastObj      string
+        lastAct      string
+    {{ "}" }}
+
+    func (f *fakeAuthorizer) GetUser(_ context.Context, req *v1.GetUserReq, _ ...callopt.Option) (*v1.GetUserResp, error) {{ "{" }}
+        f.getUserCalls++
+        f.lastUID = req.GetId()
+        return &v1.GetUserResp{{ "{" }}User: f.user{{ "}" }}, nil
+    {{ "}" }}
+
+    func (f *fakeAuthorizer) Enforce(_ context.Context, req *v1.EnforceReq, _ ...callopt.Option) (*v1.EnforceResp, error) {{ "{" }}
+        f.enforceCalls++
+        f.lastUID = req.GetUid()
+        f.lastObj = req.GetObj()
+        f.lastAct = req.GetAct()
+        return &v1.EnforceResp{{ "{" }}Allowed: f.allowed{{ "}" }}, nil
+    {{ "}" }}
+
+    func requestContext(token string) *app.RequestContext {{ "{" }}
+        c := app.NewContext(0)
+        req := protocol.NewRequest("GET", "/api/v1/reports/daily-facts", nil)
+        if token != "" {{ "{" }}
+            req.Header.Set(TokenHeader, token)
+        {{ "}" }}
+        req.CopyTo(&c.Request)
+        return c
+    {{ "}" }}
+
+    func TestCheckRejectsNonWhitelistedPeerBeforeCredentials(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &v1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}" }}, allowed: true{{ "}" }}
+        authenticator, err := New(authorizer, "expected", "agent-test", []string{{ "{" }}"127.0.0.1/32"{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+
+        _, status, reason := authenticator.Check(context.Background(), requestContext("expected"), "reports:daily-facts:read")
+        if status != consts.StatusForbidden || reason != "ip_not_allowed" {{ "{" }}
+            t.Fatalf("Check = status %d reason %q, want 403 ip_not_allowed", status, reason)
+        {{ "}" }}
+        if authorizer.getUserCalls != 0 || authorizer.enforceCalls != 0 {{ "{" }}
+            t.Fatalf("authority calls = (%d, %d), want (0, 0)", authorizer.getUserCalls, authorizer.enforceCalls)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestCheckAllowsCIDRThenEnforcesRequestedPermission(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &v1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}" }}, allowed: true{{ "}" }}
+        // A Hertz context without a network connection has the deterministic raw
+        // peer 0.0.0.0. Whitelist only that test peer; production never uses this
+        // range and supplies explicit addresses in private configuration.
+        authenticator, err := New(authorizer, "expected", "agent-test", []string{{ "{" }}"0.0.0.0/32"{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+
+        uid, status, reason := authenticator.Check(context.Background(), requestContext("expected"), "reports:daily-facts:read")
+        if status != 0 || reason != "" || uid != "agent-test" {{ "{" }}
+            t.Fatalf("Check = uid %s status %d reason %q, want agent-test/0/empty", uid, status, reason)
+        {{ "}" }}
+        if authorizer.lastUID != "agent-test" || authorizer.lastObj != "reports:daily-facts:read" || authorizer.lastAct != "execute" {{ "{" }}
+            t.Fatalf("enforce = uid:%s obj:%q act:%q", authorizer.lastUID, authorizer.lastObj, authorizer.lastAct)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestCheckDoesNotTrustForwardedHeaderFromUntrustedPeer(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &v1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}" }}, allowed: true{{ "}" }}
+        authenticator, err := New(authorizer, "expected", "agent-test", []string{{ "{" }}"203.0.113.9/32"{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        c := requestContext("expected")
+        c.Request.Header.Set("X-Forwarded-For", "203.0.113.9")
+        c.Request.Header.Set("X-Real-IP", "203.0.113.9")
+
+        _, status, reason := authenticator.Check(context.Background(), c, "reports:daily-facts:read")
+        if status != consts.StatusForbidden || reason != "ip_not_allowed" {{ "{" }}
+            t.Fatalf("Check = status %d reason %q, want 403 ip_not_allowed", status, reason)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestNewRejectsInvalidWhitelistEntry(t *testing.T) {{ "{" }}
+        if _, err := New(&fakeAuthorizer{{ "{}" }}, "expected", "agent-test", []string{{ "{" }}"not-an-ip"{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("New accepted an invalid allowlist entry")
+        {{ "}" }}
+    {{ "}" }}

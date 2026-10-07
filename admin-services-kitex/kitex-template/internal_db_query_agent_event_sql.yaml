@@ -1,0 +1,69 @@
+path: internal/db/query/agent_event.sql
+update_behavior:
+    type: cover
+body: |
+    -- name: PublishAgentEvent :one
+    INSERT INTO agent_events (
+        event_id, event_type, source, severity, dedupe_key, payload,
+        reply_required, occurred_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ON CONFLICT (event_id) DO UPDATE SET event_id = EXCLUDED.event_id
+    RETURNING *;
+
+    -- name: ClaimAgentEvents :many
+    WITH candidates AS (
+        SELECT id FROM agent_events
+        WHERE (status = 'pending'
+            OR (status = 'leased' AND lease_until <= now())
+            OR (status = 'acked' AND lease_until <= now())
+            OR (status = 'failed' AND next_retry_at <= now()))
+          AND next_retry_at <= now()
+        ORDER BY created_at, id
+        FOR UPDATE SKIP LOCKED
+        LIMIT sqlc.arg('claim_limit')
+    )
+    UPDATE agent_events AS e
+    SET status = 'leased', lease_owner = sqlc.arg('lease_owner'),
+        lease_until = now() + make_interval(secs => sqlc.arg('lease_seconds')::int),
+        updated_at = now()
+    FROM candidates WHERE e.id = candidates.id
+    RETURNING e.*;
+
+    -- name: AckAgentEvent :one
+    UPDATE agent_events
+    SET status = CASE WHEN reply_required THEN 'acked' ELSE 'completed' END,
+        acked_at = COALESCE(acked_at, now()),
+        completed_at = CASE WHEN reply_required THEN completed_at ELSE COALESCE(completed_at, now()) END,
+        lease_owner = lease_owner,
+        lease_until = CASE WHEN reply_required THEN now() + interval '5 minutes' ELSE NULL END,
+        updated_at = now()
+    WHERE event_id = sqlc.arg('event_id')
+      AND lease_owner = sqlc.arg('lease_owner')
+      AND ((status IN ('leased', 'acked') AND lease_until > now()) OR (status = 'completed' AND NOT reply_required))
+    RETURNING *;
+
+    -- name: CompleteAgentEvent :one
+    UPDATE agent_events
+    SET status = 'completed', result = sqlc.arg('result'),
+        completed_at = COALESCE(completed_at, now()),
+        lease_until = NULL, updated_at = now()
+    WHERE event_id = sqlc.arg('event_id')
+      AND lease_owner = sqlc.arg('lease_owner')
+      AND ((status IN ('leased', 'acked') AND lease_until > now())
+           OR (status = 'completed' AND result = sqlc.arg('result')::jsonb))
+    RETURNING *;
+
+    -- name: FailAgentEvent :one
+    UPDATE agent_events
+    SET status = 'failed', retry_count = retry_count + 1,
+        next_retry_at = CASE WHEN sqlc.arg('retryable')::boolean
+            THEN now() + make_interval(secs => LEAST(3600, 5 * (1 << LEAST(retry_count, 9))))
+            ELSE 'infinity'::timestamptz END,
+        last_error = sqlc.arg('last_error'), lease_owner = NULL,
+        lease_until = NULL, updated_at = now()
+    WHERE event_id = sqlc.arg('event_id') AND status IN ('leased', 'acked')
+      AND lease_owner = sqlc.arg('lease_owner') AND lease_until > now()
+    RETURNING *;
+
+    -- name: GetAgentEvent :one
+    SELECT * FROM agent_events WHERE event_id = $1;

@@ -1,0 +1,43 @@
+path: internal/pkg/agentstream/publish.go
+update_behavior:
+    type: cover
+body: |
+    package agentstream
+
+    import (
+        "context"
+        "{{.Module}}/internal/pkg/agentauth"
+        "{{.Module}}/internal/pkg/response"
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/kitex/client/callopt"
+    )
+
+    type publisher interface {{ "{" }}
+        PublishAgentEvent(context.Context, *v1.PublishAgentEventReq, ...callopt.Option) (*v1.AgentEventPB, error)
+    {{ "}" }}
+
+    // PublishHandler is a machine-only ingress with the same fail-closed boundary as WS.
+    func PublishHandler(auth *agentauth.Authenticator, cli publisher) app.HandlerFunc {{ "{" }}
+        return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+            if _, status, reason := auth.Check(ctx, c, "agent:publish"); status != 0 {{ "{" }}
+                c.AbortWithStatusJSON(status, map[string]any{{ "{" }}"msg": reason{{ "}" }})
+                return
+            {{ "}" }}
+            if len(c.Request.Body()) > 256<<10 {{ "{" }}
+                c.AbortWithStatus(413)
+                return
+            {{ "}" }}
+            var req v1.PublishAgentEventReq
+            if err := c.BindAndValidate(&req); err != nil {{ "{" }}
+                response.BindError(c, err)
+                return
+            {{ "}" }}
+            event, err := cli.PublishAgentEvent(ctx, &req)
+            if err != nil {{ "{" }}
+                response.Err(c, err)
+                return
+            {{ "}" }}
+            response.OK(c, event)
+        {{ "}" }}
+    {{ "}" }}

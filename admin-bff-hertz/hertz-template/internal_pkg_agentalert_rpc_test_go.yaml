@@ -1,0 +1,127 @@
+path: internal/pkg/agentalert/rpc_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentalert
+
+    import (
+        "context"
+        "errors"
+        "strings"
+        "testing"
+        "time"
+
+        "github.com/bytedance/gopkg/cloud/metainfo"
+        "github.com/cloudwego/kitex/pkg/endpoint"
+        "github.com/cloudwego/kitex/pkg/rpcinfo"
+    )
+
+    func TestRPCPublishesSanitizedReturnedError(t *testing.T) {{ "{" }}
+        pub := newRecordingPublisher()
+        middleware := RPC(Config{{ "{" }}Service: "edge-rpc", Publisher: pub{{ "}" }})
+        ctx := rpcContext("ListLines", "req-123")
+
+        err := middleware(func(context.Context, interface{{ "{}" }}, interface{{ "{}" }}) error {{ "{" }}
+            return errors.New("database password=hunter2")
+        {{ "}" }})(ctx, nil, nil)
+        if err == nil {{ "{" }}
+            t.Fatal("expected original RPC error")
+        {{ "}" }}
+
+        event := pub.await(t)
+        if event.Type != EventServiceRPCFailed || event.Source != "edge-rpc" {{ "{" }}
+            t.Fatalf("unexpected event: %#v", event)
+        {{ "}" }}
+        if event.Payload.RPCMethod != "ListLines" || event.Payload.RequestID != "req-123" {{ "{" }}
+            t.Fatalf("missing RPC metadata: %#v", event.Payload)
+        {{ "}" }}
+        joined := strings.Join(event.Payload.StackExcerpt, "\n")
+        if strings.Contains(joined, "hunter2") || event.Payload.ErrorType == "" || event.Payload.StackHash == "" {{ "{" }}
+            t.Fatalf("unsafe or incomplete event payload: %#v", event.Payload)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestRPCRecoversPanicAndPublishesSanitizedStack(t *testing.T) {{ "{" }}
+        pub := newRecordingPublisher()
+        middleware := RPC(Config{{ "{" }}Service: "authority", Publisher: pub{{ "}" }})
+
+        err := middleware(func(context.Context, interface{{ "{}" }}, interface{{ "{}" }}) error {{ "{" }}
+            panic("token=do-not-forward")
+        {{ "}" }})(rpcContext("CreateUser", "req-panic"), nil, nil)
+        if err == nil {{ "{" }}
+            t.Fatal("expected recovered panic to become an error")
+        {{ "}" }}
+
+        event := pub.await(t)
+        if event.Type != EventServicePanic {{ "{" }}
+            t.Fatalf("unexpected event type: %s", event.Type)
+        {{ "}" }}
+        if strings.Contains(strings.Join(event.Payload.StackExcerpt, "\n"), "do-not-forward") {{ "{" }}
+            t.Fatalf("panic secret leaked: %#v", event.Payload.StackExcerpt)
+        {{ "}" }}
+        if len(event.Payload.StackExcerpt) > maxStackLines {{ "{" }}
+            t.Fatalf("stack excerpt too long: %d", len(event.Payload.StackExcerpt))
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestRPCSuppressesDuplicateFailuresWithinWindow(t *testing.T) {{ "{" }}
+        pub := newRecordingPublisher()
+        now := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+        middleware := RPC(Config{{ "{" }}Service: "edge-rpc", Publisher: pub, Now: func() time.Time {{ "{" }} return now {{ "}}" }})
+        next := endpoint.Endpoint(func(context.Context, interface{{ "{}" }}, interface{{ "{}" }}) error {{ "{" }} return errors.New("boom") {{ "}" }})
+        wrapped := middleware(next)
+
+        for i := 0; i < 2; i++ {{ "{" }}
+            _ = wrapped(rpcContext("ListLines", "req-duplicate"), nil, nil)
+        {{ "}" }}
+        _ = pub.await(t)
+        select {{ "{" }}
+        case duplicate := <-pub.events:
+            t.Fatalf("duplicate event published: %#v", duplicate)
+        case <-time.After(50 * time.Millisecond):
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPublishPanicReleasesDedupeReservation(t *testing.T) {{ "{" }}
+        now := time.Now().UTC()
+        m := &monitor{{ "{" }}
+            config: Config{{ "{" }}Publisher: panicPublisher{{ "{}" }}, PublishTimeout: time.Second{{ "}" }},
+            seen:   map[string]time.Time{{ "{" }}"key": now{{ "}" }},
+        {{ "}" }}
+        m.publish(Event{{ "{}" }}, "key", now)
+        if _, exists := m.seen["key"]; exists {{ "{" }}
+            t.Fatal("publisher panic must release the dedupe reservation")
+        {{ "}" }}
+    {{ "}" }}
+
+    func rpcContext(method, requestID string) context.Context {{ "{" }}
+        ri := rpcinfo.NewRPCInfo(nil, nil, rpcinfo.NewInvocation("test", method), nil, nil)
+        ctx := rpcinfo.NewCtxWithRPCInfo(context.Background(), ri)
+        return metainfo.WithPersistentValue(ctx, "x-request-id", requestID)
+    {{ "}" }}
+
+    type recordingPublisher struct{{ "{" }} events chan Event {{ "}" }}
+
+    type panicPublisher struct{{ "{}" }}
+
+    func (panicPublisher) Publish(context.Context, Event) error {{ "{" }} panic("publisher unavailable") {{ "}" }}
+
+    func newRecordingPublisher() *recordingPublisher {{ "{" }}
+        return &recordingPublisher{{ "{" }}events: make(chan Event, 8){{ "}" }}
+    {{ "}" }}
+
+    func (p *recordingPublisher) Publish(_ context.Context, event Event) error {{ "{" }}
+        p.events <- event
+        return nil
+    {{ "}" }}
+
+    func (p *recordingPublisher) await(t *testing.T) Event {{ "{" }}
+        t.Helper()
+        select {{ "{" }}
+        case event := <-p.events:
+            return event
+        case <-time.After(time.Second):
+            t.Fatal("timed out waiting for event")
+            return Event{{ "{}" }}
+        {{ "}" }}
+    {{ "}" }}

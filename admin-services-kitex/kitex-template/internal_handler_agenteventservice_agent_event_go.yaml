@@ -1,0 +1,153 @@
+path: internal/handler/agenteventservice/agent_event.go
+update_behavior:
+    type: cover
+body: |
+    package agenteventservice
+
+    import (
+        "context"
+        "errors"
+        "{{.Module}}/internal/pkg/rpcerror"
+        "{{.Module}}/internal/usecase/agent_event"
+        "io"
+        "strings"
+        "time"
+
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    const (
+        agentStreamClaimLimit   = 20
+        agentStreamLeaseSeconds = 30
+    )
+
+    // AgentEventStream keeps one admin dispatcher connected to the durable event
+    // store. The database lease remains authoritative; closing the stream merely
+    // stops renewals and the event becomes claimable after lease expiry.
+    func (s *AgentEventServiceImpl) AgentEventStream(stream v1.AgentEventService_AgentEventStreamServer) error {{ "{" }}
+        ctx, cancel := context.WithCancel(stream.Context())
+        defer cancel()
+        hello, err := stream.Recv()
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        consumerID := strings.TrimSpace(hello.GetConsumerId())
+        if hello.GetKind() != "hello" || consumerID == "" {{ "{" }}
+            return errors.New("agent event stream requires a hello frame with consumer_id")
+        {{ "}" }}
+        if err := stream.Send(&v1.AgentEventStreamResponse{{ "{" }}Kind: "accepted"{{ "}" }}); err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+
+        type received struct {{ "{" }}
+            frame *v1.AgentEventStreamRequest
+            err   error
+        {{ "}" }}
+        incoming := make(chan received, 1)
+        go func() {{ "{" }}
+            for {{ "{" }}
+                frame, recvErr := stream.Recv()
+                select {{ "{" }}
+                case incoming <- received{{ "{" }}frame: frame, err: recvErr{{ "}" }}:
+                case <-ctx.Done():
+                    return
+                {{ "}" }}
+                if recvErr != nil {{ "{" }}
+                    return
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}()
+
+        ticker := time.NewTicker(time.Second)
+        defer ticker.Stop()
+        claim := func() error {{ "{" }}
+            resp, claimErr := s.agentEvent.ClaimAgentEvents(ctx, &v1.ClaimAgentEventsReq{{ "{" }}
+                ConsumerId:   consumerID,
+                Limit:        agentStreamClaimLimit,
+                LeaseSeconds: agentStreamLeaseSeconds,
+            {{ "}" }})
+            if claimErr != nil {{ "{" }}
+                return claimErr
+            {{ "}" }}
+            for _, event := range resp.GetItems() {{ "{" }}
+                if sendErr := stream.Send(&v1.AgentEventStreamResponse{{ "{" }}Kind: "event", Event: event, EventId: event.GetEventId(){{ "}" }}); sendErr != nil {{ "{" }}
+                    return sendErr
+                {{ "}" }}
+            {{ "}" }}
+            return nil
+        {{ "}" }}
+
+        if err := claim(); err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        for {{ "{" }}
+            select {{ "{" }}
+            case <-ctx.Done():
+                return ctx.Err()
+            case <-ticker.C:
+                if err := claim(); err != nil {{ "{" }}
+                    return err
+                {{ "}" }}
+            case message := <-incoming:
+                if message.err != nil {{ "{" }}
+                    if errors.Is(message.err, io.EOF) {{ "{" }}
+                        return nil
+                    {{ "}" }}
+                    return message.err
+                {{ "}" }}
+                response := s.handleAgentStreamFrame(ctx, consumerID, message.frame)
+                if err := stream.Send(response); err != nil {{ "{" }}
+                    return err
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func (s *AgentEventServiceImpl) handleAgentStreamFrame(ctx context.Context, consumerID string, frame *v1.AgentEventStreamRequest) *v1.AgentEventStreamResponse {{ "{" }}
+        if frame == nil {{ "{" }}
+            return &v1.AgentEventStreamResponse{{ "{" }}Kind: "error", ErrorMessage: "empty stream frame"{{ "}" }}
+        {{ "}" }}
+        var err error
+        switch frame.GetKind() {{ "{" }}
+        case "heartbeat":
+            return &v1.AgentEventStreamResponse{{ "{" }}Kind: "heartbeat"{{ "}" }}
+        case "ack":
+            _, err = s.agentEvent.AckAgentEvent(ctx, &v1.AckAgentEventReq{{ "{" }}EventId: frame.GetEventId(), ConsumerId: consumerID{{ "}" }})
+        case "result":
+            _, err = s.agentEvent.CompleteAgentEvent(ctx, &v1.CompleteAgentEventReq{{ "{" }}EventId: frame.GetEventId(), ConsumerId: consumerID, ResultJson: frame.GetResultJson(){{ "}" }})
+        case "failed":
+            _, err = s.agentEvent.FailAgentEvent(ctx, &v1.FailAgentEventReq{{ "{" }}EventId: frame.GetEventId(), ConsumerId: consumerID, Retryable: frame.GetRetryable(), ErrorMessage: frame.GetErrorMessage(){{ "}" }})
+        default:
+            return &v1.AgentEventStreamResponse{{ "{" }}Kind: "error", EventId: frame.GetEventId(), ErrorMessage: "unsupported frame kind"{{ "}" }}
+        {{ "}" }}
+        if err != nil {{ "{" }}
+            return &v1.AgentEventStreamResponse{{ "{" }}Kind: "error", EventId: frame.GetEventId(), ErrorMessage: "invalid_event_transition"{{ "}" }}
+        {{ "}" }}
+        return &v1.AgentEventStreamResponse{{ "{" }}Kind: "accepted", EventId: frame.GetEventId(){{ "}" }}
+    {{ "}" }}
+
+    type AgentEventServiceImpl struct{{ "{" }} agentEvent *agent_event.UseCase {{ "}" }}
+
+    func New(uc *agent_event.UseCase) *AgentEventServiceImpl {{ "{" }}
+        return &AgentEventServiceImpl{{ "{" }}agentEvent: uc{{ "}" }}
+    {{ "}" }}
+    func (s *AgentEventServiceImpl) PublishAgentEvent(ctx context.Context, req *v1.PublishAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        resp, err := s.agentEvent.PublishAgentEvent(ctx, req)
+        return resp, rpcerror.ToBizError(err)
+    {{ "}" }}
+    func (s *AgentEventServiceImpl) ClaimAgentEvents(ctx context.Context, req *v1.ClaimAgentEventsReq) (*v1.ClaimAgentEventsResp, error) {{ "{" }}
+        resp, err := s.agentEvent.ClaimAgentEvents(ctx, req)
+        return resp, rpcerror.ToBizError(err)
+    {{ "}" }}
+    func (s *AgentEventServiceImpl) AckAgentEvent(ctx context.Context, req *v1.AckAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        resp, err := s.agentEvent.AckAgentEvent(ctx, req)
+        return resp, rpcerror.ToBizError(err)
+    {{ "}" }}
+    func (s *AgentEventServiceImpl) CompleteAgentEvent(ctx context.Context, req *v1.CompleteAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        resp, err := s.agentEvent.CompleteAgentEvent(ctx, req)
+        return resp, rpcerror.ToBizError(err)
+    {{ "}" }}
+    func (s *AgentEventServiceImpl) FailAgentEvent(ctx context.Context, req *v1.FailAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        resp, err := s.agentEvent.FailAgentEvent(ctx, req)
+        return resp, rpcerror.ToBizError(err)
+    {{ "}" }}

@@ -1,0 +1,172 @@
+path: internal/pkg/agentauth/authenticator.go
+update_behavior:
+    type: cover
+body: |
+    // Package agentauth authenticates the dedicated machine Agent shared by the
+    // WebSocket gateway and Agent-only HTTP routes.
+    package agentauth
+
+    import (
+        "context"
+        "crypto/sha256"
+        "crypto/subtle"
+        "fmt"
+        "net"
+        "net/netip"
+        "strings"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/kitex/client/callopt"
+
+        "{{.Module}}/internal/pkg/authz"
+        v1 "{{.Module}}/kitex_gen/api/rbac/v1"
+    )
+
+    const TokenHeader = "X-Agent-Token"
+
+    // Authorizer is the narrow Authority client surface needed by machine auth.
+    type Authorizer interface {{ "{" }}
+        GetUser(context.Context, *v1.GetUserReq, ...callopt.Option) (*v1.GetUserResp, error)
+        Enforce(context.Context, *v1.EnforceReq, ...callopt.Option) (*v1.EnforceResp, error)
+    {{ "}" }}
+
+    // Authenticator validates, in order, raw peer IP, machine token, dedicated
+    // account state and the requested RBAC permission. Forwarded-IP headers are
+    // deliberately ignored: they are caller-controlled unless a separately
+    // modelled trusted-proxy boundary exists.
+    type Authenticator struct {{ "{" }}
+        authorizer Authorizer
+        token      string
+        uid        string
+        exact      map[netip.Addr]struct{{ "{}" }}
+        prefixes   []netip.Prefix
+    {{ "}" }}
+
+    func New(authorizer Authorizer, token string, uid string, allowedCIDRs []string) (*Authenticator, error) {{ "{" }}
+        a := &Authenticator{{ "{" }}
+            authorizer: authorizer,
+            token:      token,
+            uid:        uid,
+            exact:      make(map[netip.Addr]struct{{ "{}" }}),
+        {{ "}" }}
+        for _, raw := range allowedCIDRs {{ "{" }}
+            entry := strings.TrimSpace(raw)
+            if entry == "" {{ "{" }}
+                continue
+            {{ "}" }}
+            if prefix, err := netip.ParsePrefix(entry); err == nil {{ "{" }}
+                a.prefixes = append(a.prefixes, prefix.Masked())
+                continue
+            {{ "}" }}
+            addr, err := netip.ParseAddr(entry)
+            if err != nil {{ "{" }}
+                return nil, fmt.Errorf("invalid agent allowed CIDR %q: %w", entry, err)
+            {{ "}" }}
+            a.exact[addr.Unmap()] = struct{{ "{}{}" }}
+        {{ "}" }}
+        return a, nil
+    {{ "}" }}
+
+    // Check returns status 0 on success. Empty allowlists fail closed.
+    func (a *Authenticator) Check(ctx context.Context, c *app.RequestContext, permission string) (string, int, string) {{ "{" }}
+        uid, status, reason := a.Authenticate(ctx, c)
+        if status != 0 {{ "{" }}
+            return "", status, reason
+        {{ "}" }}
+        status, reason = a.Revalidate(ctx, permission)
+        if status != 0 {{ "{" }}
+            return "", status, reason
+        {{ "}" }}
+        return uid, 0, ""
+    {{ "}" }}
+
+    // Authenticate validates the immutable request credentials and the mutable
+    // dedicated-account state. Route RBAC remains a separate step so normal HTTP
+    // routes can continue through the table-driven EnforceRoutes middleware.
+    func (a *Authenticator) Authenticate(ctx context.Context, c *app.RequestContext) (string, int, string) {{ "{" }}
+        if a == nil || a.authorizer == nil || strings.TrimSpace(a.uid) == "" {{ "{" }}
+            return "", 403, "authorization_unavailable"
+        {{ "}" }}
+        if !a.allowed(peerIP(c)) {{ "{" }}
+            return "", 403, "ip_not_allowed"
+        {{ "}" }}
+        expectedHash := sha256.Sum256([]byte(a.token))
+        providedHash := sha256.Sum256([]byte(c.Request.Header.Get(TokenHeader)))
+        if a.token == "" || subtle.ConstantTimeCompare(providedHash[:], expectedHash[:]) != 1 {{ "{" }}
+            return "", 401, "token_mismatch"
+        {{ "}" }}
+        userResp, err := a.authorizer.GetUser(ctx, &v1.GetUserReq{{ "{" }}Id: a.uid{{ "}" }})
+        if err != nil || userResp.GetUser() == nil {{ "{" }}
+            return "", 403, "account_not_found"
+        {{ "}" }}
+        if userResp.GetUser().GetStatus() != 1 {{ "{" }}
+            return "", 403, "account_disabled"
+        {{ "}" }}
+        return a.uid, 0, ""
+    {{ "}" }}
+
+    // Revalidate checks mutable account and permission state for an already
+    // authenticated long-lived connection.
+    func (a *Authenticator) Revalidate(ctx context.Context, permission string) (int, string) {{ "{" }}
+        if a == nil || a.authorizer == nil || strings.TrimSpace(a.uid) == "" {{ "{" }}
+            return 403, "authorization_unavailable"
+        {{ "}" }}
+        userResp, err := a.authorizer.GetUser(ctx, &v1.GetUserReq{{ "{" }}Id: a.uid{{ "}" }})
+        if err != nil || userResp.GetUser() == nil {{ "{" }}
+            return 403, "account_not_found"
+        {{ "}" }}
+        if userResp.GetUser().GetStatus() != 1 {{ "{" }}
+            return 403, "account_disabled"
+        {{ "}" }}
+        permissionResp, err := a.authorizer.Enforce(ctx, &v1.EnforceReq{{ "{" }}
+            Uid: a.uid, Obj: permission, Act: authz.ActExecute,
+        {{ "}" }})
+        if err != nil {{ "{" }}
+            return 403, "permission_check_failed"
+        {{ "}" }}
+        if !permissionResp.GetAllowed() {{ "{" }}
+            return 403, "permission_denied"
+        {{ "}" }}
+        return 0, ""
+    {{ "}" }}
+
+    // Source returns the raw TCP peer used by the allowlist and safe audit logs.
+    func (a *Authenticator) Source(c *app.RequestContext) string {{ "{" }}
+        ip := peerIP(c)
+        if !ip.IsValid() {{ "{" }}
+            return "unknown"
+        {{ "}" }}
+        return ip.String()
+    {{ "}" }}
+
+    func (a *Authenticator) allowed(ip netip.Addr) bool {{ "{" }}
+        if !ip.IsValid() {{ "{" }}
+            return false
+        {{ "}" }}
+        ip = ip.Unmap()
+        if _, ok := a.exact[ip]; ok {{ "{" }}
+            return true
+        {{ "}" }}
+        for _, prefix := range a.prefixes {{ "{" }}
+            if prefix.Contains(ip) {{ "{" }}
+                return true
+            {{ "}" }}
+        {{ "}" }}
+        return false
+    {{ "}" }}
+
+    func peerIP(c *app.RequestContext) netip.Addr {{ "{" }}
+        if c == nil {{ "{" }}
+            return netip.Addr{{ "{}" }}
+        {{ "}" }}
+        raw := c.RemoteAddr().String()
+        host, _, err := net.SplitHostPort(raw)
+        if err == nil {{ "{" }}
+            raw = host
+        {{ "}" }}
+        addr, err := netip.ParseAddr(strings.Trim(raw, "[]"))
+        if err != nil {{ "{" }}
+            return netip.Addr{{ "{}" }}
+        {{ "}" }}
+        return addr.Unmap()
+    {{ "}" }}

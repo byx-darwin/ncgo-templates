@@ -1,0 +1,137 @@
+path: internal/pkg/agentstream/bridge_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentstream
+
+    import (
+        "context"
+        "errors"
+        "sync/atomic"
+        "testing"
+        "time"
+
+        "github.com/cloudwego/kitex/client/callopt"
+        "github.com/cloudwego/kitex/pkg/remote/trans/nphttp2/metadata"
+
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+        "{{.Module}}/kitex_gen/api/admin/v1/agenteventservice"
+    )
+
+    type countingStreamClient struct{{ "{" }} calls atomic.Int32 {{ "}" }}
+
+    func (c *countingStreamClient) AgentEventStream(context.Context, ...callopt.Option) (agenteventservice.AgentEventService_AgentEventStreamClient, error) {{ "{" }}
+        c.calls.Add(1)
+        return nil, errors.New("unexpected upstream connection")
+    {{ "}" }}
+
+    func TestBridgeDoesNotOpenAuthorityStreamWithoutAgent(t *testing.T) {{ "{" }}
+        client := &countingStreamClient{{ "{}" }}
+        gateway := newTestGateway(t, &fakeAuthorizer{{ "{}" }}, "secret", "agent-test", time.Minute)
+        bridge := NewBridge(client, "agent-test", gateway)
+        ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+        defer cancel()
+
+        bridge.Run(ctx)
+
+        if got := client.calls.Load(); got != 0 {{ "{" }}
+            t.Fatalf("AgentEventStream calls = %d, want 0 without a connected Agent", got)
+        {{ "}" }}
+    {{ "}" }}
+
+    type eventStreamClient struct{{ "{" }} stream *fakeEventStream {{ "}" }}
+
+    func (c *eventStreamClient) AgentEventStream(context.Context, ...callopt.Option) (agenteventservice.AgentEventService_AgentEventStreamClient, error) {{ "{" }}
+        return c.stream, nil
+    {{ "}" }}
+
+    type fakeEventStream struct {{ "{" }}
+        ctx      context.Context
+        received atomic.Int32
+        sent     chan struct{{ "{}" }}
+    {{ "}" }}
+
+    func (s *fakeEventStream) Send(*v1.AgentEventStreamRequest) error {{ "{" }}
+        if s.sent != nil {{ "{" }}
+            select {{ "{" }}
+            case s.sent <- struct{{ "{}{}" }}:
+            default:
+            {{ "}" }}
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+
+    func (s *fakeEventStream) Recv() (*v1.AgentEventStreamResponse, error) {{ "{" }}
+        if s.received.Add(1) == 1 {{ "{" }}
+            return &v1.AgentEventStreamResponse{{ "{" }}Kind: "event"{{ "}" }}, nil
+        {{ "}" }}
+        <-s.ctx.Done()
+        return nil, s.ctx.Err()
+    {{ "}" }}
+
+    func (s *fakeEventStream) SetHeader(metadata.MD) error  {{ "{" }} return nil {{ "}" }}
+    func (s *fakeEventStream) SendHeader(metadata.MD) error {{ "{" }} return nil {{ "}" }}
+    func (s *fakeEventStream) SetTrailer(metadata.MD)       {{ "{}" }}
+    func (s *fakeEventStream) Header() (metadata.MD, error) {{ "{" }} return nil, nil {{ "}" }}
+    func (s *fakeEventStream) Trailer() metadata.MD         {{ "{" }} return nil {{ "}" }}
+    func (s *fakeEventStream) Context() context.Context     {{ "{" }} return s.ctx {{ "}" }}
+    func (s *fakeEventStream) RecvMsg(interface{{ "{}" }}) error    {{ "{" }} return nil {{ "}" }}
+    func (s *fakeEventStream) SendMsg(interface{{ "{}" }}) error    {{ "{" }} return nil {{ "}" }}
+    func (s *fakeEventStream) Close() error                 {{ "{" }} return nil {{ "}" }}
+
+    func TestBridgeStopsAuthorityStreamWhenAgentDisconnects(t *testing.T) {{ "{" }}
+        ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+        defer cancel()
+        stream := &fakeEventStream{{ "{" }}ctx: ctx{{ "}" }}
+        gateway := newTestGateway(t, &fakeAuthorizer{{ "{}" }}, "secret", "agent-test", time.Minute)
+        bridge := NewBridge(&eventStreamClient{{ "{" }}stream: stream{{ "}" }}, "agent-test", gateway)
+
+        err := bridge.runOnce(ctx)
+
+        if !errors.Is(err, errAgentUnavailable) {{ "{" }}
+            t.Fatalf("runOnce error = %v, want %v", err, errAgentUnavailable)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestBridgeStopsIdleAuthorityStreamImmediatelyOnAgentDisconnect(t *testing.T) {{ "{" }}
+        ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+        defer cancel()
+        stream := &fakeEventStream{{ "{" }}ctx: ctx, received: atomic.Int32{{ "{}" }}, sent: make(chan struct{{ "{}" }}, 1){{ "}" }}
+        gateway := newTestGateway(t, &fakeAuthorizer{{ "{}" }}, "secret", "agent-test", time.Minute)
+        conn := newFakeConn()
+        gateway.replace(conn)
+        bridge := NewBridge(&eventStreamClient{{ "{" }}stream: stream{{ "}" }}, "agent-test", gateway)
+        result := make(chan error, 1)
+        go func() {{ "{" }} result <- bridge.runOnce(ctx) {{ "}" }}()
+
+        select {{ "{" }}
+        case <-stream.sent:
+        case <-ctx.Done():
+            t.Fatal("bridge did not open the Authority stream")
+        {{ "}" }}
+        gateway.remove(conn)
+
+        select {{ "{" }}
+        case err := <-result:
+            if !errors.Is(err, errAgentUnavailable) {{ "{" }}
+                t.Fatalf("runOnce error = %v, want %v", err, errAgentUnavailable)
+            {{ "}" }}
+        case <-ctx.Done():
+            t.Fatal("bridge kept the Authority stream open after Agent disconnected")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestBridgeRejectsFramesWhenUpstreamQueueIsFull(t *testing.T) {{ "{" }}
+        bridge := NewBridge(nil, "test", nil)
+        if err := bridge.Submit(context.Background(), nil); err == nil {{ "{" }}
+            t.Fatal("nil frame accepted")
+        {{ "}" }}
+        for i := 0; i < cap(bridge.outgoing); i++ {{ "{" }}
+            if err := bridge.Submit(context.Background(), &v1.AgentEventStreamRequest{{ "{" }}Kind: "heartbeat"{{ "}" }}); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+        {{ "}" }}
+        if err := bridge.Submit(context.Background(), &v1.AgentEventStreamRequest{{ "{" }}Kind: "heartbeat"{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("full queue should fail without blocking")
+        {{ "}" }}
+    {{ "}" }}

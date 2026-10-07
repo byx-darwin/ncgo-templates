@@ -1,0 +1,130 @@
+path: internal/pkg/agentstream/bridge.go
+update_behavior:
+    type: cover
+body: |
+    // Package agentstream bridges authority's durable Kitex stream to the Agent WebSocket.
+    package agentstream
+
+    import (
+        "context"
+        "errors"
+        "log"
+        "time"
+
+        "github.com/cloudwego/kitex/client/callopt"
+
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+        "{{.Module}}/kitex_gen/api/admin/v1/agenteventservice"
+    )
+
+    var errAgentUnavailable = errors.New("agent websocket unavailable")
+
+    type streamClient interface {{ "{" }}
+        AgentEventStream(context.Context, ...callopt.Option) (agenteventservice.AgentEventService_AgentEventStreamClient, error)
+    {{ "}" }}
+
+    type Bridge struct {{ "{" }}
+        client     streamClient
+        consumerID string
+        gateway    *Gateway
+        outgoing   chan *v1.AgentEventStreamRequest
+    {{ "}" }}
+
+    func NewBridge(client streamClient, consumerID string, gateway *Gateway) *Bridge {{ "{" }}
+        return &Bridge{{ "{" }}client: client, consumerID: consumerID, gateway: gateway, outgoing: make(chan *v1.AgentEventStreamRequest, 256){{ "}" }}
+    {{ "}" }}
+
+    func (b *Bridge) Submit(ctx context.Context, frame *v1.AgentEventStreamRequest) error {{ "{" }}
+        if frame == nil {{ "{" }}
+            return errors.New("empty agent frame")
+        {{ "}" }}
+        select {{ "{" }}
+        case b.outgoing <- frame:
+            return nil
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+            return errors.New("agent upstream queue is full")
+        {{ "}" }}
+    {{ "}" }}
+
+    func (b *Bridge) Run(ctx context.Context) {{ "{" }}
+        backoff := time.Second
+        for ctx.Err() == nil {{ "{" }}
+            if !b.gateway.WaitConnected(ctx) {{ "{" }}
+                return
+            {{ "}" }}
+            if err := b.runOnce(ctx); err != nil && ctx.Err() == nil {{ "{" }}
+                log.Printf("agent authority stream disconnected: %v", err)
+            {{ "}" }}
+            select {{ "{" }}
+            case <-ctx.Done():
+                return
+            case <-time.After(backoff):
+            {{ "}" }}
+            if backoff < 30*time.Second {{ "{" }}
+                backoff = min(backoff*2, 30*time.Second)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func (b *Bridge) runOnce(ctx context.Context) error {{ "{" }}
+        // The shared authority client has a five-second timeout for ordinary RPCs.
+        // A bidirectional event stream is intentionally long-lived, so override the
+        // per-call timeout and let ctx control its lifetime.
+        ctx, cancel := context.WithCancel(ctx)
+        defer cancel()
+        stream, err := b.client.AgentEventStream(ctx, callopt.WithRPCTimeout(0))
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        defer func() {{ "{" }} _ = stream.Close() {{ "}" }}()
+        if err := stream.Send(&v1.AgentEventStreamRequest{{ "{" }}Kind: "hello", ConsumerId: b.consumerID{{ "}" }}); err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        type inbound struct {{ "{" }}
+            frame *v1.AgentEventStreamResponse
+            err   error
+        {{ "}" }}
+        received := make(chan inbound, 1)
+        go func() {{ "{" }}
+            for {{ "{" }}
+                frame, recvErr := stream.Recv()
+                select {{ "{" }}
+                case received <- inbound{{ "{" }}frame: frame, err: recvErr{{ "}" }}:
+                case <-ctx.Done():
+                    return
+                {{ "}" }}
+                if recvErr != nil {{ "{" }}
+                    return
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}()
+        for {{ "{" }}
+            connected, connectionChanged := b.gateway.connectionSnapshot()
+            if !connected {{ "{" }}
+                return errAgentUnavailable
+            {{ "}" }}
+            select {{ "{" }}
+            case <-ctx.Done():
+                return ctx.Err()
+            case <-connectionChanged:
+                // Re-check the snapshot. A replacement connection keeps the same
+                // Authority stream; a true disconnect ends it before more events
+                // can be leased to an unavailable downstream Agent.
+                continue
+            case frame := <-b.outgoing:
+                frame.ConsumerId = b.consumerID
+                if err := stream.Send(frame); err != nil {{ "{" }}
+                    return err
+                {{ "}" }}
+            case message := <-received:
+                if message.err != nil {{ "{" }}
+                    return message.err
+                {{ "}" }}
+                if message.frame != nil && !b.gateway.Send(message.frame) {{ "{" }}
+                    return errAgentUnavailable
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}

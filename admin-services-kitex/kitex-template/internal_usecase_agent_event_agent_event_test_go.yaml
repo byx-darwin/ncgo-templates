@@ -1,0 +1,83 @@
+path: internal/usecase/agent_event/agent_event_test.go
+update_behavior:
+    type: cover
+body: |
+    package agent_event
+
+    import (
+        "context"
+        "testing"
+
+        "{{.Module}}/internal/db/gen"
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    type fakeRepo struct {{ "{" }}
+        published gen.PublishAgentEventParams
+        claimed   gen.ClaimAgentEventsParams
+    {{ "}" }}
+
+    func (f *fakeRepo) Publish(_ context.Context, p gen.PublishAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        f.published = p
+        return gen.AgentEvent{{ "{" }}EventID: p.EventID, EventType: p.EventType, Source: p.Source, Severity: p.Severity, Payload: p.Payload, Status: "pending"{{ "}" }}, nil
+    {{ "}" }}
+    func (f *fakeRepo) Claim(_ context.Context, p gen.ClaimAgentEventsParams) ([]gen.AgentEvent, error) {{ "{" }}
+        f.claimed = p
+        return []gen.AgentEvent{{ "{{" }}EventID: "evt-1", Status: "leased"{{ "}}" }}, nil
+    {{ "}" }}
+    func (*fakeRepo) Ack(context.Context, gen.AckAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        return gen.AgentEvent{{ "{}" }}, nil
+    {{ "}" }}
+    func (*fakeRepo) Complete(context.Context, gen.CompleteAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        return gen.AgentEvent{{ "{}" }}, nil
+    {{ "}" }}
+
+    func (*fakeRepo) Fail(context.Context, gen.FailAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        return gen.AgentEvent{{ "{}" }}, nil
+    {{ "}" }}
+
+    func TestPublishAgentEventValidatesAndNormalizes(t *testing.T) {{ "{" }}
+        repo := &fakeRepo{{ "{}" }}
+        uc := New(repo)
+        got, err := uc.PublishAgentEvent(context.Background(), &v1.PublishAgentEventReq{{ "{" }}
+            EventId: " evt-1 ", EventType: "line_quality_degraded", Source: "telemetry",
+            Severity: "warning", PayloadJson: `{{ "{" }}"line_id":1{{ "}" }}`,
+        {{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatalf("PublishAgentEvent: %v", err)
+        {{ "}" }}
+        if got.GetEventId() != "evt-1" || repo.published.EventID != "evt-1" {{ "{" }}
+            t.Fatalf("event id was not normalized: %+v", got)
+        {{ "}" }}
+        if string(repo.published.Payload) != `{{ "{" }}"line_id":1{{ "}" }}` {{ "{" }}
+            t.Fatalf("payload = %s", repo.published.Payload)
+        {{ "}" }}
+        if !repo.published.OccurredAt.Valid {{ "{" }}
+            t.Fatal("occurred_at should default to now")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPublishAgentEventRejectsInvalidJSON(t *testing.T) {{ "{" }}
+        uc := New(&fakeRepo{{ "{}" }})
+        _, err := uc.PublishAgentEvent(context.Background(), &v1.PublishAgentEventReq{{ "{" }}
+            EventId: "evt-1", EventType: "line_quality_degraded", Source: "telemetry", Severity: "warning", PayloadJson: "{{ "{" }}",
+        {{ "}" }})
+        if err == nil {{ "{" }}
+            t.Fatal("expected invalid JSON error")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestClaimAgentEventsCapsLeaseAndBatch(t *testing.T) {{ "{" }}
+        repo := &fakeRepo{{ "{}" }}
+        uc := New(repo)
+        resp, err := uc.ClaimAgentEvents(context.Background(), &v1.ClaimAgentEventsReq{{ "{" }}ConsumerId: "admin-1", Limit: 500, LeaseSeconds: 900{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatalf("ClaimAgentEvents: %v", err)
+        {{ "}" }}
+        if repo.claimed.ClaimLimit != 100 || repo.claimed.LeaseSeconds != 300 {{ "{" }}
+            t.Fatalf("claim params = %+v", repo.claimed)
+        {{ "}" }}
+        if len(resp.GetItems()) != 1 || resp.GetItems()[0].GetEventId() != "evt-1" {{ "{" }}
+            t.Fatalf("response = %+v", resp)
+        {{ "}" }}
+    {{ "}" }}

@@ -8,6 +8,8 @@ body: |
     go 1.23
 
     require (
+     github.com/gorilla/websocket v1.5.3
+     github.com/hertz-contrib/websocket v0.2.0
     	github.com/byx-darwin/go-tools/go-common v0.1.0
     	github.com/byx-darwin/go-tools/go-framework v0.2.0
     	github.com/byx-darwin/go-tools/go-middleware v0.1.0

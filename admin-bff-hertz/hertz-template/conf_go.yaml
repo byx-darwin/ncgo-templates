@@ -31,6 +31,8 @@ body: |-
   )
 
   type Config struct {
+      Agent AgentConfig `yaml:"agent"`
+      AlertsEnabled bool `yaml:"alerts_enabled"`
       Env string `yaml:"env"`
       Debug bool `yaml:"debug"`
       ConfigCenter ConfigCenterConfig `yaml:"config_center"`
@@ -306,7 +308,7 @@ body: |-
   }
 
   type LoggingConsoleConfig struct {
-      Enabled bool `yaml:"enabled"`
+         Enabled bool `yaml:"enabled"`
   }
 
   type LoggingFileConfig struct {
@@ -320,7 +322,7 @@ body: |-
   }
 
   type LoggingCategoryConfig struct {
-      Enabled bool   `yaml:"enabled"`
+         Enabled bool   `yaml:"enabled"`
       File    string `yaml:"file"`
       Level   string `yaml:"level"`
   }
@@ -403,7 +405,7 @@ body: |-
   }
 
   type RetryConfig struct {
-      Enabled bool `yaml:"enabled"`
+         Enabled bool `yaml:"enabled"`
   }
 
   func RegisterConfigCenterLoader(provider string, loader ConfigCenterLoader) {
@@ -455,6 +457,9 @@ body: |-
           return nil, goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").Wrap(err)
       }
       *cfg = *loaded
+      if token := os.Getenv("AGENT_TOKEN"); token != "" {{ "{" }}
+          cfg.Agent.Token = token
+      {{ "}" }}
       if err := mergeConfigCenter(cfg); err != nil {
           return nil, err
       }
@@ -746,6 +751,9 @@ body: |-
       if c == nil {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("config is nil")
       }
+      if c.Agent.Enabled && (strings.TrimSpace(c.Agent.Token)=="" || strings.TrimSpace(c.Agent.UID)=="" || len(c.Agent.AllowedCIDRs)==0) {{ "{" }}
+          return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("agent requires token, UUID uid and allowed_cidrs")
+      {{ "}" }}
       c.applyRedisFallbacks()
       if c.Server.Registry.Name == "" {
           c.Server.Registry.Name = c.Env
@@ -993,3 +1001,12 @@ body: |-
       }
       return false
   }
+  // Agent is a dedicated machine boundary, independent of browser JWTs.
+  type AgentConfig struct {{ "{" }}
+      Enabled bool `yaml:"enabled"`
+      Token string `yaml:"token"`
+      UID string `yaml:"uid"`
+      AllowedCIDRs []string `yaml:"allowed_cidrs"`
+      ConsumerID string `yaml:"consumer_id"`
+      RevalidateSeconds int `yaml:"revalidate_seconds"`
+  {{ "}" }}

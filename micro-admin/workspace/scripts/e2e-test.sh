@@ -23,6 +23,15 @@ for tool in docker curl jq goose; do
 done
 
 ./scripts/prepare.sh
+# Enable the machine boundary only in this disposable E2E workspace.
+export AGENT_TOKEN="e2e-agent-token"
+python3 - <<'PYCONFIG'
+from pathlib import Path
+p=Path('services/admin/conf/dev/conf.yaml')
+s=p.read_text().replace('alerts_enabled: false','alerts_enabled: true').replace('agent:\n  enabled: false','agent:\n  enabled: true').replace('  uid: ""','  uid: "00000000-0000-7000-8000-000000000003"').replace('  allowed_cidrs: []','  allowed_cidrs: ["127.0.0.1/32", "::1/128"]').replace('  revalidate_seconds: 300','  revalidate_seconds: 1')
+p.write_text(s)
+p=Path('services/authority/conf/dev/conf.yaml');p.write_text(p.read_text().replace('alerts_enabled: false','alerts_enabled: true'))
+PYCONFIG
 
 echo '==> Building and testing authority'
 (cd services/authority && go build -o "$ROOT/.authority-test" . && go test ./...)
@@ -47,12 +56,16 @@ cat scripts/seed-permissions.sql scripts/seed.sql | docker compose -f compose.in
   psql -U postgres -d micro_admin -v ON_ERROR_STOP=1
 
 echo '==> Starting authority and BFF'
-(cd services/authority && GO_ENV=dev "$ROOT/.authority-test") > "$ROOT/authority-e2e.log" 2>&1 &
+(cd services/authority && exec env GO_ENV=dev "$ROOT/.authority-test") > "$ROOT/authority-e2e.log" 2>&1 &
 AUTHORITY_PID=$!
-(cd services/admin && GO_ENV=dev "$ROOT/.admin-test") > "$ROOT/admin-e2e.log" 2>&1 &
+(cd services/admin && exec env GO_ENV=dev "$ROOT/.admin-test") > "$ROOT/admin-e2e.log" 2>&1 &
 ADMIN_PID=$!
 ready=0
 for _ in $(seq 1 30); do
+  if ! kill -0 "$AUTHORITY_PID" 2>/dev/null || ! kill -0 "$ADMIN_PID" 2>/dev/null; then
+    cat admin-e2e.log authority-e2e.log >&2
+    exit 1
+  fi
   if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
     ready=1
     break
@@ -63,4 +76,6 @@ test "$ready" -eq 1 || { cat admin-e2e.log authority-e2e.log >&2; exit 1; }
 
 echo '==> Running HTTP smoke test'
 BFF_URL=http://127.0.0.1:8080 ./scripts/smoke-test.sh
+echo '==> Running machine WebSocket, durable RPC events and error integration tests'
+(cd services/admin && AGENT_E2E_URL=http://127.0.0.1:8080 AGENT_E2E_DSN="$DATABASE_URL" go test ./internal/pkg/agentstream -run TestAgentEndToEnd -count=1 -v)
 echo '==> Full backend E2E passed'

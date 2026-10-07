@@ -1,0 +1,112 @@
+path: internal/pkg/agentalert/http_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentalert
+
+    import (
+        "context"
+        "strings"
+        "testing"
+        "time"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/protocol"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+    )
+
+    type channelPublisher struct{{ "{" }} events chan Event {{ "}" }}
+
+    func (p channelPublisher) Publish(_ context.Context, event Event) error {{ "{" }}
+        p.events <- event
+        return nil
+    {{ "}" }}
+
+    func TestHTTPPublishesSanitizedServerError(t *testing.T) {{ "{" }}
+        events := make(chan Event, 1)
+        middleware := HTTP(Config{{ "{" }}Service: "admin", Publisher: channelPublisher{{ "{" }}events: events{{ "}" }}, Window: 2 * time.Minute{{ "}" }})
+        c := requestContext("POST", "/api/v1/example", "req-123")
+        c.SetHandlers(app.HandlersChain{{ "{" }}func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+            CaptureError(c, context.DeadlineExceeded)
+            c.SetStatusCode(consts.StatusInternalServerError)
+        {{ "}}" }})
+
+        middleware(context.Background(), c)
+        event := receiveEvent(t, events)
+
+        if event.Type != EventServiceRequestFailed || event.Source != "admin" {{ "{" }}
+            t.Fatalf("event = %+v", event)
+        {{ "}" }}
+        if event.Payload.Method != "POST" || event.Payload.Path != "/api/v1/example" || event.Payload.Status != 500 || event.Payload.RequestID != "req-123" {{ "{" }}
+            t.Fatalf("payload = %+v", event.Payload)
+        {{ "}" }}
+        if event.Payload.StackHash == "" || len(event.Payload.StackExcerpt) == 0 {{ "{" }}
+            t.Fatalf("stack metadata missing: %+v", event.Payload)
+        {{ "}" }}
+        if strings.Contains(strings.Join(event.Payload.StackExcerpt, "\n"), "secret") {{ "{" }}
+            t.Fatal("stack excerpt contains a secret")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestHTTPRecoversPanicAndPublishesStack(t *testing.T) {{ "{" }}
+        events := make(chan Event, 1)
+        middleware := HTTP(Config{{ "{" }}Service: "edge-bff", Publisher: channelPublisher{{ "{" }}events: events{{ "}" }}, Window: 2 * time.Minute{{ "}" }})
+        c := requestContext("GET", "/panic", "req-panic")
+        c.SetHandlers(app.HandlersChain{{ "{" }}func(context.Context, *app.RequestContext) {{ "{" }}
+            panic("password=do-not-forward")
+        {{ "}}" }})
+
+        middleware(context.Background(), c)
+        event := receiveEvent(t, events)
+
+        if c.Response.StatusCode() != consts.StatusInternalServerError {{ "{" }}
+            t.Fatalf("status = %d, want 500", c.Response.StatusCode())
+        {{ "}" }}
+        if event.Type != EventServicePanic || event.Payload.ErrorType != "string" {{ "{" }}
+            t.Fatalf("event = %+v", event)
+        {{ "}" }}
+        joined := strings.Join(event.Payload.StackExcerpt, "\n")
+        if strings.Contains(joined, "do-not-forward") || len(event.Payload.StackExcerpt) > 20 {{ "{" }}
+            t.Fatalf("unsafe stack excerpt: %q", joined)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestHTTPSuppressesDuplicateWithinWindow(t *testing.T) {{ "{" }}
+        events := make(chan Event, 2)
+        now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+        middleware := HTTP(Config{{ "{" }}
+            Service: "telemetry", Publisher: channelPublisher{{ "{" }}events: events{{ "}" }}, Window: 2 * time.Minute,
+            Now: func() time.Time {{ "{" }} return now {{ "}" }},
+        {{ "}" }})
+        for range 2 {{ "{" }}
+            c := requestContext("GET", "/api/v1/stats", "req-duplicate")
+            c.SetHandlers(app.HandlersChain{{ "{" }}func(context.Context, *app.RequestContext) {{ "{" }} c.SetStatusCode(503) {{ "}}" }})
+            middleware(context.Background(), c)
+        {{ "}" }}
+
+        _ = receiveEvent(t, events)
+        select {{ "{" }}
+        case duplicate := <-events:
+            t.Fatalf("unexpected duplicate: %+v", duplicate)
+        case <-time.After(25 * time.Millisecond):
+        {{ "}" }}
+    {{ "}" }}
+
+    func requestContext(method, path, requestID string) *app.RequestContext {{ "{" }}
+        c := app.NewContext(0)
+        req := protocol.NewRequest(method, path, nil)
+        req.Header.Set("X-Request-ID", requestID)
+        req.CopyTo(&c.Request)
+        return c
+    {{ "}" }}
+
+    func receiveEvent(t *testing.T, events <-chan Event) Event {{ "{" }}
+        t.Helper()
+        select {{ "{" }}
+        case event := <-events:
+            return event
+        case <-time.After(time.Second):
+            t.Fatal("timed out waiting for event")
+            return Event{{ "{}" }}
+        {{ "}" }}
+    {{ "}" }}

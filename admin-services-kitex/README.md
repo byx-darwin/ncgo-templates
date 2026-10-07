@@ -388,3 +388,9 @@ explicit project updates. Fresh workspace permission seeds are generated from
 admin-bff-hertz's route table rather than copied from frontend mocks.
 See [micro-admin](../micro-admin/README.md#permission-contract-v2) for complete
 upgrade and verification steps.
+
+Agent event support includes `AgentEventService`, the `000005_agent_events.sql`
+migration, durable leases/ACK/results/retries and operational RPC/panic alerts.
+Set `alerts_enabled: true` after enabling and migrating the database. See the
+[micro-admin guide](../micro-admin/README.md#agent-websocket-durable-events-and-operational-alerts)
+for protocol, provisioning and end-to-end validation.

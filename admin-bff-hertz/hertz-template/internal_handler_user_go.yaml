@@ -28,7 +28,7 @@ body: |
     func (h *UserHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
         resp, err := h.rbacCli.ListUsers(ctx, &api.ListUsersReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Users)
@@ -39,7 +39,7 @@ body: |
 
     	resp, err := h.rbacCli.GetUser(ctx, &api.GetUserReq{{ "{" }}Id: idStr{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.User)
@@ -54,7 +54,7 @@ body: |
 
     	resp, err := h.rbacCli.CreateUser(ctx, &req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.User)
@@ -72,7 +72,7 @@ body: |
 
     	resp, err := h.rbacCli.UpdateUser(ctx, &req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.User)
@@ -83,7 +83,7 @@ body: |
 
     	_, err := h.rbacCli.DeleteUser(ctx, &api.DeleteUserReq{{ "{" }}Id: idStr{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
@@ -92,12 +92,17 @@ body: |
     func (h *UserHandler) AssignRoles(ctx context.Context, c *app.RequestContext) {{ "{" }}
         var req api.AssignRolesToUserReq
         if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-            response.ErrorCode(c, response.CodeRequestParamInvalid); return
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
         {{ "}" }}
-        if req.RoleIds == nil {{ "{" }} response.ErrorCode(c, response.CodeRequestParamInvalid); return {{ "}" }}
+        if req.RoleIds == nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
         req.UserId = c.Param("id")
         if _, err := h.rbacCli.AssignRolesToUser(ctx, &req); err != nil {{ "{" }}
-            response.ErrorCode(c, response.CodeInternalError); return
+            response.Err(c, err)
+            return
         {{ "}" }}
         response.OK(c, map[string]string{{ "{" }}"status": "assigned"{{ "}" }})
     {{ "}" }}

@@ -487,3 +487,10 @@ Pair this version with admin-services-kitex v2 and its migrations. Existing
 handler files marked `skip` need explicit application updates. See
 [micro-admin's permission contract](../micro-admin/README.md#permission-contract-v2)
 for upgrade and verification steps.
+
+Agent support adds a token/IP/account/RBAC authenticated WebSocket gateway,
+machine event ingress and sanitized HTTP/RPC/panic alert capture. Generate the
+client from `idl/z_agent_event.proto` in addition to the existing RPC IDLs. Native
+Kitex business codes retain their HTTP status and public message. See the
+[micro-admin guide](../micro-admin/README.md#agent-websocket-durable-events-and-operational-alerts)
+for configuration and protocol details.

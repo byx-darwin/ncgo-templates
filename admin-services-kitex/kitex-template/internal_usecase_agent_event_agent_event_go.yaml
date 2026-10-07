@@ -1,0 +1,180 @@
+path: internal/usecase/agent_event/agent_event.go
+update_behavior:
+    type: cover
+body: |
+    // Package agent_event implements reliable Agent event state transitions.
+    //
+    // ncgo:domain=agent_event kind=usecase
+    package agent_event
+
+    import (
+        "context"
+        "encoding/json"
+        "strings"
+        "time"
+
+        goerror "github.com/byx-darwin/go-tools/go-common/error"
+        frameworkerror "github.com/byx-darwin/go-tools/go-framework/error"
+        "github.com/jackc/pgx/v5/pgtype"
+
+        "{{.Module}}/internal/db/gen"
+        agent_eventrepo "{{.Module}}/internal/repository/agent_event"
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    const maxPayloadBytes = 256 << 10
+
+    type UseCase struct{{ "{" }} repo agent_eventrepo.Repository {{ "}" }}
+
+    func New(repo agent_eventrepo.Repository) *UseCase  {{ "{" }} return &UseCase{{ "{" }}repo: repo{{ "}" }} {{ "}" }}
+    func (u *UseCase) Repo() agent_eventrepo.Repository {{ "{" }} return u.repo {{ "}" }}
+
+    // ncgo:methods:start
+
+    func (u *UseCase) PublishAgentEvent(ctx context.Context, req *v1.PublishAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        if req == nil || strings.TrimSpace(req.GetEventId()) == "" || strings.TrimSpace(req.GetEventType()) == "" || strings.TrimSpace(req.GetSource()) == "" {{ "{" }}
+            return nil, invalid("event_id, event_type and source are required")
+        {{ "}" }}
+        severity := strings.TrimSpace(req.GetSeverity())
+        if severity != "info" && severity != "warning" && severity != "critical" {{ "{" }}
+            return nil, invalid("severity must be info, warning or critical")
+        {{ "}" }}
+        payload := []byte(req.GetPayloadJson())
+        if len(payload) == 0 {{ "{" }}
+            payload = []byte("{{ "{}" }}")
+        {{ "}" }}
+        if len(payload) > maxPayloadBytes || !json.Valid(payload) {{ "{" }}
+            return nil, invalid("payload_json must be valid JSON no larger than 256 KiB")
+        {{ "}" }}
+        occurredAt := time.Now().UTC()
+        if raw := strings.TrimSpace(req.GetOccurredAt()); raw != "" {{ "{" }}
+            parsed, err := time.Parse(time.RFC3339, raw)
+            if err != nil {{ "{" }}
+                return nil, invalid("occurred_at must be RFC3339")
+            {{ "}" }}
+            occurredAt = parsed
+        {{ "}" }}
+        e, err := u.repo.Publish(ctx, gen.PublishAgentEventParams{{ "{" }}
+            EventID: strings.TrimSpace(req.GetEventId()), EventType: strings.TrimSpace(req.GetEventType()),
+            Source: strings.TrimSpace(req.GetSource()), Severity: severity, DedupeKey: optionalString(req.GetDedupeKey()),
+            Payload: payload, ReplyRequired: req.GetReplyRequired(), OccurredAt: pgtype.Timestamptz{{ "{" }}Time: occurredAt, Valid: true{{ "}" }},
+        {{ "}" }})
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        return toPB(e), nil
+    {{ "}" }}
+
+    func (u *UseCase) ClaimAgentEvents(ctx context.Context, req *v1.ClaimAgentEventsReq) (*v1.ClaimAgentEventsResp, error) {{ "{" }}
+        if req == nil || strings.TrimSpace(req.GetConsumerId()) == "" {{ "{" }}
+            return nil, invalid("consumer_id is required")
+        {{ "}" }}
+        limit := req.GetLimit()
+        if limit <= 0 {{ "{" }}
+            limit = 20
+        {{ "}" }}
+        if limit > 100 {{ "{" }}
+            limit = 100
+        {{ "}" }}
+        leaseSeconds := req.GetLeaseSeconds()
+        if leaseSeconds <= 0 {{ "{" }}
+            leaseSeconds = 30
+        {{ "}" }}
+        if leaseSeconds > 300 {{ "{" }}
+            leaseSeconds = 300
+        {{ "}" }}
+        owner := strings.TrimSpace(req.GetConsumerId())
+        events, err := u.repo.Claim(ctx, gen.ClaimAgentEventsParams{{ "{" }}LeaseOwner: &owner, LeaseSeconds: leaseSeconds, ClaimLimit: limit{{ "}" }})
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        items := make([]*v1.AgentEventPB, 0, len(events))
+        for _, event := range events {{ "{" }}
+            items = append(items, toPB(event))
+        {{ "}" }}
+        return &v1.ClaimAgentEventsResp{{ "{" }}Items: items{{ "}" }}, nil
+    {{ "}" }}
+
+    func (u *UseCase) AckAgentEvent(ctx context.Context, req *v1.AckAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        if req == nil || strings.TrimSpace(req.GetEventId()) == "" || strings.TrimSpace(req.GetConsumerId()) == "" {{ "{" }}
+            return nil, invalid("event_id and consumer_id are required")
+        {{ "}" }}
+        owner := strings.TrimSpace(req.GetConsumerId())
+        e, err := u.repo.Ack(ctx, gen.AckAgentEventParams{{ "{" }}EventID: strings.TrimSpace(req.GetEventId()), LeaseOwner: &owner{{ "}" }})
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        return toPB(e), nil
+    {{ "}" }}
+
+    func (u *UseCase) CompleteAgentEvent(ctx context.Context, req *v1.CompleteAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        if req == nil || strings.TrimSpace(req.GetEventId()) == "" || strings.TrimSpace(req.GetConsumerId()) == "" {{ "{" }}
+            return nil, invalid("event_id and consumer_id are required")
+        {{ "}" }}
+        result := []byte(req.GetResultJson())
+        if len(result) == 0 || len(result) > maxPayloadBytes || !json.Valid(result) {{ "{" }}
+            return nil, invalid("result_json must be valid JSON no larger than 256 KiB")
+        {{ "}" }}
+        owner := strings.TrimSpace(req.GetConsumerId())
+        e, err := u.repo.Complete(ctx, gen.CompleteAgentEventParams{{ "{" }}Result: result, EventID: strings.TrimSpace(req.GetEventId()), LeaseOwner: &owner{{ "}" }})
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        return toPB(e), nil
+    {{ "}" }}
+
+    func (u *UseCase) FailAgentEvent(ctx context.Context, req *v1.FailAgentEventReq) (*v1.AgentEventPB, error) {{ "{" }}
+        if req == nil || strings.TrimSpace(req.GetEventId()) == "" || strings.TrimSpace(req.GetConsumerId()) == "" {{ "{" }}
+            return nil, invalid("event_id and consumer_id are required")
+        {{ "}" }}
+        owner := strings.TrimSpace(req.GetConsumerId())
+        e, err := u.repo.Fail(ctx, gen.FailAgentEventParams{{ "{" }}Retryable: req.GetRetryable(), LastError: optionalString(req.GetErrorMessage()), EventID: strings.TrimSpace(req.GetEventId()), LeaseOwner: &owner{{ "}" }})
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        return toPB(e), nil
+    {{ "}" }}
+
+    // ncgo:methods:end
+
+    func invalid(message string) error {{ "{" }}
+        return goerror.In("agent_event").Code(int(frameworkerror.CodeParamInvalid)).Public("invalid_agent_event").New(message)
+    {{ "}" }}
+
+    func optionalString(value string) *string {{ "{" }}
+        value = strings.TrimSpace(value)
+        if value == "" {{ "{" }}
+            return nil
+        {{ "}" }}
+        return &value
+    {{ "}" }}
+
+    func toPB(e gen.AgentEvent) *v1.AgentEventPB {{ "{" }}
+        return &v1.AgentEventPB{{ "{" }}
+            Id: e.ID, EventId: e.EventID, EventType: e.EventType, Source: e.Source, Severity: e.Severity,
+            DedupeKey: value(e.DedupeKey), PayloadJson: string(e.Payload), Status: e.Status,
+            ReplyRequired: e.ReplyRequired, ResultJson: string(e.Result), LeaseOwner: value(e.LeaseOwner),
+            LeaseUntil: timestamp(e.LeaseUntil), RetryCount: e.RetryCount, NextRetryAt: timestamp(e.NextRetryAt),
+            LastError: value(e.LastError), OccurredAt: timestamp(e.OccurredAt), CreatedAt: timestamp(e.CreatedAt),
+            UpdatedAt: timestamp(e.UpdatedAt), AckedAt: timestamp(e.AckedAt), CompletedAt: timestamp(e.CompletedAt),
+        {{ "}" }}
+    {{ "}" }}
+
+    func value(v *string) string {{ "{" }}
+        if v == nil {{ "{" }}
+            return ""
+        {{ "}" }}
+        return *v
+    {{ "}" }}
+    func timestamp(v pgtype.Timestamptz) string {{ "{" }}
+        if v.InfinityModifier == pgtype.Infinity {{ "{" }}
+            return "infinity"
+        {{ "}" }}
+        if v.InfinityModifier == pgtype.NegativeInfinity {{ "{" }}
+            return "-infinity"
+        {{ "}" }}
+        if !v.Valid {{ "{" }}
+            return ""
+        {{ "}" }}
+        return v.Time.UTC().Format(time.RFC3339Nano)
+    {{ "}" }}

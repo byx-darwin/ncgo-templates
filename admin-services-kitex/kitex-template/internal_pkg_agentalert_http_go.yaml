@@ -1,0 +1,243 @@
+path: internal/pkg/agentalert/http.go
+update_behavior:
+    type: cover
+body: |
+    // Package agentalert captures operational HTTP failures and turns them into
+    // sanitized events suitable for Authority's durable Agent stream.
+    package agentalert
+
+    import (
+        "context"
+        "crypto/sha256"
+        "encoding/hex"
+        "fmt"
+        "reflect"
+        "regexp"
+        "runtime/debug"
+        "strings"
+        "sync"
+        "time"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+    )
+
+    const (
+        EventServiceRequestFailed = "service_request_failed"
+        EventServiceRPCFailed     = "service_rpc_failed"
+        EventServicePanic         = "service_panic"
+        capturedErrorKey          = "agentalert:captured_error"
+        defaultWindow             = 2 * time.Minute
+        defaultPublishTimeout     = 5 * time.Second
+        maxStackLines             = 20
+    )
+
+    var secretPattern = regexp.MustCompile(`(?i)(authorization|token|secret|password|passwd|dsn)([=:][^\s,;]+)`)
+    var stackAddressPattern = regexp.MustCompile(`0x[0-9a-fA-F]+`)
+
+    type Payload struct {{ "{" }}
+        Method       string   `json:"method"`
+        Path         string   `json:"path"`
+        RPCMethod    string   `json:"rpc_method,omitempty"`
+        Status       int      `json:"status"`
+        RequestID    string   `json:"request_id,omitempty"`
+        TraceID      string   `json:"trace_id,omitempty"`
+        ErrorType    string   `json:"error_type,omitempty"`
+        StackHash    string   `json:"stack_hash,omitempty"`
+        StackExcerpt []string `json:"stack_excerpt,omitempty"`
+    {{ "}" }}
+
+    type Event struct {{ "{" }}
+        ID         string
+        Type       string
+        Source     string
+        Severity   string
+        DedupeKey  string
+        OccurredAt time.Time
+        Payload    Payload
+    {{ "}" }}
+
+    type Publisher interface {{ "{" }}
+        Publish(context.Context, Event) error
+    {{ "}" }}
+
+    type PublisherFunc func(context.Context, Event) error
+
+    func (f PublisherFunc) Publish(ctx context.Context, event Event) error {{ "{" }}
+        return f(ctx, event)
+    {{ "}" }}
+
+    type Config struct {{ "{" }}
+        Service        string
+        Publisher      Publisher
+        Window         time.Duration
+        PublishTimeout time.Duration
+        Now            func() time.Time
+    {{ "}" }}
+
+    type capturedError struct {{ "{" }}
+        errorType string
+        stack     []byte
+    {{ "}" }}
+
+    type monitor struct {{ "{" }}
+        config Config
+        mu     sync.Mutex
+        seen   map[string]time.Time
+    {{ "}" }}
+
+    // CaptureError records the error type and stack at the response boundary.
+    // It intentionally does not retain err.Error(), which can contain SQL,
+    // credentials or request data.
+    func CaptureError(c *app.RequestContext, err error) {{ "{" }}
+        if c == nil || err == nil {{ "{" }}
+            return
+        {{ "}" }}
+        c.Set(capturedErrorKey, capturedError{{ "{" }}errorType: reflect.TypeOf(err).String(), stack: debug.Stack(){{ "}" }})
+    {{ "}" }}
+
+    // HTTP reports final 5xx responses and recovers panics. Publishing is
+    // asynchronous so alert delivery never increases request latency.
+    func HTTP(config Config) app.HandlerFunc {{ "{" }}
+        if config.Window < time.Second {{ "{" }}
+            config.Window = defaultWindow
+        {{ "}" }}
+        if config.PublishTimeout <= 0 {{ "{" }}
+            config.PublishTimeout = defaultPublishTimeout
+        {{ "}" }}
+        if config.Now == nil {{ "{" }}
+            config.Now = time.Now
+        {{ "}" }}
+        m := &monitor{{ "{" }}config: config, seen: make(map[string]time.Time){{ "}" }}
+        return m.handle
+    {{ "}" }}
+
+    func (m *monitor) handle(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        defer func() {{ "{" }}
+            if recovered := recover(); recovered != nil {{ "{" }}
+                stack := debug.Stack()
+                c.AbortWithStatusJSON(consts.StatusInternalServerError, map[string]any{{ "{" }}"code": 10000, "msg": "system_error"{{ "}" }})
+                m.report(EventServicePanic, c, reflect.TypeOf(recovered).String(), stack)
+                return
+            {{ "}" }}
+            if c.Response.StatusCode() >= consts.StatusInternalServerError {{ "{" }}
+                captured := capturedFrom(c)
+                m.report(EventServiceRequestFailed, c, captured.errorType, captured.stack)
+            {{ "}" }}
+        {{ "}" }}()
+        c.Next(ctx)
+    {{ "}" }}
+
+    func (m *monitor) report(eventType string, c *app.RequestContext, errorType string, stack []byte) {{ "{" }}
+        if m.config.Publisher == nil || strings.TrimSpace(m.config.Service) == "" {{ "{" }}
+            return
+        {{ "}" }}
+        now := m.config.Now().UTC()
+        path := string(c.Path())
+        method := string(c.Method())
+        stackHash, excerpt := stackMetadata(stack)
+        dedupeKey := strings.Join([]string{{ "{" }}"service", m.config.Service, eventType, method, path, fmt.Sprint(c.Response.StatusCode()), stackHash{{ "}" }}, ":")
+        if !m.reserve(dedupeKey, now) {{ "{" }}
+            return
+        {{ "}" }}
+        bucket := now.Unix() / int64(m.config.Window.Seconds())
+        event := Event{{ "{" }}
+            ID:         shortHash(fmt.Sprintf("%s:%d", dedupeKey, bucket)),
+            Type:       eventType,
+            Source:     m.config.Service,
+            Severity:   "critical",
+            DedupeKey:  dedupeKey,
+            OccurredAt: now,
+            Payload: Payload{{ "{" }}
+                Method: method, Path: path, Status: c.Response.StatusCode(),
+                RequestID: requestID(c), TraceID: traceID(c), ErrorType: errorType,
+                StackHash: stackHash, StackExcerpt: excerpt,
+            {{ "}" }},
+        {{ "}" }}
+        go m.publish(event, dedupeKey, now)
+    {{ "}" }}
+
+    func (m *monitor) publish(event Event, dedupeKey string, reservedAt time.Time) {{ "{" }}
+        defer func() {{ "{" }}
+            if recover() != nil {{ "{" }}
+                m.release(dedupeKey, reservedAt)
+            {{ "}" }}
+        {{ "}" }}()
+        publishCtx, cancel := context.WithTimeout(context.Background(), m.config.PublishTimeout)
+        defer cancel()
+        if err := m.config.Publisher.Publish(publishCtx, event); err != nil {{ "{" }}
+            m.release(dedupeKey, reservedAt)
+        {{ "}" }}
+    {{ "}" }}
+
+    func (m *monitor) reserve(key string, now time.Time) bool {{ "{" }}
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        for existing, seenAt := range m.seen {{ "{" }}
+            if now.Sub(seenAt) >= m.config.Window {{ "{" }}
+                delete(m.seen, existing)
+            {{ "}" }}
+        {{ "}" }}
+        if seenAt, ok := m.seen[key]; ok && now.Sub(seenAt) < m.config.Window {{ "{" }}
+            return false
+        {{ "}" }}
+        m.seen[key] = now
+        return true
+    {{ "}" }}
+
+    func (m *monitor) release(key string, reservedAt time.Time) {{ "{" }}
+        m.mu.Lock()
+        defer m.mu.Unlock()
+        if m.seen[key].Equal(reservedAt) {{ "{" }}
+            delete(m.seen, key)
+        {{ "}" }}
+    {{ "}" }}
+
+    func capturedFrom(c *app.RequestContext) capturedError {{ "{" }}
+        value, ok := c.Get(capturedErrorKey)
+        if !ok {{ "{" }}
+            return capturedError{{ "{}" }}
+        {{ "}" }}
+        captured, _ := value.(capturedError)
+        return captured
+    {{ "}" }}
+
+    func stackMetadata(stack []byte) (string, []string) {{ "{" }}
+        if len(stack) == 0 {{ "{" }}
+            return "", nil
+        {{ "}" }}
+        sanitized := secretPattern.ReplaceAllString(string(stack), "$1=[REDACTED]")
+        lines := strings.Split(strings.TrimSpace(sanitized), "\n")
+        hashLines := lines
+        if len(hashLines) > 0 && strings.HasPrefix(hashLines[0], "goroutine ") {{ "{" }}
+            hashLines = hashLines[1:]
+        {{ "}" }}
+        if len(lines) > maxStackLines {{ "{" }}
+            lines = lines[:maxStackLines]
+        {{ "}" }}
+        normalizedForHash := stackAddressPattern.ReplaceAllString(strings.Join(hashLines, "\n"), "0xADDR")
+        return shortHash(normalizedForHash), lines
+    {{ "}" }}
+
+    func shortHash(value string) string {{ "{" }}
+        sum := sha256.Sum256([]byte(value))
+        return hex.EncodeToString(sum[:8])
+    {{ "}" }}
+
+    func requestID(c *app.RequestContext) string {{ "{" }}
+        if value, ok := c.Get("responder:request_id"); ok {{ "{" }}
+            if id, ok := value.(string); ok && id != "" {{ "{" }}
+                return id
+            {{ "}" }}
+        {{ "}" }}
+        return string(c.Request.Header.Peek("X-Request-ID"))
+    {{ "}" }}
+
+    func traceID(c *app.RequestContext) string {{ "{" }}
+        traceparent := string(c.Request.Header.Peek("traceparent"))
+        parts := strings.Split(traceparent, "-")
+        if len(parts) == 4 && len(parts[1]) == 32 {{ "{" }}
+            return parts[1]
+        {{ "}" }}
+        return ""
+    {{ "}" }}

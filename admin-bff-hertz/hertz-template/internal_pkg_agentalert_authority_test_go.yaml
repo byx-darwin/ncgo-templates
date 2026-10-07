@@ -1,0 +1,47 @@
+path: internal/pkg/agentalert/authority_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentalert
+
+    import (
+        "context"
+        "encoding/json"
+        "testing"
+        "time"
+
+        "github.com/cloudwego/kitex/client/callopt"
+
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    type fakeAuthorityClient struct{{ "{" }} request *v1.PublishAgentEventReq {{ "}" }}
+
+    func (f *fakeAuthorityClient) PublishAgentEvent(_ context.Context, request *v1.PublishAgentEventReq, _ ...callopt.Option) (*v1.AgentEventPB, error) {{ "{" }}
+        f.request = request
+        return &v1.AgentEventPB{{ "{" }}EventId: request.GetEventId(){{ "}" }}, nil
+    {{ "}" }}
+
+    func TestAuthorityPublisherMapsSanitizedEvent(t *testing.T) {{ "{" }}
+        client := &fakeAuthorityClient{{ "{}" }}
+        publisher := NewAuthorityPublisher(client)
+        event := Event{{ "{" }}
+            ID: "bucket-1", Type: EventServiceRequestFailed, Source: "admin", Severity: "critical",
+            DedupeKey: "service:admin:POST:/x:500", OccurredAt: time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC),
+            Payload: Payload{{ "{" }}Method: "POST", Path: "/x", Status: 500, RequestID: "req-1", StackHash: "abc"{{ "}" }},
+        {{ "}" }}
+
+        if err := publisher.Publish(context.Background(), event); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if client.request.GetEventId() != "operational:bucket-1" || client.request.GetEventType() != EventServiceRequestFailed || client.request.GetSource() != "admin" {{ "{" }}
+            t.Fatalf("request = %+v", client.request)
+        {{ "}" }}
+        var payload Payload
+        if err := json.Unmarshal([]byte(client.request.GetPayloadJson()), &payload); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if payload.RequestID != "req-1" || payload.StackHash != "abc" {{ "{" }}
+            t.Fatalf("payload = %+v", payload)
+        {{ "}" }}
+    {{ "}" }}

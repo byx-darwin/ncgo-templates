@@ -1,0 +1,243 @@
+path: internal/pkg/agentstream/gateway_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentstream
+
+    import (
+        "bytes"
+        "context"
+        "encoding/binary"
+        "log"
+        "strings"
+        "sync"
+        "testing"
+        "time"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/protocol"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+        "github.com/cloudwego/kitex/client/callopt"
+        "github.com/hertz-contrib/websocket"
+
+        "{{.Module}}/internal/pkg/agentauth"
+        rbacv1 "{{.Module}}/kitex_gen/api/rbac/v1"
+    )
+
+    type fakeAuthorizer struct {{ "{" }}
+        mu           sync.Mutex
+        user         *rbacv1.User
+        userErr      error
+        allowed      bool
+        enforceErr   error
+        getUserCalls int
+        enforceCalls int
+        lastUID      string
+        lastObj      string
+        lastAct      string
+    {{ "}" }}
+
+    func (f *fakeAuthorizer) GetUser(_ context.Context, req *rbacv1.GetUserReq, _ ...callopt.Option) (*rbacv1.GetUserResp, error) {{ "{" }}
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        f.getUserCalls++
+        f.lastUID = req.GetId()
+        if f.userErr != nil {{ "{" }}
+            return nil, f.userErr
+        {{ "}" }}
+        return &rbacv1.GetUserResp{{ "{" }}User: f.user{{ "}" }}, nil
+    {{ "}" }}
+
+    func (f *fakeAuthorizer) Enforce(_ context.Context, req *rbacv1.EnforceReq, _ ...callopt.Option) (*rbacv1.EnforceResp, error) {{ "{" }}
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        f.enforceCalls++
+        f.lastUID = req.GetUid()
+        f.lastObj = req.GetObj()
+        f.lastAct = req.GetAct()
+        if f.enforceErr != nil {{ "{" }}
+            return nil, f.enforceErr
+        {{ "}" }}
+        return &rbacv1.EnforceResp{{ "{" }}Allowed: f.allowed{{ "}" }}, nil
+    {{ "}" }}
+
+    func requestContext(token string) *app.RequestContext {{ "{" }}
+        c := app.NewContext(0)
+        req := protocol.NewRequest("GET", "/api/v1/agent/stream", nil)
+        req.CopyTo(&c.Request)
+        if token != "" {{ "{" }}
+            c.Request.Header.Set(TokenHeader, token)
+        {{ "}" }}
+        return c
+    {{ "}" }}
+
+    func newTestGateway(t *testing.T, authorizer *fakeAuthorizer, token string, uid string, interval time.Duration, allowed ...string) *Gateway {{ "{" }}
+        t.Helper()
+        if len(allowed) == 0 {{ "{" }}
+            allowed = []string{{ "{" }}"0.0.0.0/32"{{ "}" }}
+        {{ "}" }}
+        authenticator, err := agentauth.New(authorizer, token, uid, allowed)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        return NewGateway(authenticator, interval)
+    {{ "}" }}
+
+    func TestHandlerRejectsMissingAndWrongTokensBeforeAuthority(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &rbacv1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}" }}, allowed: true{{ "}" }}
+        handler := newTestGateway(t, authorizer, "expected", "agent-test", time.Minute).Handler()
+        for _, token := range []string{{ "{" }}"", "wrong", "expected-extra"{{ "}" }} {{ "{" }}
+            c := requestContext(token)
+            handler(context.Background(), c)
+            if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
+                t.Fatalf("token %q: status=%d, want 401", token, c.Response.StatusCode())
+            {{ "}" }}
+        {{ "}" }}
+        if authorizer.getUserCalls != 0 || authorizer.enforceCalls != 0 {{ "{" }}
+            t.Fatalf("authority calls = (%d, %d), want (0, 0)", authorizer.getUserCalls, authorizer.enforceCalls)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestHandshakeFailureLogDoesNotContainToken(t *testing.T) {{ "{" }}
+        var logs bytes.Buffer
+        originalWriter := log.Writer()
+        log.SetOutput(&logs)
+        defer log.SetOutput(originalWriter)
+
+        configuredToken := "configured-token-must-not-leak"
+        providedToken := "provided-token-must-not-leak"
+        c := requestContext(providedToken)
+        newTestGateway(t, &fakeAuthorizer{{ "{}" }}, configuredToken, "agent-test", time.Minute).Handler()(context.Background(), c)
+
+        if strings.Contains(logs.String(), configuredToken) || strings.Contains(logs.String(), providedToken) {{ "{" }}
+            t.Fatalf("handshake log leaked a token: %q", logs.String())
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestCheckHandshakeRejectsInvalidAccountAndPermission(t *testing.T) {{ "{" }}
+        tests := []struct {{ "{" }}
+            name       string
+            authorizer *fakeAuthorizer
+            wantReason string
+        {{ "}{" }}
+            {{ "{" }}name: "missing account", authorizer: &fakeAuthorizer{{ "{}" }}, wantReason: "account_not_found"{{ "}" }},
+            {{ "{" }}name: "disabled account", authorizer: &fakeAuthorizer{{ "{" }}user: &rbacv1.User{{ "{" }}Id: "agent-test", Status: 0{{ "}}" }}, wantReason: "account_disabled"{{ "}" }},
+            {{ "{" }}name: "permission denied", authorizer: &fakeAuthorizer{{ "{" }}user: &rbacv1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}}" }}, wantReason: "permission_denied"{{ "}" }},
+        {{ "}" }}
+        for _, tt := range tests {{ "{" }}
+            t.Run(tt.name, func(t *testing.T) {{ "{" }}
+                status, reason := newTestGateway(t, tt.authorizer, "secret", "agent-test", time.Minute).checkHandshake(context.Background(), requestContext("secret"))
+                if status != consts.StatusForbidden || reason != tt.wantReason {{ "{" }}
+                    t.Fatalf("checkHandshake = (%d, %q), want (403, %q)", status, reason, tt.wantReason)
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestCheckHandshakeAcceptsEnabledAuthorizedAccount(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &rbacv1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}" }}, allowed: true{{ "}" }}
+        status, reason := newTestGateway(t, authorizer, "secret", "agent-test", time.Minute).checkHandshake(context.Background(), requestContext("secret"))
+        if status != 0 || reason != "" {{ "{" }}
+            t.Fatalf("checkHandshake = (%d, %q), want success", status, reason)
+        {{ "}" }}
+        if authorizer.lastUID != "agent-test" || authorizer.lastObj != "agent:stream" || authorizer.lastAct != "execute" {{ "{" }}
+            t.Fatalf("authorization request = uid:%s obj:%q act:%q", authorizer.lastUID, authorizer.lastObj, authorizer.lastAct)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestHandlerRejectsNonWhitelistedPeerBeforeAuthority(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &rbacv1.User{{ "{" }}Id: "agent-test", Status: 1{{ "}" }}, allowed: true{{ "}" }}
+        handler := newTestGateway(t, authorizer, "secret", "agent-test", time.Minute, "127.0.0.1/32").Handler()
+        c := requestContext("secret")
+
+        handler(context.Background(), c)
+
+        if c.Response.StatusCode() != consts.StatusForbidden {{ "{" }}
+            t.Fatalf("status = %d, want 403", c.Response.StatusCode())
+        {{ "}" }}
+        if authorizer.getUserCalls != 0 || authorizer.enforceCalls != 0 {{ "{" }}
+            t.Fatalf("authority calls = (%d, %d), want (0, 0)", authorizer.getUserCalls, authorizer.enforceCalls)
+        {{ "}" }}
+    {{ "}" }}
+
+    type fakeConn struct {{ "{" }}
+        mu        sync.Mutex
+        writes    []fakeWrite
+        closed    bool
+        closedSig chan struct{{ "{}" }}
+    {{ "}" }}
+
+    type fakeWrite struct {{ "{" }}
+        messageType int
+        data        []byte
+    {{ "}" }}
+
+    func newFakeConn() *fakeConn {{ "{" }} return &fakeConn{{ "{" }}closedSig: make(chan struct{{ "{}" }}){{ "}" }} {{ "}" }}
+
+    func (f *fakeConn) ReadMessage() (int, []byte, error) {{ "{" }} return 0, nil, context.Canceled {{ "}" }}
+    func (f *fakeConn) SetReadDeadline(time.Time) error   {{ "{" }} return nil {{ "}" }}
+
+    func (f *fakeConn) WriteMessage(messageType int, data []byte) error {{ "{" }}
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        f.writes = append(f.writes, fakeWrite{{ "{" }}messageType: messageType, data: append([]byte(nil), data...){{ "}" }})
+        return nil
+    {{ "}" }}
+
+    func (f *fakeConn) Close() error {{ "{" }}
+        f.mu.Lock()
+        defer f.mu.Unlock()
+        if !f.closed {{ "{" }}
+            f.closed = true
+            close(f.closedSig)
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+
+    func TestRevalidationClosesConnectionWith4403(t *testing.T) {{ "{" }}
+        authorizer := &fakeAuthorizer{{ "{" }}user: &rbacv1.User{{ "{" }}Id: "agent-test", Status: 0{{ "}}" }}
+        gateway := newTestGateway(t, authorizer, "secret", "agent-test", time.Millisecond)
+        conn := newFakeConn()
+        gateway.replace(conn)
+        done := make(chan struct{{ "{}" }})
+        go gateway.revalidateLoop(context.Background(), conn, "test-source", done)
+
+        select {{ "{" }}
+        case <-conn.closedSig:
+        case <-time.After(time.Second):
+            close(done)
+            t.Fatal("connection was not closed after failed revalidation")
+        {{ "}" }}
+
+        conn.mu.Lock()
+        defer conn.mu.Unlock()
+        if len(conn.writes) != 1 || conn.writes[0].messageType != websocket.CloseMessage {{ "{" }}
+            t.Fatalf("writes = %+v, want one close frame", conn.writes)
+        {{ "}" }}
+        if len(conn.writes[0].data) < 2 || binary.BigEndian.Uint16(conn.writes[0].data[:2]) != CloseCodeForbidden {{ "{" }}
+            t.Fatalf("close payload = %v, want code %d", conn.writes[0].data, CloseCodeForbidden)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestNewConnectionClosesPreviousConnectionWith4409(t *testing.T) {{ "{" }}
+        gateway := newTestGateway(t, &fakeAuthorizer{{ "{}" }}, "secret", "agent-test", time.Minute)
+        oldConn := newFakeConn()
+        newConn := newFakeConn()
+        gateway.replace(oldConn)
+        gateway.replace(newConn)
+
+        oldConn.mu.Lock()
+        defer oldConn.mu.Unlock()
+        if !oldConn.closed {{ "{" }}
+            t.Fatal("previous connection was not closed")
+        {{ "}" }}
+        if len(oldConn.writes) != 1 || oldConn.writes[0].messageType != websocket.CloseMessage {{ "{" }}
+            t.Fatalf("writes = %+v, want one close frame", oldConn.writes)
+        {{ "}" }}
+        if len(oldConn.writes[0].data) < 2 || binary.BigEndian.Uint16(oldConn.writes[0].data[:2]) != CloseCodeReplaced {{ "{" }}
+            t.Fatalf("close payload = %v, want code %d", oldConn.writes[0].data, CloseCodeReplaced)
+        {{ "}" }}
+        if newConn.closed || len(newConn.writes) != 0 {{ "{" }}
+            t.Fatalf("new connection was touched: closed=%v writes=%+v", newConn.closed, newConn.writes)
+        {{ "}" }}
+    {{ "}" }}

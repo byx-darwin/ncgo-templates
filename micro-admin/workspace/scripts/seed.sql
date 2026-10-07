@@ -66,4 +66,22 @@ INSERT INTO casbin_rule (ptype,v0,v1,v2)
 SELECT DISTINCT 'p','operator',p.code,'execute' FROM permissions p
 WHERE p.code IN ('user:read','role:read','permission:read','menu:read')
 AND NOT EXISTS (SELECT 1 FROM casbin_rule WHERE ptype='p' AND v0='operator' AND v1=p.code AND v2='execute');
+-- Dedicated machine account: no usable password; the BFF checks AGENT_TOKEN.
+INSERT INTO users(uuid,username,password_hash,nickname,status) VALUES
+('00000000-0000-7000-8000-000000000003','agent_worker','!disabled','Agent Worker',1)
+ON CONFLICT(username) DO NOTHING;
+INSERT INTO roles(code,name,status,is_super) VALUES ('agent_worker','Agent Worker',1,false)
+ON CONFLICT(code) DO NOTHING;
+INSERT INTO permissions(code,name,type,path,method,status) VALUES
+('agent:stream','Agent stream','api','/api/v1/agent/stream','GET',1),
+('agent:publish','Publish agent event','api','/internal/v1/agent-events','POST',1)
+ON CONFLICT(code,type) DO NOTHING;
+INSERT INTO user_roles(user_id,role_id) SELECT u.id,r.id FROM users u,roles r
+WHERE u.username='agent_worker' AND r.code='agent_worker' ON CONFLICT DO NOTHING;
+INSERT INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r,permissions p
+WHERE r.code='agent_worker' AND p.code IN ('agent:stream','agent:publish') ON CONFLICT DO NOTHING;
+INSERT INTO casbin_rule(ptype,v0,v1,v2) SELECT 'g',u.uuid,'agent_worker','' FROM users u
+WHERE u.username='agent_worker' AND NOT EXISTS (SELECT 1 FROM casbin_rule WHERE ptype='g' AND v0=u.uuid AND v1='agent_worker');
+INSERT INTO casbin_rule(ptype,v0,v1,v2) SELECT 'p','agent_worker',p.code,'execute' FROM permissions p
+WHERE p.code IN ('agent:stream','agent:publish') AND NOT EXISTS (SELECT 1 FROM casbin_rule WHERE ptype='p' AND v0='agent_worker' AND v1=p.code);
 COMMIT;

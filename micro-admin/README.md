@@ -459,3 +459,85 @@ without Docker. Database E2E requires Docker through the workspace's `make test`
 
 The templates keep their existing UUID/string ID and RPC package contracts;
 iproost business resources such as edge devices and billing remain project-owned.
+
+## Agent WebSocket, durable events and operational alerts
+
+The Authority template now registers `AgentEventService` alongside Auth, RBAC and
+Rule Center. Migration `000005_agent_events.sql` adds a PostgreSQL event queue;
+`prepare.sh` also generates the BFF client from `idl/z_agent_event.proto`.
+
+Enable the gateway in the generated BFF configuration:
+
+```yaml
+alerts_enabled: true
+agent:
+  enabled: true
+  uid: "00000000-0000-7000-8000-000000000003"
+  allowed_cidrs: ["127.0.0.1/32"]
+  consumer_id: "admin-instance-1"
+  revalidate_seconds: 300
+```
+
+Inject the machine secret with `AGENT_TOKEN`. Each BFF instance should have a
+unique `consumer_id`. The gateway and alerts are disabled by default; enable
+`alerts_enabled` in Authority too to persist its RPC errors and recovered panics.
+Apply migrations and the workspace seeds before starting the services. The seed
+creates an enabled `agent_worker` UUID account with an unusable password and only
+`agent:stream` / `agent:publish` grants. Existing deployments must provision an
+equivalent account and grants. Use private RPC connectivity or the configured
+Authority caller allowlist for the trusted BFF-to-Authority boundary.
+
+Connect to `GET /api/v1/agent/stream` with `X-Agent-Token`. Authentication checks
+the raw TCP peer against `allowed_cidrs`, compares the token in constant time,
+then verifies the account and the `agent:stream` permission. Forwarded-IP headers
+are ignored. Account/permission revocation closes the socket with code **4403**;
+a newer connection replaces the old one with code **4409**. Send a protocol
+heartbeat at least every 90 seconds; WebSocket ping/pong alone does not renew the
+read deadline. Frames are limited to 256 KiB and writes have a five-second deadline.
+
+The gateway receives Authority frames shaped as:
+
+```json
+{"kind":"event","event_id":"job-1","event":{"event_id":"job-1","event_type":"example","payload_json":"{\"task\":\"sample\"}","reply_required":true}}
+```
+
+The worker sends `{"kind":"heartbeat"}`, `{"kind":"ack","event_id":"job-1"}`,
+`{"kind":"result","event_id":"job-1","result_json":"{\"ok\":true}"}` or
+`{"kind":"failed","event_id":"job-1","retryable":true,"error_message":"retry later"}`.
+Authority replies with `accepted`, `heartbeat` or `error`. ACK completes a
+notification; an event requiring a reply stays `acked` until a result arrives.
+
+Publishing is available via the trusted `PublishAgentEvent` RPC or the machine-only
+`POST /internal/v1/agent-events` route, which requires `agent:publish`:
+
+```bash
+curl -X POST http://127.0.0.1:8080/internal/v1/agent-events \
+  -H "X-Agent-Token: $AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"event_id":"job-1","event_type":"example","source":"scheduler","severity":"info","payload_json":"{\"task\":\"sample\"}","reply_required":true}'
+```
+
+Use a stable, unique `event_id` for retries: repeated publication preserves the
+original event. `dedupe_key` is searchable metadata, not a global uniqueness
+constraint. Delivery is at least once. PostgreSQL leases and `SKIP LOCKED` prevent
+concurrent claimers from leasing the same event. Unacknowledged leases expire in
+30 seconds; ACK extends a reply-required lease to five minutes. Expired or foreign
+owners cannot change state. Identical results and notification ACKs can be replayed.
+Retryable failures use exponential backoff; nonretryable failures stop delivery.
+Workers should make their business effects idempotent. Domain-specific result
+application belongs in the generated project's usecase, not the generic template.
+
+Operational alerts cover HTTP 5xx responses, RPC failures and recovered panics.
+They persist as `service_request_failed`, `service_rpc_failed` and `service_panic`
+events even when the worker is offline. Publishing runs asynchronously with a
+five-second timeout and a two-minute deduplication window. Alerts omit error text,
+request/response bodies, credentials and query strings; they include error type,
+request/trace identifiers and a sanitized stack excerpt. A publishing failure
+releases the dedupe reservation so a later failure can retry publication.
+
+Run `scripts/e2e-test.sh` in a generated workspace. It uses fresh PostgreSQL/Redis
+Docker containers and runs the generated Go services on the host. It checks the
+existing RBAC flows, machine authentication, validation/error routing, concurrent
+leases, stale owners, ACK/results, retry, reconnect, replacement, account
+revocation and durable operational-alert delivery. Panic recovery and sanitization
+are covered by generated unit tests. Cleanup stops the owned processes and removes
+the disposable containers and volumes.

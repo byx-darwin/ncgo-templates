@@ -74,3 +74,21 @@ body: |
     		t.Fatal("expected error when grpc.authority.host_ports is empty, not a later panic")
     	{{ "}" }}
     {{ "}" }}
+
+    func TestValidateAgentFailsClosed(t *testing.T) {{ "{" }}
+        var missing *Config
+        if err := missing.Validate(); err == nil {{ "{" }}
+            t.Fatal("nil config accepted")
+        {{ "}" }}
+        cfg := Default()
+        cfg.Agent.Enabled = true
+        if err := cfg.Validate(); err == nil {{ "{" }}
+            t.Fatal("enabled agent accepted without credentials")
+        {{ "}" }}
+        cfg.Agent.Token = "test"
+        cfg.Agent.UID = "00000000-0000-7000-8000-000000000003"
+        cfg.Agent.AllowedCIDRs = []string{{ "{" }}"127.0.0.1/32"{{ "}" }}
+        if err := cfg.Validate(); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+    {{ "}" }}

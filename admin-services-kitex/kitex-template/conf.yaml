@@ -28,6 +28,7 @@ body: |-
   )
 
   type Config struct {
+   AlertsEnabled bool `yaml:"alerts_enabled"`
       Env      string                   `json:"env" yaml:"env"`
       Debug    bool                     `json:"debug" yaml:"debug"`
       Server   kitexconfig.ServerConfig `json:"server" yaml:"server"`

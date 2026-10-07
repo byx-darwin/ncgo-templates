@@ -39,6 +39,9 @@ body: |
     	{{ "}" }}
     	if _, ok := kerrors.FromBizStatusError(err); ok {{ "{" }}
     		return err
+        {{ "}" }}
+        if code, _ := goerror.Extract(err); code == 0 {{ "{" }}
+            err = goerror.In("kitex.server").Code(CodeInternalError).Public("internal_error").Wrap(err)
     	{{ "}" }}
     	return &rpcerror.OopsStatusAdapter{{ "{" }}Err: err{{ "}" }}
     {{ "}" }}

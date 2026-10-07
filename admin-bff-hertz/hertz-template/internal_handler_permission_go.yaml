@@ -28,7 +28,7 @@ body: |
     func (h *PermissionHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
         resp, err := h.rbacCli.ListPermissions(ctx, &api.ListPermissionsReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Permissions)
@@ -39,7 +39,7 @@ body: |
 
     	resp, err := h.rbacCli.GetPermission(ctx, &api.GetPermissionReq{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Permission)
@@ -54,7 +54,7 @@ body: |
 
     	resp, err := h.rbacCli.CreatePermission(ctx, &req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Permission)
@@ -72,7 +72,7 @@ body: |
 
     	resp, err := h.rbacCli.UpdatePermission(ctx, &req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Permission)
@@ -83,7 +83,7 @@ body: |
 
     	_, err := h.rbacCli.DeletePermission(ctx, &api.DeletePermissionReq{{ "{" }}Id: id{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
@@ -94,9 +94,14 @@ body: |
         items := make([]*api.Permission, 0)
         for page := int32(1); ; page++ {{ "{" }}
             resp, err := h.rbacCli.ListPermissions(ctx, &api.ListPermissionsReq{{ "{" }}Page: page, PageSize: 1000{{ "}" }})
-            if err != nil {{ "{" }} response.ErrorCode(c, response.CodeInternalError); return {{ "}" }}
+            if err != nil {{ "{" }}
+                response.Err(c, err)
+                return
+            {{ "}" }}
             items = append(items, resp.Permissions...)
-            if len(items) >= int(resp.Total) || len(resp.Permissions) == 0 {{ "{" }} break {{ "}" }}
+            if len(items) >= int(resp.Total) || len(resp.Permissions) == 0 {{ "{" }}
+                break
+            {{ "}" }}
         {{ "}" }}
         response.OK(c, permissionTree(items))
     {{ "}" }}
@@ -108,11 +113,17 @@ body: |
 
     func permissionTree(items []*api.Permission) []*permissionNode {{ "{" }}
         nodes := make(map[string]*permissionNode, len(items))
-        for _, p := range items {{ "{" }} nodes[p.Id] = &permissionNode{{ "{" }}Permission: p, Children: make([]*permissionNode, 0){{ "}" }} {{ "}" }}
+        for _, p := range items {{ "{" }}
+            nodes[p.Id] = &permissionNode{{ "{" }}Permission: p, Children: make([]*permissionNode, 0){{ "}" }}
+        {{ "}" }}
         roots := make([]*permissionNode, 0)
         for _, p := range items {{ "{" }}
             n := nodes[p.Id]
-            if parent, ok := nodes[p.ParentId]; ok && p.ParentId != p.Id {{ "{" }} parent.Children = append(parent.Children, n) {{ "}" }} else {{ "{" }} roots = append(roots, n) {{ "}" }}
+            if parent, ok := nodes[p.ParentId]; ok && p.ParentId != p.Id {{ "{" }}
+                parent.Children = append(parent.Children, n)
+            {{ "}" }} else {{ "{" }}
+                roots = append(roots, n)
+            {{ "}" }}
         {{ "}" }}
         return roots
     {{ "}" }}

@@ -5,7 +5,16 @@ update_behavior:
 body: |
     package response
 
-    import "testing"
+    import (
+        "context"
+        "errors"
+        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/kitex/pkg/kerrors"
+        "testing"
+    )
 
     func TestCodeNotImplementedIsDefined(t *testing.T) {{ "{" }}
     	if CodeNotImplemented != 10402 {{ "{" }}
@@ -14,7 +23,7 @@ body: |
     {{ "}" }}
 
     func TestPermissionContractHTTPStatuses(t *testing.T) {{ "{" }}
-        for _, test := range []struct {{ "{" }} code, status int {{ "}" }}{{ "{" }}
+        for _, test := range []struct{{ "{" }} code, status int {{ "}{" }}
             {{ "{" }}CodeRequestParamInvalid, 400{{ "}" }},
             {{ "{" }}CodeUnauthorized, 401{{ "}" }},
             {{ "{" }}CodePermissionDenied, 403{{ "}" }},
@@ -22,5 +31,40 @@ body: |
             if got := StatusFromCode(test.code); got != test.status {{ "{" }}
                 t.Errorf("code %d returned HTTP %d, want %d", test.code, got, test.status)
             {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestKitexBusinessErrorsPreserveCodeAndStatus(t *testing.T) {{ "{" }}
+        router := &kitexAwareErrorRouter{{ "{" }}inner: &hertzframework.RPCErrorRouter{{ "{}}" }}
+        for _, test := range []struct {{ "{" }}
+            code, status int
+            msg          string
+        {{ "}{{" }}CodeParamInvalid, 400, "invalid_agent_event"{{ "}" }}, {{ "{" }}CodeAuthFailed, 401, "invalid_credentials"{{ "}" }}, {{ "{" }}CodePermissionDenied, 403, "permission_denied"{{ "}" }}, {{ "{" }}CodeInternalError, 500, "internal_error"{{ "}}" }} {{ "{" }}
+            route, ok := router.Route(context.Background(), kerrors.NewBizStatusError(int32(test.code), test.msg))
+            if !ok || route.HTTPCode != test.status || route.BizCode != test.code || route.Override != test.msg {{ "{" }}
+                t.Fatalf("route=%+v ok=%v", route, ok)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestErrUsesInjectedKitexErrorRouter(t *testing.T) {{ "{" }}
+        h := server.New()
+        h.Use(NewResponder().Middleware())
+        h.GET("/error", func(_ context.Context, c *app.RequestContext) {{ "{" }}
+            Err(c, kerrors.NewBizStatusError(int32(CodeParamInvalid), "invalid_agent_event"))
+        {{ "}" }})
+        result := ut.PerformRequest(h.Engine, "GET", "/error", nil).Result()
+        if result.StatusCode() != 400 {{ "{" }}
+            t.Fatalf("status=%d body=%s", result.StatusCode(), result.Body())
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestBindErrorHasBadRequestStatus(t *testing.T) {{ "{" }}
+        h := server.New()
+        h.Use(NewResponder().Middleware())
+        h.GET("/bind", func(_ context.Context, c *app.RequestContext) {{ "{" }} BindError(c, errors.New("invalid JSON")) {{ "}" }})
+        result := ut.PerformRequest(h.Engine, "GET", "/bind", nil).Result()
+        if result.StatusCode() != 400 {{ "{" }}
+            t.Fatalf("bind status=%d", result.StatusCode())
         {{ "}" }}
     {{ "}" }}

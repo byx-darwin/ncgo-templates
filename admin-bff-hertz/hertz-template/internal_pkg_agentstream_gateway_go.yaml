@@ -1,0 +1,250 @@
+path: internal/pkg/agentstream/gateway.go
+update_behavior:
+    type: cover
+body: |
+    package agentstream
+
+    import (
+        "context"
+        "encoding/json"
+        "log"
+        "net/http"
+        "sync"
+        "time"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/hertz-contrib/websocket"
+
+        "{{.Module}}/internal/pkg/agentauth"
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    const (
+        TokenHeader        = agentauth.TokenHeader
+        CloseCodeForbidden = 4403
+        // CloseCodeReplaced tells a displaced Agent that a newer authenticated
+        // connection took over, so it must stop instead of reconnecting and
+        // displacing the new connection in turn.
+        CloseCodeReplaced         = 4409
+        defaultReadTimeout        = 90 * time.Second
+        defaultRevalidateInterval = 5 * time.Minute
+    )
+
+    var upgrader = websocket.HertzUpgrader{{ "{" }}
+        ReadBufferSize: 4096, WriteBufferSize: 4096,
+        CheckOrigin: func(*app.RequestContext) bool {{ "{" }} return true {{ "}" }},
+    {{ "}" }}
+
+    type websocketConn interface {{ "{" }}
+        ReadMessage() (messageType int, p []byte, err error)
+        WriteMessage(messageType int, data []byte) error
+        SetReadDeadline(t time.Time) error
+        Close() error
+    {{ "}" }}
+
+    type Gateway struct {{ "{" }}
+        mu                 sync.Mutex
+        conn               websocketConn
+        connectionChanged  chan struct{{ "{}" }}
+        submit             func(context.Context, *v1.AgentEventStreamRequest) error
+        authenticator      *agentauth.Authenticator
+        revalidateInterval time.Duration
+    {{ "}" }}
+
+    func NewGateway(authenticator *agentauth.Authenticator, revalidateInterval time.Duration) *Gateway {{ "{" }}
+        if revalidateInterval <= 0 {{ "{" }}
+            revalidateInterval = defaultRevalidateInterval
+        {{ "}" }}
+        return &Gateway{{ "{" }}
+            authenticator:      authenticator,
+            revalidateInterval: revalidateInterval,
+            connectionChanged:  make(chan struct{{ "{}" }}),
+        {{ "}" }}
+    {{ "}" }}
+
+    func (g *Gateway) SetSubmit(fn func(context.Context, *v1.AgentEventStreamRequest) error) {{ "{" }}
+        g.submit = fn
+    {{ "}" }}
+
+    // Send forwards one authority frame to the active Agent. A missing Agent is
+    // deliberately a soft failure: the authority lease expires and is retried.
+    func (g *Gateway) Send(frame *v1.AgentEventStreamResponse) bool {{ "{" }}
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        if g.conn == nil {{ "{" }}
+            return false
+        {{ "}" }}
+        data, err := json.Marshal(frame)
+        if err != nil {{ "{" }}
+            return false
+        {{ "}" }}
+        writeDeadline(g.conn)
+        if err := g.conn.WriteMessage(websocket.TextMessage, data); err != nil {{ "{" }}
+            _ = g.conn.Close()
+            g.conn = nil
+            g.signalConnectionChangedLocked()
+            return false
+        {{ "}" }}
+        return true
+    {{ "}" }}
+
+    // WaitConnected blocks until an Agent WebSocket is active. The bridge uses
+    // this gate before opening Authority's leasing stream, so events remain
+    // pending instead of being leased to a dispatcher with no downstream Agent.
+    func (g *Gateway) WaitConnected(ctx context.Context) bool {{ "{" }}
+        for {{ "{" }}
+            g.mu.Lock()
+            if g.conn != nil {{ "{" }}
+                g.mu.Unlock()
+                return true
+            {{ "}" }}
+            changed := g.connectionChanged
+            g.mu.Unlock()
+
+            select {{ "{" }}
+            case <-ctx.Done():
+                return false
+            case <-changed:
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    // connectionSnapshot returns the current connection state and a channel that
+    // closes on the next state change. Taking both under the same lock prevents a
+    // disconnect from being missed between the state check and the wait.
+    func (g *Gateway) connectionSnapshot() (bool, <-chan struct{{ "{}" }}) {{ "{" }}
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        return g.conn != nil, g.connectionChanged
+    {{ "}" }}
+
+    func (g *Gateway) Handler() app.HandlerFunc {{ "{" }}
+        return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+            source := g.authenticator.Source(c)
+            status, reason := g.checkHandshake(ctx, c)
+            if status != 0 {{ "{" }}
+                log.Printf("agent websocket handshake rejected source=%q reason=%s", source, reason)
+                c.SetStatusCode(status)
+                c.Abort()
+                return
+            {{ "}" }}
+
+            if err := upgrader.Upgrade(c, func(conn *websocket.Conn) {{ "{" }}
+                conn.SetReadLimit(256 << 10)
+                g.replace(conn)
+                defer g.remove(conn)
+                log.Printf("agent websocket handshake accepted source=%q reason=authorized", source)
+
+                done := make(chan struct{{ "{}" }})
+                go g.revalidateLoop(ctx, conn, source, done)
+                defer close(done)
+
+                _ = conn.SetReadDeadline(time.Now().Add(defaultReadTimeout))
+                for {{ "{" }}
+                    _, payload, err := conn.ReadMessage()
+                    if err != nil {{ "{" }}
+                        return
+                    {{ "}" }}
+                    // Only a data frame refreshes the timeout. WebSocket ping/pong
+                    // frames deliberately do not count as the agent protocol heartbeat.
+                    _ = conn.SetReadDeadline(time.Now().Add(defaultReadTimeout))
+                    var frame v1.AgentEventStreamRequest
+                    if json.Unmarshal(payload, &frame) != nil {{ "{" }}
+                        continue
+                    {{ "}" }}
+                    switch frame.GetKind() {{ "{" }}
+                    case "ack", "result", "failed", "heartbeat":
+                        if g.submit != nil && g.submit(ctx, &frame) != nil {{ "{" }}
+                            return
+                        {{ "}" }}
+                    {{ "}" }}
+                {{ "}" }}
+            {{ "}" }}); err != nil {{ "{" }}
+                log.Printf("agent websocket handshake rejected source=%q reason=upgrade_failed", source)
+                c.SetStatusCode(http.StatusBadRequest)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    // checkHandshake returns HTTP status 0 on success. Token validation always
+    // runs first, so an unauthenticated caller cannot probe account state or RBAC.
+    func (g *Gateway) checkHandshake(ctx context.Context, c *app.RequestContext) (int, string) {{ "{" }}
+        _, status, reason := g.authenticator.Check(ctx, c, "agent:stream")
+        return status, reason
+    {{ "}" }}
+
+    func (g *Gateway) revalidateLoop(ctx context.Context, conn websocketConn, source string, done <-chan struct{{ "{}" }}) {{ "{" }}
+        ticker := time.NewTicker(g.revalidateInterval)
+        defer ticker.Stop()
+        for {{ "{" }}
+            select {{ "{" }}
+            case <-ctx.Done():
+                return
+            case <-done:
+                return
+            case <-ticker.C:
+                _, reason := g.authenticator.Revalidate(ctx, "agent:stream")
+                if reason == "" {{ "{" }}
+                    continue
+                {{ "}" }}
+                log.Printf("agent websocket revalidation rejected source=%q reason=%s", source, reason)
+                g.closeForbidden(conn)
+                return
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func (g *Gateway) closeForbidden(conn websocketConn) {{ "{" }}
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        if g.conn != conn {{ "{" }}
+            return
+        {{ "}" }}
+        writeDeadline(conn)
+        _ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(CloseCodeForbidden, "authorization revoked"))
+        _ = conn.Close()
+        g.conn = nil
+        g.signalConnectionChangedLocked()
+    {{ "}" }}
+
+    func (g *Gateway) replace(conn websocketConn) {{ "{" }}
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        if g.conn != nil {{ "{" }}
+            writeDeadline(g.conn)
+            _ = g.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(CloseCodeReplaced, "replaced by a newer connection"))
+            _ = g.conn.Close()
+        {{ "}" }}
+        g.conn = conn
+        g.signalConnectionChangedLocked()
+    {{ "}" }}
+
+    func (g *Gateway) remove(conn websocketConn) {{ "{" }}
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        if g.conn == conn {{ "{" }}
+            g.conn = nil
+            g.signalConnectionChangedLocked()
+        {{ "}" }}
+        _ = conn.Close()
+    {{ "}" }}
+
+    func (g *Gateway) signalConnectionChangedLocked() {{ "{" }}
+        close(g.connectionChanged)
+        g.connectionChanged = make(chan struct{{ "{}" }})
+    {{ "}" }}
+
+    func writeDeadline(conn websocketConn) {{ "{" }}
+        if socket, ok := conn.(interface{{ "{" }} SetWriteDeadline(time.Time) error {{ "}" }}); ok {{ "{" }}
+            _ = socket.SetWriteDeadline(time.Now().Add(5 * time.Second))
+        {{ "}" }}
+    {{ "}" }}
+    func (g *Gateway) Close() {{ "{" }}
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        if g.conn != nil {{ "{" }}
+            _ = g.conn.Close()
+            g.conn = nil
+            g.signalConnectionChangedLocked()
+        {{ "}" }}
+    {{ "}" }}

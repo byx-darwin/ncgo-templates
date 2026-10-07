@@ -1,0 +1,91 @@
+syntax = "proto3";
+package api.admin.v1;
+option go_package = "{{.Module}}/kitex_gen/api/admin/v1;adminv1";
+
+service AgentEventService {
+  rpc PublishAgentEvent(PublishAgentEventReq) returns (AgentEventPB);
+  rpc ClaimAgentEvents(ClaimAgentEventsReq) returns (ClaimAgentEventsResp);
+  rpc AckAgentEvent(AckAgentEventReq) returns (AgentEventPB);
+  rpc CompleteAgentEvent(CompleteAgentEventReq) returns (AgentEventPB);
+  rpc FailAgentEvent(FailAgentEventReq) returns (AgentEventPB);
+  rpc AgentEventStream(stream AgentEventStreamRequest) returns (stream AgentEventStreamResponse);
+}
+
+message AgentEventPB {
+  int64 id = 1;
+  string event_id = 2;
+  string event_type = 3;
+  string source = 4;
+  string severity = 5;
+  string dedupe_key = 6;
+  string payload_json = 7;
+  string status = 8;
+  bool reply_required = 9;
+  string result_json = 10;
+  string lease_owner = 11;
+  string lease_until = 12;
+  int32 retry_count = 13;
+  string next_retry_at = 14;
+  string last_error = 15;
+  string occurred_at = 16;
+  string created_at = 17;
+  string updated_at = 18;
+  string acked_at = 19;
+  string completed_at = 20;
+}
+
+message PublishAgentEventReq {
+  string event_id = 1;
+  string event_type = 2;
+  string source = 3;
+  string severity = 4;
+  string dedupe_key = 5;
+  string payload_json = 6;
+  bool reply_required = 7;
+  string occurred_at = 8;
+}
+
+message ClaimAgentEventsReq {
+  string consumer_id = 1;
+  int32 limit = 2;
+  int32 lease_seconds = 3;
+}
+
+message ClaimAgentEventsResp {
+  repeated AgentEventPB items = 1;
+}
+
+message AckAgentEventReq {
+  string event_id = 1;
+  string consumer_id = 2;
+}
+
+message CompleteAgentEventReq {
+  string event_id = 1;
+  string consumer_id = 2;
+  string result_json = 3;
+}
+
+message FailAgentEventReq {
+  string event_id = 1;
+  string consumer_id = 2;
+  bool retryable = 3;
+  string error_message = 4;
+}
+
+message AgentEventStreamRequest {
+  string kind = 1;
+  string consumer_id = 2;
+  string event_id = 3;
+  string result_json = 4;
+  bool retryable = 5;
+  string error_message = 6;
+}
+
+message AgentEventStreamResponse {
+  string kind = 1;
+  AgentEventPB event = 2;
+  string event_id = 3;
+  string error_message = 4;
+}
+

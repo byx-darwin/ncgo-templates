@@ -28,7 +28,7 @@ body: |
     func (h *RoleHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
         resp, err := h.rbacCli.ListRoles(ctx, &api.ListRolesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Roles)
@@ -43,7 +43,7 @@ body: |
 
     	resp, err := h.rbacCli.CreateRole(ctx, &req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Role)
@@ -61,7 +61,7 @@ body: |
 
     	resp, err := h.rbacCli.UpdateRole(ctx, &req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp.Role)
@@ -72,7 +72,7 @@ body: |
 
     	_, err := h.rbacCli.DeleteRole(ctx, &api.DeleteRoleReq{{ "{" }}Id: idStr{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
@@ -81,12 +81,17 @@ body: |
     func (h *RoleHandler) GrantPermissions(ctx context.Context, c *app.RequestContext) {{ "{" }}
         var req api.GrantPermissionsToRoleReq
         if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-            response.ErrorCode(c, response.CodeRequestParamInvalid); return
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
         {{ "}" }}
-        if req.PermissionCodes == nil {{ "{" }} response.ErrorCode(c, response.CodeRequestParamInvalid); return {{ "}" }}
+        if req.PermissionCodes == nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
         req.RoleId = c.Param("id")
         if _, err := h.rbacCli.GrantPermissionsToRole(ctx, &req); err != nil {{ "{" }}
-            response.ErrorCode(c, response.CodeInternalError); return
+            response.Err(c, err)
+            return
         {{ "}" }}
         response.OK(c, map[string]string{{ "{" }}"status": "assigned"{{ "}" }})
     {{ "}" }}

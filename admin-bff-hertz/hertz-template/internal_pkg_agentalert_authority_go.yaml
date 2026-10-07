@@ -1,0 +1,47 @@
+path: internal/pkg/agentalert/authority.go
+update_behavior:
+    type: cover
+body: |
+    package agentalert
+
+    import (
+        "context"
+        "encoding/json"
+        "fmt"
+        "time"
+
+        "github.com/cloudwego/kitex/client/callopt"
+
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    type authorityClient interface {{ "{" }}
+        PublishAgentEvent(context.Context, *v1.PublishAgentEventReq, ...callopt.Option) (*v1.AgentEventPB, error)
+    {{ "}" }}
+
+    type AuthorityPublisher struct{{ "{" }} client authorityClient {{ "}" }}
+
+    func NewAuthorityPublisher(client authorityClient) *AuthorityPublisher {{ "{" }}
+        return &AuthorityPublisher{{ "{" }}client: client{{ "}" }}
+    {{ "}" }}
+
+    func (p *AuthorityPublisher) Publish(ctx context.Context, event Event) error {{ "{" }}
+        if p == nil || p.client == nil {{ "{" }}
+            return fmt.Errorf("authority operational-alert client is not configured")
+        {{ "}" }}
+        payload, err := json.Marshal(event.Payload)
+        if err != nil {{ "{" }}
+            return fmt.Errorf("marshal operational alert: %w", err)
+        {{ "}" }}
+        _, err = p.client.PublishAgentEvent(ctx, &v1.PublishAgentEventReq{{ "{" }}
+            EventId:       "operational:" + event.ID,
+            EventType:     event.Type,
+            Source:        event.Source,
+            Severity:      event.Severity,
+            DedupeKey:     event.DedupeKey,
+            PayloadJson:   string(payload),
+            ReplyRequired: false,
+            OccurredAt:    event.OccurredAt.UTC().Format(time.RFC3339Nano),
+        {{ "}" }})
+        return err
+    {{ "}" }}

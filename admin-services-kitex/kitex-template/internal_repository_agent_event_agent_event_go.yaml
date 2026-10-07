@@ -1,0 +1,52 @@
+path: internal/repository/agent_event/agent_event.go
+update_behavior:
+    type: cover
+body: |
+    package agent_eventrepo
+
+    import (
+        "context"
+        "errors"
+        "{{.Module}}/internal/db/gen"
+    )
+
+    type Repository interface {{ "{" }}
+        Publish(context.Context, gen.PublishAgentEventParams) (gen.AgentEvent, error)
+        Claim(context.Context, gen.ClaimAgentEventsParams) ([]gen.AgentEvent, error)
+        Ack(context.Context, gen.AckAgentEventParams) (gen.AgentEvent, error)
+        Complete(context.Context, gen.CompleteAgentEventParams) (gen.AgentEvent, error)
+        Fail(context.Context, gen.FailAgentEventParams) (gen.AgentEvent, error)
+    {{ "}" }}
+    type Repo struct{{ "{" }} q *gen.Queries {{ "}" }}
+
+    func New(q *gen.Queries) *Repo {{ "{" }} return &Repo{{ "{" }}q: q{{ "}" }} {{ "}" }}
+    func (r *Repo) Publish(ctx context.Context, p gen.PublishAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        if r.q == nil {{ "{" }}
+            return gen.AgentEvent{{ "{}" }}, errors.New("agent event database is disabled")
+        {{ "}" }}
+        return r.q.PublishAgentEvent(ctx, p)
+    {{ "}" }}
+    func (r *Repo) Claim(ctx context.Context, p gen.ClaimAgentEventsParams) ([]gen.AgentEvent, error) {{ "{" }}
+        if r.q == nil {{ "{" }}
+            return nil, errors.New("agent event database is disabled")
+        {{ "}" }}
+        return r.q.ClaimAgentEvents(ctx, p)
+    {{ "}" }}
+    func (r *Repo) Ack(ctx context.Context, p gen.AckAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        if r.q == nil {{ "{" }}
+            return gen.AgentEvent{{ "{}" }}, errors.New("agent event database is disabled")
+        {{ "}" }}
+        return r.q.AckAgentEvent(ctx, p)
+    {{ "}" }}
+    func (r *Repo) Complete(ctx context.Context, p gen.CompleteAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        if r.q == nil {{ "{" }}
+            return gen.AgentEvent{{ "{}" }}, errors.New("agent event database is disabled")
+        {{ "}" }}
+        return r.q.CompleteAgentEvent(ctx, p)
+    {{ "}" }}
+    func (r *Repo) Fail(ctx context.Context, p gen.FailAgentEventParams) (gen.AgentEvent, error) {{ "{" }}
+        if r.q == nil {{ "{" }}
+            return gen.AgentEvent{{ "{}" }}, errors.New("agent event database is disabled")
+        {{ "}" }}
+        return r.q.FailAgentEvent(ctx, p)
+    {{ "}" }}

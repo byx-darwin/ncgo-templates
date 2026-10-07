@@ -12,6 +12,8 @@ body: |-
 
   import (
       "context"
+      "{{.Module}}/internal/pkg/agentalert"
+      "github.com/cloudwego/kitex/pkg/kerrors"
       "sync"
 
       goerror "github.com/byx-darwin/go-tools/go-common/error"
@@ -95,23 +97,24 @@ body: |-
   // NewResponder creates a Responder instance (called by server.Run).
   func NewResponder() *hertzframework.Responder {
       return hertzframework.NewResponder(
-          hertzframework.WithErrorRouter(&hertzframework.RPCErrorRouter{}),
+          hertzframework.WithErrorRouter(&kitexAwareErrorRouter{{ "{" }}inner: &hertzframework.RPCErrorRouter{{ "{}}" }}),
       )
   }
 
   // OK writes a success response using package-level convenience function.
   func OK(c *app.RequestContext, data any) {
-      hertzframework.Success(c, data)
+      hertzframework.RespondFrom(c).Success(c, data)
   }
 
   // Err writes an error response using package-level convenience function.
   func Err(c *app.RequestContext, err error) {
-      hertzframework.Error(context.Background(), c, err, "")
+      agentalert.CaptureError(c, err)
+      hertzframework.RespondFrom(c).Error(context.Background(), c, err, "")
   }
 
   // BindError writes a 400 bind-validation error response.
   func BindError(c *app.RequestContext, err error) {
-      hertzframework.Error(context.Background(), c, err, "bind_error")
+      hertzframework.RespondFrom(c).ErrorWithCode(context.Background(), c, consts.StatusBadRequest, CodeParamInvalid, "bind_error")
   }
 
   // ErrorCode writes an error response using the given business code.
@@ -169,7 +172,9 @@ body: |-
           return consts.StatusUnauthorized
       case CodePermissionDenied:
           return consts.StatusForbidden
-      case CodeCacheUnavailable:
+      case CodeRPCTimeout:
+          return consts.StatusGatewayTimeout
+      case CodeRPCUnavailable, CodeDatabaseUnavailable, CodeCacheUnavailable:
           return consts.StatusServiceUnavailable
       default:
           return consts.StatusInternalServerError
@@ -246,3 +251,23 @@ body: |-
       Register(def)
       return def
   }
+
+  type kitexAwareErrorRouter struct{{ "{" }} inner hertzframework.ErrorRouter {{ "}" }}
+
+  func (r *kitexAwareErrorRouter) Route(ctx context.Context, err error) (hertzframework.ErrorRoute, bool) {{ "{" }}
+      if route, ok := r.inner.Route(ctx, err); ok {{ "{" }}
+          return route, true
+      {{ "}" }}
+      if biz, ok := kerrors.FromBizStatusError(err); ok && biz.BizStatusCode() != 0 {{ "{" }}
+          code := int(biz.BizStatusCode())
+          return hertzframework.ErrorRoute{{ "{" }}HTTPCode: StatusFromCode(code), BizCode: code, Override: biz.BizMessage(){{ "}" }}, true
+      {{ "}" }}
+      if err != nil {{ "{" }}
+          code := CodeInternalError
+          if kerrors.IsTimeoutError(err) {{ "{" }}
+              code = CodeRPCTimeout
+          {{ "}" }}
+          return hertzframework.ErrorRoute{{ "{" }}HTTPCode: StatusFromCode(code), BizCode: code, Override: MsgFromCode(code){{ "}" }}, true
+      {{ "}" }}
+      return hertzframework.ErrorRoute{{ "{}" }}, false
+  {{ "}" }}

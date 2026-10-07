@@ -44,7 +44,7 @@ body: |
     		Password: req.Password,
     	{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
 
@@ -68,7 +68,7 @@ body: |
     		RefreshToken: req.RefreshToken,
     	{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
 
@@ -89,7 +89,7 @@ body: |
         accessToken := strings.TrimPrefix(string(c.GetHeader("Authorization")), "Bearer ")
         _, err := h.rbacCli.Logout(ctx, &api.LogoutReq{{ "{" }}AccessToken: accessToken{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
 

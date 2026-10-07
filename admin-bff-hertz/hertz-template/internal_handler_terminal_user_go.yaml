@@ -43,7 +43,7 @@ body: |
 
     	resp, err := h.userCli.ListUsers(ctx, &userv1.ListUsersReq{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp)
@@ -58,13 +58,13 @@ body: |
 
     	userResp, err := h.userCli.GetUser(ctx, &userv1.GetUserReq{{ "{" }}Uid: uid{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
 
     	identitiesResp, err := h.userCli.ListUserIdentities(ctx, &userv1.ListUserIdentitiesReq{{ "{" }}Uid: uid{{ "}" }})
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
 
@@ -94,7 +94,7 @@ body: |
     	{{ "}" }}
 
     	if _, err := h.userCli.BanUser(ctx, &userv1.BanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
 
@@ -128,7 +128,7 @@ body: |
     	{{ "}" }}
 
     	if _, err := h.userCli.UnbanUser(ctx, &userv1.UnbanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "unbanned"{{ "}" }})
@@ -143,7 +143,7 @@ body: |
     	{{ "}" }}
 
     	if _, err := h.userCli.AdminUnbindProvider(ctx, &userv1.AdminUnbindProviderReq{{ "{" }}Uid: uid, Provider: provider{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "unbound"{{ "}" }})
@@ -170,7 +170,7 @@ body: |
     		operatorUID = claims.Uid
     	{{ "}" }}
     	if _, err := h.userCli.ResetPassword(ctx, &userv1.ResetPasswordReq{{ "{" }}Uid: uid, NewPassword: req.NewPassword, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
@@ -207,7 +207,7 @@ body: |
     	{{ "}" }}
     	resp, err := h.userCli.ListAuditLogs(ctx, req)
     	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
     		return
     	{{ "}" }}
     	response.OK(c, resp)

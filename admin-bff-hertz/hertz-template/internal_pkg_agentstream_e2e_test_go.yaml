@@ -1,0 +1,347 @@
+path: internal/pkg/agentstream/e2e_test.go
+update_behavior:
+    type: cover
+body: |
+    package agentstream
+
+    import (
+        "bytes"
+        "context"
+        "encoding/json"
+        "fmt"
+        "io"
+        "net/http"
+        "os"
+        "strings"
+        "sync"
+        "testing"
+        "time"
+
+        v1 "{{.Module}}/kitex_gen/api/admin/v1"
+        "{{.Module}}/kitex_gen/api/admin/v1/agenteventservice"
+        "github.com/cloudwego/kitex/client"
+        "github.com/cloudwego/kitex/transport"
+        "github.com/gorilla/websocket"
+        "github.com/jackc/pgx/v5/pgxpool"
+    )
+
+    // This suite runs against the actual BFF, Authority RPC server and Docker DB.
+    // Normal go test skips it; workspace/scripts/e2e-test.sh enables it.
+    func TestAgentEndToEnd(t *testing.T) {{ "{" }}
+        base := os.Getenv("AGENT_E2E_URL")
+        if base == "" {{ "{" }}
+            t.Skip("requires running Docker E2E workspace")
+        {{ "}" }}
+        ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+        defer cancel()
+        pool, err := pgxpool.New(ctx, os.Getenv("AGENT_E2E_DSN"))
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        defer pool.Close()
+        token := os.Getenv("AGENT_TOKEN")
+        rpc, err := agenteventservice.NewClient("authority", client.WithHostPorts("127.0.0.1:8888"), client.WithTransportProtocol(transport.GRPC))
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        request := func(t *testing.T, path, credential string, body any) (int, []byte) {{ "{" }}
+            data, _ := json.Marshal(body)
+            method := "POST"
+            if body == nil {{ "{" }}
+                method = "GET"
+            {{ "}" }}
+            req, err := http.NewRequestWithContext(ctx, method, base+path, bytes.NewReader(data))
+            if err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            req.Header.Set("Content-Type", "application/json")
+            req.Header.Set("X-Agent-Token", credential)
+            resp, err := http.DefaultClient.Do(req)
+            if err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            defer resp.Body.Close()
+            raw, err := io.ReadAll(resp.Body)
+            if err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            return resp.StatusCode, raw
+        {{ "}" }}
+        publish := func(t *testing.T, id string, reply bool) {{ "{" }}
+            status, raw := request(t, "/internal/v1/agent-events", token, map[string]any{{ "{" }}"event_id": id, "event_type": "test_event", "source": "e2e", "severity": "info", "payload_json": `{{ "{" }}"task":"sample"{{ "}" }}`, "reply_required": reply{{ "}" }})
+            if status != 200 {{ "{" }}
+                t.Fatalf("publish status=%d body=%s", status, raw)
+            {{ "}" }}
+        {{ "}" }}
+        status := func(t *testing.T, id, want string) {{ "{" }}
+            t.Helper()
+            deadline := time.Now().Add(10 * time.Second)
+            for time.Now().Before(deadline) {{ "{" }}
+                var got string
+                if err := pool.QueryRow(ctx, "SELECT status FROM agent_events WHERE event_id=$1", id).Scan(&got); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if got == want {{ "{" }}
+                    return
+                {{ "}" }}
+                time.Sleep(30 * time.Millisecond)
+            {{ "}" }}
+            t.Fatalf("event %s never reached %s", id, want)
+        {{ "}" }}
+        t.Run("machine boundary and validation", func(t *testing.T) {{ "{" }}
+            for _, path := range []string{{ "{" }}"/api/v1/agent/stream", "/internal/v1/agent-events"{{ "}" }} {{ "{" }}
+                body := any(nil)
+                if strings.Contains(path, "internal") {{ "{" }}
+                    body = map[string]any{{ "{}" }}
+                {{ "}" }}
+                for _, credential := range []string{{ "{" }}"", "wrong"{{ "}" }} {{ "{" }}
+                    code, _ := request(t, path, credential, body)
+                    if code != 401 {{ "{" }}
+                        t.Fatalf("%s unauthorized=%d", path, code)
+                    {{ "}" }}
+                {{ "}" }}
+            {{ "}" }}
+            code, raw := request(t, "/internal/v1/agent-events", token, map[string]any{{ "{" }}"event_id": "invalid", "event_type": "test", "source": "e2e", "severity": "info", "payload_json": "broken"{{ "}" }})
+            if code != 400 || !bytes.Contains(raw, []byte("invalid_agent_event")) {{ "{" }}
+                t.Fatalf("RPC business error lost: %d %s", code, raw)
+            {{ "}" }}
+        {{ "}" }})
+        t.Run("atomic leases and idempotent results", func(t *testing.T) {{ "{" }}
+            for i := 0; i < 12; i++ {{ "{" }}
+                publish(t, fmt.Sprintf("atomic-%d", i), true)
+            {{ "}" }}
+            var wg sync.WaitGroup
+            var mu sync.Mutex
+            seen := map[string]string{{ "{}" }}
+            for _, owner := range []string{{ "{" }}"consumer-a", "consumer-b"{{ "}" }} {{ "{" }}
+                owner := owner
+                wg.Add(1)
+                go func() {{ "{" }}
+                    defer wg.Done()
+                    events, err := rpc.ClaimAgentEvents(ctx, &v1.ClaimAgentEventsReq{{ "{" }}ConsumerId: owner, Limit: 100, LeaseSeconds: 30{{ "}" }})
+                    if err != nil {{ "{" }}
+                        t.Error(err)
+                        return
+                    {{ "}" }}
+                    mu.Lock()
+                    defer mu.Unlock()
+                    for _, event := range events.Items {{ "{" }}
+                        if !strings.HasPrefix(event.EventId, "atomic-") {{ "{" }}
+                            continue
+                        {{ "}" }}
+                        if previous := seen[event.EventId]; previous != "" {{ "{" }}
+                            t.Errorf("event leased twice: %s", event.EventId)
+                        {{ "}" }}
+                        seen[event.EventId] = owner
+                    {{ "}" }}
+                {{ "}" }}()
+            {{ "}" }}
+            wg.Wait()
+            if len(seen) != 12 {{ "{" }}
+                t.Fatalf("claimed %d events", len(seen))
+            {{ "}" }}
+            for id, owner := range seen {{ "{" }}
+                if _, err := rpc.CompleteAgentEvent(ctx, &v1.CompleteAgentEventReq{{ "{" }}EventId: id, ConsumerId: "wrong", ResultJson: `{{ "{" }}"ok":true{{ "}" }}`{{ "}" }}); err == nil {{ "{" }}
+                    t.Fatal("wrong owner accepted")
+                {{ "}" }}
+                if _, err := rpc.CompleteAgentEvent(ctx, &v1.CompleteAgentEventReq{{ "{" }}EventId: id, ConsumerId: owner, ResultJson: `{{ "{" }}"ok":true{{ "}" }}`{{ "}" }}); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if _, err := rpc.CompleteAgentEvent(ctx, &v1.CompleteAgentEventReq{{ "{" }}EventId: id, ConsumerId: owner, ResultJson: `{{ "{" }} "ok" : true {{ "}" }}`{{ "}" }}); err != nil {{ "{" }}
+                    t.Fatalf("duplicate result: %v", err)
+                {{ "}" }}
+                if _, err := rpc.CompleteAgentEvent(ctx, &v1.CompleteAgentEventReq{{ "{" }}EventId: id, ConsumerId: owner, ResultJson: `{{ "{" }}"ok":false{{ "}" }}`{{ "}" }}); err == nil {{ "{" }}
+                    t.Fatal("changed result accepted")
+                {{ "}" }}
+            {{ "}" }}
+            publish(t, "stale", true)
+            if _, err := rpc.ClaimAgentEvents(ctx, &v1.ClaimAgentEventsReq{{ "{" }}ConsumerId: "old", LeaseSeconds: 1{{ "}" }}); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            if _, err := pool.Exec(ctx, "UPDATE agent_events SET lease_until=now()-interval '1 second' WHERE event_id='stale'"); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            if _, err := rpc.AckAgentEvent(ctx, &v1.AckAgentEventReq{{ "{" }}EventId: "stale", ConsumerId: "old"{{ "}" }}); err == nil {{ "{" }}
+                t.Fatal("expired ACK accepted")
+            {{ "}" }}
+            if _, err := rpc.ClaimAgentEvents(ctx, &v1.ClaimAgentEventsReq{{ "{" }}ConsumerId: "new"{{ "}" }}); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            if _, err := rpc.CompleteAgentEvent(ctx, &v1.CompleteAgentEventReq{{ "{" }}EventId: "stale", ConsumerId: "new", ResultJson: `{{ "{}" }}`{{ "}" }}); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+        {{ "}" }})
+        t.Run("operational alerts persist without a connected worker", func(t *testing.T) {{ "{" }}
+            loginCode, loginRaw := request(t, "/api/v1/auth/login", "", map[string]any{{ "{" }}"username": "admin", "password": "Admin@123"{{ "}" }})
+            var login struct {{ "{" }}
+                Data struct {{ "{" }}
+                    AccessToken string `json:"access_token"`
+                {{ "}" }} `json:"data"`
+            {{ "}" }}
+            if json.Unmarshal(loginRaw, &login) != nil || loginCode != 200 || login.Data.AccessToken == "" {{ "{" }}
+                t.Fatalf("login %d %s", loginCode, loginRaw)
+            {{ "}" }}
+            for i := 0; i < 2; i++ {{ "{" }}
+                req, _ := http.NewRequestWithContext(ctx, "GET", base+"/api/v1/terminal-users?token=do-not-forward", nil)
+                req.Header.Set("Authorization", "Bearer "+login.Data.AccessToken)
+                req.Header.Set("X-Request-ID", "alert-e2e")
+                resp, err := http.DefaultClient.Do(req)
+                if err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                io.Copy(io.Discard, resp.Body)
+                resp.Body.Close()
+                if resp.StatusCode < 500 {{ "{" }}
+                    t.Fatalf("expected failing downstream RPC, status=%d", resp.StatusCode)
+                {{ "}" }}
+            {{ "}" }}
+            deadline := time.Now().Add(5 * time.Second)
+            for time.Now().Before(deadline) {{ "{" }}
+                var count int
+                var payload string
+                err := pool.QueryRow(ctx, `SELECT count(*),COALESCE(max(payload::text),'') FROM agent_events WHERE source='admin' AND event_type='service_request_failed' AND payload->>'path'='/api/v1/terminal-users'`).Scan(&count, &payload)
+                if err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if count > 0 {{ "{" }}
+                    if count != 1 || strings.Contains(payload, "do-not-forward") || strings.Contains(payload, login.Data.AccessToken) || !strings.Contains(payload, "alert-e2e") {{ "{" }}
+                        t.Fatalf("unsafe/duplicate alert: count=%d payload=%s", count, payload)
+                    {{ "}" }}
+                    return
+                {{ "}" }}
+                time.Sleep(30 * time.Millisecond)
+            {{ "}" }}
+            t.Fatal("HTTP failure did not reach durable event store")
+        {{ "}" }})
+        wsURL := "ws" + strings.TrimPrefix(base, "http") + "/api/v1/agent/stream"
+        connect := func(t *testing.T) *websocket.Conn {{ "{" }}
+            t.Helper()
+            conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, http.Header{{ "{" }}"X-Agent-Token": []string{{ "{" }}token{{ "}}" }})
+            if err != nil {{ "{" }}
+                t.Fatalf("websocket connect: %v response=%v", err, resp)
+            {{ "}" }}
+            return conn
+        {{ "}" }}
+        conn := connect(t)
+        defer func() {{ "{" }} conn.Close() {{ "}" }}()
+        receive := func(t *testing.T, kind, id string) *v1.AgentEventStreamResponse {{ "{" }}
+            t.Helper()
+            conn.SetReadDeadline(time.Now().Add(15 * time.Second))
+            for {{ "{" }}
+                var frame v1.AgentEventStreamResponse
+                if err := conn.ReadJSON(&frame); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if frame.Kind == "error" {{ "{" }}
+                    t.Fatalf("stream error: %+v", frame)
+                {{ "}" }}
+                if frame.Kind == kind && (id == "" || frame.EventId == id) {{ "{" }}
+                    return &frame
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        send := func(t *testing.T, kind, id, result string, retry bool) {{ "{" }}
+            t.Helper()
+            if err := conn.WriteJSON(&v1.AgentEventStreamRequest{{ "{" }}Kind: kind, EventId: id, ResultJson: result, Retryable: retry, ErrorMessage: "test failure"{{ "}" }}); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+        {{ "}" }}
+        receive(t, "accepted", "")
+        conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+        for {{ "{" }}
+            var frame v1.AgentEventStreamResponse
+            if err := conn.ReadJSON(&frame); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            if frame.Kind == "event" && frame.Event != nil && frame.Event.Source == "admin" && frame.Event.EventType == "service_request_failed" && strings.Contains(frame.Event.PayloadJson, "/api/v1/terminal-users") {{ "{" }}
+                send(t, "ack", frame.EventId, "", false)
+                receive(t, "accepted", frame.EventId)
+                status(t, frame.EventId, "completed")
+                break
+            {{ "}" }}
+        {{ "}" }}
+        t.Run("heartbeat ack result retry and durable reconnect", func(t *testing.T) {{ "{" }}
+            send(t, "heartbeat", "", "", false)
+            receive(t, "heartbeat", "")
+            publish(t, "notify", false)
+            receive(t, "event", "notify")
+            send(t, "ack", "notify", "", false)
+            receive(t, "accepted", "notify")
+            status(t, "notify", "completed")
+            send(t, "ack", "notify", "", false)
+            receive(t, "accepted", "notify")
+            publish(t, "reply", true)
+            receive(t, "event", "reply")
+            send(t, "ack", "reply", "", false)
+            receive(t, "accepted", "reply")
+            status(t, "reply", "acked")
+            send(t, "result", "reply", `{{ "{" }}"ok":true{{ "}" }}`, false)
+            receive(t, "accepted", "reply")
+            status(t, "reply", "completed")
+            send(t, "result", "reply", `{{ "{" }}"ok":true{{ "}" }}`, false)
+            receive(t, "accepted", "reply")
+            publish(t, "retry", true)
+            receive(t, "event", "retry")
+            send(t, "failed", "retry", "", true)
+            receive(t, "accepted", "retry")
+            status(t, "retry", "failed")
+            receive(t, "event", "retry")
+            send(t, "failed", "retry", "", false)
+            receive(t, "accepted", "retry")
+            status(t, "retry", "failed")
+            var terminal bool
+            if err := pool.QueryRow(ctx, "SELECT next_retry_at='infinity'::timestamptz FROM agent_events WHERE event_id='retry'").Scan(&terminal); err != nil || !terminal {{ "{" }}
+                t.Fatalf("terminal retry=%v err=%v", terminal, err)
+            {{ "}" }}
+            publish(t, "reconnect", true)
+            receive(t, "event", "reconnect")
+            conn.Close()
+            if _, err := pool.Exec(ctx, "UPDATE agent_events SET lease_until=now()-interval '1 second' WHERE event_id='reconnect'"); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            conn = connect(t)
+            receive(t, "accepted", "")
+            receive(t, "event", "reconnect")
+            send(t, "result", "reconnect", `{{ "{}" }}`, false)
+            receive(t, "accepted", "reconnect")
+            status(t, "reconnect", "completed")
+            publish(t, "notify", false)
+            var count int
+            if err := pool.QueryRow(ctx, "SELECT count(*) FROM agent_events WHERE event_id='notify'").Scan(&count); err != nil || count != 1 {{ "{" }}
+                t.Fatalf("dedupe count=%d err=%v", count, err)
+            {{ "}" }}
+        {{ "}" }})
+        t.Run("replacement and authorization revocation", func(t *testing.T) {{ "{" }}
+            old := conn
+            conn = connect(t)
+            old.SetReadDeadline(time.Now().Add(3 * time.Second))
+            _, _, err := old.ReadMessage()
+            if !websocket.IsCloseError(err, CloseCodeReplaced) {{ "{" }}
+                t.Fatalf("replacement close=%v", err)
+            {{ "}" }}
+            send(t, "heartbeat", "", "", false)
+            receive(t, "heartbeat", "")
+            if _, err := pool.Exec(ctx, "UPDATE users SET status=0 WHERE username='agent_worker'"); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            defer pool.Exec(context.Background(), "UPDATE users SET status=1 WHERE username='agent_worker'")
+            conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+            for {{ "{" }}
+                _, _, err = conn.ReadMessage()
+                if err != nil {{ "{" }}
+                    break
+                {{ "}" }}
+            {{ "}" }}
+            if !websocket.IsCloseError(err, CloseCodeForbidden) {{ "{" }}
+                t.Fatalf("revocation close=%v", err)
+            {{ "}" }}
+            code, _ := request(t, "/internal/v1/agent-events", token, map[string]any{{ "{}" }})
+            if code != 403 {{ "{" }}
+                t.Fatalf("disabled account=%d", code)
+            {{ "}" }}
+            _, resp, err := websocket.DefaultDialer.DialContext(ctx, wsURL, http.Header{{ "{" }}"X-Agent-Token": []string{{ "{" }}token{{ "}}" }})
+            if err == nil || resp == nil || resp.StatusCode != 403 {{ "{" }}
+                t.Fatalf("disabled websocket err=%v response=%v", err, resp)
+            {{ "}" }}
+        {{ "}" }})
+    {{ "}" }}

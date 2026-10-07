@@ -1,0 +1,31 @@
+path: internal/db/schema/000005_agent_events.sql
+update_behavior:
+    type: cover
+body: |
+    CREATE TABLE agent_events (
+        id BIGSERIAL PRIMARY KEY,
+        event_id TEXT NOT NULL UNIQUE,
+        event_type TEXT NOT NULL,
+        source TEXT NOT NULL,
+        severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'critical')),
+        dedupe_key TEXT,
+        payload JSONB NOT NULL DEFAULT '{{ "{}" }}'::jsonb,
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'leased', 'acked', 'completed', 'failed')),
+        reply_required BOOLEAN NOT NULL DEFAULT false,
+        result JSONB,
+        lease_owner TEXT,
+        lease_until TIMESTAMPTZ,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_error TEXT,
+        occurred_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        acked_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ
+    );
+
+    CREATE INDEX idx_agent_events_dispatch ON agent_events (status, next_retry_at, created_at);
+    CREATE INDEX idx_agent_events_lease ON agent_events (lease_until) WHERE status = 'leased';
+    CREATE INDEX idx_agent_events_dedupe_key ON agent_events (dedupe_key) WHERE dedupe_key IS NOT NULL;

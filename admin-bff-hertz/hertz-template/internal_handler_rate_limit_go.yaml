@@ -29,7 +29,7 @@ body: |
     func (h *RateLimitHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
         resp, err := h.rulecenterCli.ListRules(ctx, &api.ListRulesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
         return
         {{ "}" }}
     	response.OK(c, resp.Rules)
@@ -44,7 +44,7 @@ body: |
 
         resp, err := h.rulecenterCli.CreateRule(ctx, &req)
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
         return
         {{ "}" }}
         response.OK(c, map[string]int64{{ "{" }}"id": resp.Id{{ "}" }})
@@ -66,7 +66,7 @@ body: |
 
         _, err = h.rulecenterCli.UpdateRule(ctx, &req)
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
         return
         {{ "}" }}
     	response.OK(c, nil)
@@ -81,7 +81,7 @@ body: |
 
         _, err = h.rulecenterCli.DeleteRule(ctx, &api.DeleteRuleReq{{ "{" }}Id: id{{ "}" }})
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
+            response.Err(c, err)
         return
         {{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})

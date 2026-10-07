@@ -1,0 +1,105 @@
+path: internal/pkg/agentalert/rpc.go
+update_behavior:
+    type: cover
+body: |
+    package agentalert
+
+    import (
+        "context"
+        "errors"
+        "fmt"
+        "reflect"
+        "runtime/debug"
+        "strings"
+        "time"
+
+        "github.com/bytedance/gopkg/cloud/metainfo"
+        "github.com/cloudwego/kitex/pkg/endpoint"
+        "github.com/cloudwego/kitex/pkg/rpcinfo"
+    )
+
+    // RPC reports final Kitex endpoint errors and recovers panics. It deliberately
+    // omits error text and request/response bodies because both may contain secrets.
+    func RPC(config Config) endpoint.Middleware {{ "{" }}
+        if config.Window < time.Second {{ "{" }}
+            config.Window = defaultWindow
+        {{ "}" }}
+        if config.PublishTimeout <= 0 {{ "{" }}
+            config.PublishTimeout = defaultPublishTimeout
+        {{ "}" }}
+        if config.Now == nil {{ "{" }}
+            config.Now = time.Now
+        {{ "}" }}
+        m := &monitor{{ "{" }}config: config, seen: make(map[string]time.Time){{ "}" }}
+        return func(next endpoint.Endpoint) endpoint.Endpoint {{ "{" }}
+            return func(ctx context.Context, req, resp interface{{ "{}" }}) (err error) {{ "{" }}
+                defer func() {{ "{" }}
+                    if recovered := recover(); recovered != nil {{ "{" }}
+                        err = errors.New("rpc panic recovered")
+                        m.reportRPC(EventServicePanic, ctx, reflect.TypeOf(recovered).String(), debug.Stack())
+                        return
+                    {{ "}" }}
+                    if err != nil {{ "{" }}
+                        m.reportRPC(EventServiceRPCFailed, ctx, reflect.TypeOf(err).String(), debug.Stack())
+                    {{ "}" }}
+                {{ "}" }}()
+                return next(ctx, req, resp)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func (m *monitor) reportRPC(eventType string, ctx context.Context, errorType string, stack []byte) {{ "{" }}
+        if m.config.Publisher == nil || strings.TrimSpace(m.config.Service) == "" {{ "{" }}
+            return
+        {{ "}" }}
+        now := m.config.Now().UTC()
+        method := rpcMethod(ctx)
+        stackHash, excerpt := stackMetadata(stack)
+        dedupeKey := strings.Join([]string{{ "{" }}"service", m.config.Service, eventType, "rpc", method, stackHash{{ "}" }}, ":")
+        if !m.reserve(dedupeKey, now) {{ "{" }}
+            return
+        {{ "}" }}
+        bucket := now.Unix() / int64(m.config.Window.Seconds())
+        event := Event{{ "{" }}
+            ID:         shortHash(fmt.Sprintf("%s:%d", dedupeKey, bucket)),
+            Type:       eventType,
+            Source:     m.config.Service,
+            Severity:   "critical",
+            DedupeKey:  dedupeKey,
+            OccurredAt: now,
+            Payload: Payload{{ "{" }}
+                RPCMethod:    method,
+                RequestID:    rpcMeta(ctx, "x-request-id"),
+                TraceID:      traceIDFromTraceparent(rpcMeta(ctx, "traceparent")),
+                ErrorType:    errorType,
+                StackHash:    stackHash,
+                StackExcerpt: excerpt,
+            {{ "}" }},
+        {{ "}" }}
+        go m.publish(event, dedupeKey, now)
+    {{ "}" }}
+
+    func rpcMethod(ctx context.Context) string {{ "{" }}
+        if ri := rpcinfo.GetRPCInfo(ctx); ri != nil && ri.Invocation() != nil {{ "{" }}
+            return ri.Invocation().MethodName()
+        {{ "}" }}
+        return "unknown"
+    {{ "}" }}
+
+    func rpcMeta(ctx context.Context, key string) string {{ "{" }}
+        if value, ok := metainfo.GetPersistentValue(ctx, key); ok {{ "{" }}
+            return value
+        {{ "}" }}
+        if value, ok := metainfo.GetValue(ctx, key); ok {{ "{" }}
+            return value
+        {{ "}" }}
+        return ""
+    {{ "}" }}
+
+    func traceIDFromTraceparent(traceparent string) string {{ "{" }}
+        parts := strings.Split(traceparent, "-")
+        if len(parts) == 4 && len(parts[1]) == 32 {{ "{" }}
+            return parts[1]
+        {{ "}" }}
+        return ""
+    {{ "}" }}

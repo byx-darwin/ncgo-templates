@@ -9,6 +9,13 @@ body: |
 
     import (
     	"context"
+        "encoding/json"
+        agenthandler "{{.Module}}/internal/handler/agenteventservice"
+        "{{.Module}}/internal/pkg/agentalert"
+        agentrepo "{{.Module}}/internal/repository/agent_event"
+        agentuc "{{.Module}}/internal/usecase/agent_event"
+        adminv1 "{{.Module}}/kitex_gen/api/admin/v1"
+        "{{.Module}}/kitex_gen/api/admin/v1/agenteventservice"
     	"log"
     	"net"
     	"time"
@@ -55,8 +62,8 @@ body: |
     	"{{.Module}}/kitex_gen/api/admin/v1/ruleservice"
     )
 
-    // Run wires the unified admin-services (Auth + RBAC + Rule) and registers
-    // all three gRPC services on a single Kitex server.
+    // Run wires the unified admin-services (Auth + RBAC + Rule + Agent) and registers
+    // all four RPC services on a single Kitex server.
     func Run(extraOptions ...kitexserver.Option) {{ "{" }}
     	cfg := conf.Get()
     	if cfg == nil {{ "{" }}
@@ -98,6 +105,18 @@ body: |
     		log.Printf("warning: database disabled — admin-services RPC calls will fail until database.enabled=true with a DSN")
     	{{ "}" }}
 
+        agentUC := agentuc.New(agentrepo.New(q))
+        var alertPublisher agentalert.Publisher
+        if cfg.AlertsEnabled {{ "{" }}
+            alertPublisher = agentalert.PublisherFunc(func(ctx context.Context, event agentalert.Event) error {{ "{" }}
+                payload, err := json.Marshal(event.Payload)
+                if err != nil {{ "{" }}
+                    return err
+                {{ "}" }}
+                _, err = agentUC.PublishAgentEvent(ctx, &adminv1.PublishAgentEventReq{{ "{" }}EventId: "operational:" + event.ID, EventType: event.Type, Source: event.Source, Severity: event.Severity, DedupeKey: event.DedupeKey, PayloadJson: string(payload), OccurredAt: event.OccurredAt.Format(time.RFC3339Nano){{ "}" }})
+                return err
+            {{ "}" }})
+        {{ "}" }}
     	// ── RBAC repositories ──────────────────────────────────────────────
     	userRepo := userrepo.New(q, pool)
     	roleRepo := rolerepo.New(q, pool)
@@ -180,7 +199,7 @@ body: |
     			// release.KitexTraffic(), // reads and propagates traffic.* metadata
     			// ncgo:wire:canary:server-traffic
     			interceptor.AccessLog(),
-    			interceptor.Recovery(),
+                agentalert.RPC(agentalert.Config{{ "{" }}Service: cfg.Server.Registry.Name, Publisher: alertPublisher{{ "}" }}),
     			// Optional rate-limit wiring (after `ncgo add infra rate-limit`):
     			// import "{{.Module}}/internal/base/middleware"
     			// middleware.RateLimit(cfg.RateLimit),
@@ -215,6 +234,10 @@ body: |
 
     	if err := ruleservice.RegisterService(svr, rulehandler.NewRuleServiceImpl(ruleUC)); err != nil {{ "{" }}
     		log.Fatalf("register ruleservice: %v", err)
+        {{ "}" }}
+
+        if err := agenteventservice.RegisterService(svr, agenthandler.New(agentUC)); err != nil {{ "{" }}
+            log.Fatalf("register agent events: %v", err)
     	{{ "}" }}
 
     	if err := svr.Run(); err != nil {{ "{" }}

@@ -15,8 +15,6 @@ body: |
     	"{{.Module}}/internal/domain/user"
     )
 
-    // AdminRoleCode grants full menu/permission visibility.
-    const AdminRoleCode = "admin"
 
     // MenuRepo is the read-only menu persistence port consumed by the service.
     type MenuRepo interface {{ "{" }}
@@ -54,7 +52,7 @@ body: |
     {{ "}" }}
 
     // UserPermCodes returns the unified permission codes visible to a user. uid
-    // is the external UUID. The admin role sees every permission.
+    // is the external UUID. A super role sees every permission.
     func (s *QueryService) UserPermCodes(ctx context.Context, uid string) ([]string, error) {{ "{" }}
     	u, err := s.users.GetByUUID(ctx, uid)
     	if err != nil {{ "{" }}
@@ -64,7 +62,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	if hasRole(roles, AdminRoleCode) {{ "{" }}
+        if hasSuperRole(roles) {{ "{" }}
     		all, err := s.perms.List(ctx, math.MaxInt32, 0)
     		if err != nil {{ "{" }}
     			return nil, err
@@ -96,7 +94,7 @@ body: |
     {{ "}" }}
 
     // UserMenuTree returns the menu forest visible to a user. uid is the
-    // external UUID. The admin role sees the full menu tree; other users only
+    // external UUID. A super role sees the full menu tree; other users only
     // see menus whose code they hold.
     func (s *QueryService) UserMenuTree(ctx context.Context, uid string) ([]*menu.Node, error) {{ "{" }}
     	u, err := s.users.GetByUUID(ctx, uid)
@@ -107,7 +105,7 @@ body: |
     	if err != nil {{ "{" }}
     		return nil, err
     	{{ "}" }}
-    	if hasRole(roles, AdminRoleCode) {{ "{" }}
+        if hasSuperRole(roles) {{ "{" }}
     		items, err := s.menus.ListMenusAsTree(ctx)
     		if err != nil {{ "{" }}
     			return nil, err
@@ -136,9 +134,9 @@ body: |
     	return menu.BuildTree(filtered), nil
     {{ "}" }}
 
-    func hasRole(roles []*role.Role, code string) bool {{ "{" }}
+    func hasSuperRole(roles []*role.Role) bool {{ "{" }}
     	for _, r := range roles {{ "{" }}
-    		if r.Code == code {{ "{" }}
+            if r.IsSuper {{ "{" }}
     			return true
     		{{ "}" }}
     	{{ "}" }}

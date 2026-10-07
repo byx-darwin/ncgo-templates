@@ -7,6 +7,7 @@ body: |
 
     import (
     	"context"
+        "fmt"
     	"strconv"
 
     	"github.com/cloudwego/kitex/pkg/klog"
@@ -26,7 +27,7 @@ body: |
     	Save(ctx context.Context, r *role.Role) (*role.Role, error)
     	Update(ctx context.Context, r *role.Role) (*role.Role, error)
     	Delete(ctx context.Context, id int64) error
-    	AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error
+        SetPermissionsAndSuper(ctx context.Context, roleID int64, permissionIDs []int64, isSuper bool) error
     	ListPermissionCodes(ctx context.Context, roleID int64) ([]string, error)
     	ListPermissionIDsByCodes(ctx context.Context, codes []string) ([]gen.ListPermissionIDsByCodesRow, error)
     {{ "}" }}
@@ -158,7 +159,17 @@ body: |
     	if err != nil {{ "{" }}
     		return err
     	{{ "}" }}
-    	// Resolve codes → permissions
+        if len(permissionCodes) == 1 && permissionCodes[0] == "*" {{ "{" }}
+            if err := s.roles.SetPermissionsAndSuper(ctx, rid, nil, true); err != nil {{ "{" }} return err {{ "}" }}
+            if _, err := s.enforcer.RemoveFilteredPolicy(0, r.Code); err != nil {{ "{" }} return s.casbinSyncFailure(ctx, roleID, r.Code, err) {{ "}" }}
+            if _, err := s.enforcer.AddPolicy(r.Code, "*", "*"); err != nil {{ "{" }} return s.casbinSyncFailure(ctx, roleID, r.Code, err) {{ "}" }}
+            _ = s.audit.Write(ctx, "", "role.grant_permissions", roleID, "{{ "{}" }}")
+            return nil
+        {{ "}" }}
+        for _, code := range permissionCodes {{ "{" }}
+            if code == "*" {{ "{" }} return role.ValidationError{{ "{" }}Field: "permission_codes", Msg: "wildcard '*' must not be combined with specific codes"{{ "}" }} {{ "}" }}
+        {{ "}" }}
+        // Resolve codes → permissions
     	perms, err := s.perms.ListByCodes(ctx, permissionCodes)
     	if err != nil {{ "{" }}
     		return err
@@ -182,18 +193,26 @@ body: |
     	for _, row := range rows {{ "{" }}
     		ids = append(ids, row.ID)
     	{{ "}" }}
-    	if err := s.roles.AssignPermissions(ctx, rid, ids); err != nil {{ "{" }}
+        if err := s.roles.SetPermissionsAndSuper(ctx, rid, ids, false); err != nil {{ "{" }}
     		return err
     	{{ "}" }}
     	// Sync Casbin policies: clear existing then add new.
     	if _, err := s.enforcer.RemoveFilteredPolicy(0, r.Code); err != nil {{ "{" }}
-    		klog.CtxErrorf(ctx, "role.grant_permissions: remove existing casbin policies for role %s failed: %v", r.Code, err)
+            return s.casbinSyncFailure(ctx, roleID, r.Code, err)
     	{{ "}" }}
     	for _, p := range perms {{ "{" }}
             if _, err := s.enforcer.AddPolicy(r.Code, p.Code, "execute"); err != nil {{ "{" }}
-    			return err
+                return s.casbinSyncFailure(ctx, roleID, r.Code, err)
     		{{ "}" }}
     	{{ "}" }}
     	_ = s.audit.Write(ctx, "", "role.grant_permissions", roleID, "{{ "{" }}{{ "}" }}")
     	return nil
+    {{ "}" }}
+
+    // DB grants and Casbin persistence are separate writes. Surface partial failure
+    // so retrying the same grant can converge them; never report false success.
+    func (s *Service) casbinSyncFailure(ctx context.Context, roleID, code string, cause error) error {{ "{" }}
+        _ = s.audit.Write(ctx, "", "role.grant_permissions.casbin_sync_failed", roleID,
+            fmt.Sprintf("{{ "{" }}\"role_code\":%q,\"cause\":%q{{ "}" }}", code, cause.Error()))
+        return fmt.Errorf("role %s (id=%s): permissions saved but authorization sync failed; retry GrantPermissions with the same input: %w", code, roleID, cause)
     {{ "}" }}

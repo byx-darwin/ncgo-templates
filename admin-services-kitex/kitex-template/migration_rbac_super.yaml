@@ -1,0 +1,19 @@
+path: internal/db/migrations/000003_rbac_super.sql
+update_behavior:
+    type: cover
+body: |
+    -- +goose Up
+    ALTER TABLE roles ADD COLUMN is_super BOOLEAN NOT NULL DEFAULT false;
+    -- Align menu visibility only for roles already carrying a wildcard policy.
+    UPDATE roles SET is_super = true WHERE code IN (
+        SELECT v0 FROM casbin_rule WHERE ptype = 'p' AND v1 = '*' AND v2 = '*'
+    );
+    ALTER TABLE permissions DROP CONSTRAINT permissions_method_check;
+    ALTER TABLE permissions ADD CONSTRAINT permissions_method_check CHECK
+        (method IS NULL OR method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'));
+    UPDATE casbin_rule SET v2 = 'execute' WHERE ptype = 'p' AND v1 <> '*'
+        AND (v2 IS NULL OR v2 IN ('','GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'));
+
+    -- +goose Down
+    -- Keep execute and the wider method constraint to preserve valid grants.
+    ALTER TABLE roles DROP COLUMN is_super;

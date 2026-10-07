@@ -66,7 +66,7 @@ body: |
 
     func TestUserPermCodesAdmin(t *testing.T) {{ "{" }}
     	ctx := context.Background()
-    	qs := New(&fakeMenuRepo{{ "{" }}{{ "}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: 1, Code: "admin"{{ "}}" }}{{ "}" }}, &fakePermReader{{ "{" }}allPerms: []*permission.Permission{{ "{" }}
+        qs := New(&fakeMenuRepo{{ "{}" }}, &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID: 1, Code: "admin", IsSuper: true{{ "}}}" }}, &fakePermReader{{ "{" }}allPerms: []*permission.Permission{{ "{" }}
     		{{ "{" }}Code: "user:create"{{ "}" }},
     		{{ "{" }}Code: "user:delete"{{ "}" }},
     	{{ "}}" }})
@@ -91,4 +91,18 @@ body: |
     	if len(codes) != 1 || codes[0] != "user:create" {{ "{" }}
     		t.Fatalf("codes = %v, want [user:create]", codes)
     	{{ "}" }}
+    {{ "}" }}
+
+    func TestSuperVisibilityIndependentOfRoleName(t *testing.T) {{ "{" }}
+        for _, test := range []struct{{ "{" }}code string; super bool; want int{{ "}{" }}
+            {{ "{" }}"renamed-super",true,1{{ "}" }}, {{ "{" }}"admin",false,0{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            qs := New(&fakeMenuRepo{{ "{" }}menus: []*menu.Menu{{ "{{" }}ID:1,Code:"system:user"{{ "}}}" }},
+                &fakeUserRoleReader{{ "{" }}roles: []*role.Role{{ "{{" }}ID:1,Code:test.code,IsSuper:test.super{{ "}}}" }},
+                &fakePermReader{{ "{" }}allPerms: []*permission.Permission{{ "{{" }}Code:"system:user"{{ "}}}" }})
+            codes, err := qs.UserPermCodes(context.Background(),"uuid-1")
+            if err != nil || len(codes)!=test.want {{ "{" }} t.Fatalf("codes for %s: %v %v",test.code,codes,err) {{ "}" }}
+            menus, err := qs.UserMenuTree(context.Background(),"uuid-1")
+            if err != nil || len(menus)!=test.want {{ "{" }} t.Fatalf("menus for %s: %v %v",test.code,menus,err) {{ "}" }}
+        {{ "}" }}
     {{ "}" }}

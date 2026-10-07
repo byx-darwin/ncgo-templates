@@ -123,6 +123,7 @@ message Role {
   int32 status = 4;
   string remark = 5;
   repeated string permissions = 6;
+  bool is_super = 7;
 }
 
 message ListRolesReq {

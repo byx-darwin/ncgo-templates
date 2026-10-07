@@ -30,5 +30,16 @@ body: |
     		response.ErrorCode(c, response.CodeInternalError)
     		return
     	{{ "}" }}
-    	response.OK(c, resp.Menus)
+        nodes := make(map[string]*api.MenuNode, len(resp.Menus))
+        for _, m := range resp.Menus {{ "{" }} nodes[m.Id] = &api.MenuNode{{ "{" }}Menu: m{{ "}" }} {{ "}" }}
+        roots := make([]*api.MenuNode, 0)
+        for _, m := range resp.Menus {{ "{" }}
+            n := nodes[m.Id]
+            if parent, ok := nodes[m.ParentId]; ok && m.ParentId != m.Id {{ "{" }}
+                parent.Children = append(parent.Children, n)
+            {{ "}" }} else {{ "{" }} roots = append(roots, n) {{ "}" }}
+        {{ "}" }}
+        menus := make([]map[string]interface{{ "{}" }}, 0, len(roots))
+        for _, n := range roots {{ "{" }} menus = append(menus, menuNodeJSON(n)) {{ "}" }}
+        response.OK(c, menus)
     {{ "}" }}

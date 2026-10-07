@@ -88,3 +88,16 @@ body: |
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
     {{ "}" }}
+
+    func (h *UserHandler) AssignRoles(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        var req api.AssignRolesToUserReq
+        if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid); return
+        {{ "}" }}
+        if req.RoleIds == nil {{ "{" }} response.ErrorCode(c, response.CodeRequestParamInvalid); return {{ "}" }}
+        req.UserId = c.Param("id")
+        if _, err := h.rbacCli.AssignRolesToUser(ctx, &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError); return
+        {{ "}" }}
+        response.OK(c, map[string]string{{ "{" }}"status": "assigned"{{ "}" }})
+    {{ "}" }}

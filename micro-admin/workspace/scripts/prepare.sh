@@ -51,4 +51,7 @@ echo '==> Generating BFF RPC clients, database code, and i18n catalog'
   go mod tidy
 )
 
+echo '==> Generating permission seeds from the BFF route table'
+(cd "$ADMIN" && go run ./cmd/permgen) > "$ROOT/scripts/seed-permissions.sql"
+
 echo '==> Workspace preparation complete'

@@ -7,6 +7,7 @@ body: |
     package router
 
     import (
+        "github.com/cloudwego/hertz/pkg/app"
     	"bytes"
     	"context"
     	"os"
@@ -385,4 +386,24 @@ body: |
     	if authCli.loginCalls != 1 {{ "{" }}
     		t.Errorf("loginCalls = %d, want 1 — the second identical request should have been deduped by Idempotency, not re-invoked the real Login RPC", authCli.loginCalls)
     	{{ "}" }}
+    {{ "}" }}
+
+    func TestGlobalAuthz_UnregisteredRouteDenied(t *testing.T) {{ "{" }}
+        h := server.New()
+        Register{{.ServiceName}}BffServiceRoutes(h, &fakeRouterAuthClient{{ "{}" }}, &fakeRouterRBACClient{{ "{" }}allowed:true{{ "}" }}, nil, &fakeRouterUserClient{{ "{}" }}, nil)
+        h.GET("/api/v1/forgotten", func(ctx context.Context, c *app.RequestContext) {{ "{" }} c.Status(200) {{ "}" }})
+        w := ut.PerformRequest(h.Engine, "GET", "/api/v1/forgotten", nil)
+        if got := w.Result().StatusCode(); got != consts.StatusForbidden {{ "{" }} t.Fatalf("unregistered route got %d, want 403", got) {{ "}" }}
+        w = ut.PerformRequest(h.Engine, "GET", "/api/v1/not-found", nil)
+        if got := w.Result().StatusCode(); got != consts.StatusNotFound {{ "{" }} t.Fatalf("unmatched route got %d, want 404", got) {{ "}" }}
+    {{ "}" }}
+
+    func TestGrantRoutesRequirePermission(t *testing.T) {{ "{" }}
+        engine:=newRouterTestEngine(t,&fakeRouterRBACClient{{ "{" }}allowed:false{{ "}" }})
+        for _, test:=range []struct{{ "{" }}method,path string{{ "}{" }}
+            {{ "{" }}"POST","/api/v1/users/1/roles"{{ "}" }},{{ "{" }}"POST","/api/v1/roles/1/permissions"{{ "}" }},{{ "{" }}"GET","/api/v1/permissions/tree"{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            w:=ut.PerformRequest(engine,test.method,test.path,nil,ut.Header{{ "{" }}Key:"Authorization",Value:"Bearer "+newRouterTestJWT(t){{ "}" }})
+            if got:=w.Result().StatusCode();got!=consts.StatusForbidden {{ "{" }} t.Fatalf("%s %s got %d, want 403",test.method,test.path,got) {{ "}" }}
+        {{ "}" }}
     {{ "}" }}

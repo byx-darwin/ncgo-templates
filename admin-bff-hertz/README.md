@@ -172,10 +172,10 @@ GET /api/v1/menus  # permission: menu:read
 #### Rate Limit Rules Management
 
 ```
-GET    /api/v1/rate-limit-rules      # permission: rate_limit:list
-POST   /api/v1/rate-limit-rules      # permission: rate_limit:create
-PUT    /api/v1/rate-limit-rules/:id  # permission: rate_limit:update
-DELETE /api/v1/rate-limit-rules/:id  # permission: rate_limit:delete
+GET    /api/v1/rate-limit-rules      # permission: rate-limit:read
+POST   /api/v1/rate-limit-rules      # permission: rate-limit:create
+PUT    /api/v1/rate-limit-rules/:id  # permission: rate-limit:update
+DELETE /api/v1/rate-limit-rules/:id  # permission: rate-limit:delete
 ```
 
 #### Terminal User Management
@@ -214,7 +214,7 @@ about immediate revocation must check this field, not just the status code.
 2. Idempotency Check (if enabled)
 3. JWT Authentication
 4. RBAC Authorization (Casbin)
-5. Permission Check (per-route)
+5. Global route permission check (`authz.Routes`)
 6. Handler Execution → gRPC call to authority
 ```
 
@@ -258,10 +258,10 @@ Standard naming convention: `resource:action`
 | `permission:update` | Update permission |
 | `permission:delete` | Delete permission |
 | `menu:read` | List menus |
-| `rate_limit:list` | List rate limit rules |
-| `rate_limit:create` | Create rate limit rule |
-| `rate_limit:update` | Update rate limit rule |
-| `rate_limit:delete` | Delete rate limit rule |
+| `rate-limit:read` | List rate limit rules |
+| `rate-limit:create` | Create rate limit rule |
+| `rate-limit:update` | Update rate limit rule |
+| `rate-limit:delete` | Delete rate limit rule |
 | `terminal_user:list` | List terminal (end-user) accounts |
 | `terminal_user:read` | Get terminal user detail |
 | `terminal_user:ban` | Ban a terminal user (also triggers `ForceLogout`, see [gRPC Connection](#grpc-connection)) |
@@ -368,7 +368,7 @@ type Claims struct {
 
 `Uid` comes from a verified JWT (`TokenAuth`); `AK` comes from a verified HMAC signature (`SignatureAuth`, `X-App-Key`/`X-Signature` headers) — a separate, non-JWT open-API auth path. `TokenAuth` preserves any `AK` `SignatureAuth` already set earlier in the chain instead of overwriting it.
 
-`idempotency.go` is registered once per route group: on the public `auth` group (`/auth/login`, `/auth/refresh` — `ak:`/`ip:` scope only, no `Uid` before authentication) and on the `protected` group after `JWTAuth` (full `ak_user_uuid:`/`user_uuid:`/`ak:`/`ip:` precedence). This package's only `rate_limit.go` call site is the `password_change` phase on the password-reset route, already correctly positioned inside `protected` after `JWTAuth` (issue #73).
+`idempotency.go` is registered once per route group: on the public `auth` group (`/auth/login`, `/auth/refresh` — `ak:`/`ip:` scope only, no `Uid` before authentication) and on the `protected` group after the global JWT gate (full `ak_user_uuid:`/`user_uuid:`/`ak:`/`ip:` precedence). This package's only `rate_limit.go` call site is the `password_change` phase on the password-reset route, already correctly positioned inside `protected` after the global JWT gate (issue #73).
 
 A JWT can also carry its own `ak` claim; if `SignatureAuth` never ran, `TokenAuth` passes that value through unverified by the HMAC path (only the JWT's own signature backs it).
 
@@ -453,9 +453,9 @@ make test
 
 ## Seams
 
-- **`Authz` middleware ordering bug, fixed by this plan.** Prior to this plan, `middleware.Authz(rbacCli)` was registered at the `protected` route-group level via `.Use(...)`, before any per-route `RequirePermission(code)` had a chance to run. Because Hertz's `RouterGroup.combineHandlers` always places group-level `Use()` handlers ahead of a route's own handlers, and `RequestContext.Next` is a forward-only loop, `Authz` always executed with "no permission required yet" on the context and always took its no-op branch — silently skipping enforcement on **every** protected route in this package (all 19 pre-existing routes, not just the 5 new terminal-user ones). This plan fixed it by moving `Authz(rbacCli)` to run per-route, immediately after `RequirePermission(code)`, on every route. **If you are upgrading an existing deployment past this plan, be aware:** RBAC permission checks that were previously inert (any authenticated user could call any protected route regardless of assigned permissions) now actually enforce. Review your Casbin policies before rolling this out, or users without the right permission grants will start seeing `403 permission_denied` on routes that previously "worked."
+- **Authorization ordering.** The earlier group-level `Authz` ran before per-route permission markers and skipped enforcement. v2 reads the code from `authz.Routes` in a global gate after JWT verification, making route-handler ordering irrelevant. Coverage tests detect new routes missing permission registration.
 - **New required config fields (`grpc.terminal_user`, `grpc.authority`) break boot on upgrade without a config change.** Both fields are enforced by an unconditional `Validate()` guard, and `conf.Load` fully replaces `Default()` rather than merging into it, so an existing `conf.yaml` written before these fields existed won't pick up their defaults. An upgrade that doesn't also update `conf.yaml` fails to boot with `grpc.terminal_user.service_name is empty` (or the `grpc.authority` equivalent) instead of starting up without the newer feature. This is the intended, by-design tradeoff (fail loud at startup over a silently misconfigured client) — see the [gRPC Connection](#grpc-connection) upgrade note above before rolling out either field to a running deployment.
-- **New permission codes for admin-initiated password reset and audit-log read.** `POST /api/v1/terminal-users/:uid/reset-password` is gated by the `terminal_user:password-reset` permission code, and `GET /api/v1/terminal-users/:uid/audit-logs` by `terminal_user:audit-log:read` — both routed through the per-route `Authz(rbacCli)` + `RequirePermission(code)` pair described above, same as the pre-existing `terminal_user:*` codes, and both calling `user-kitex` via the same `grpc.terminal_user` client (see [Configuration](#grpc-connection)). Review your Casbin policies to grant these two codes to the appropriate admin roles before relying on either endpoint. Note the audit-log endpoint's query scope: it only ever returns records for the `:uid` in the path (`ActorUid` is pinned server-side from the path param, not from a request body/query field) — there is no cross-user or unscoped audit-log query capability in this package.
+- **New permission codes for admin-initiated password reset and audit-log read.** `POST /api/v1/terminal-users/:uid/reset-password` is gated by the `terminal_user:password-reset` permission code, and `GET /api/v1/terminal-users/:uid/audit-logs` by `terminal_user:audit-log:read` — both registered in the global `authz.Routes` table, same as the pre-existing `terminal_user:*` codes, and both calling `user-kitex` via the same `grpc.terminal_user` client (see [Configuration](#grpc-connection)). Review your Casbin policies to grant these two codes to the appropriate admin roles before relying on either endpoint. Note the audit-log endpoint's query scope: it only ever returns records for the `:uid` in the path (`ActorUid` is pinned server-side from the path param, not from a request body/query field) — there is no cross-user or unscoped audit-log query capability in this package.
 
 ## Related Templates
 
@@ -467,3 +467,23 @@ make test
 ## License
 
 Part of the ncgo template registry.
+
+## RBAC v2 alignment
+
+All BFF routes now inherit `RouteTokenAuth` and `EnforceRoutes`. Permission
+bindings live in `internal/pkg/authz/routes.go`; matched routes absent from the
+table return 403, and anonymous routes are explicit. The AST coverage test
+requires the router and table to agree. Per-route `RequirePermission` + `Authz`
+remain compatibility helpers; the global table is the default enforcement path.
+
+New management routes are `POST /users/:id/roles` (`user:assignRole`),
+`POST /roles/:id/permissions` (`role:assignPerm`), and
+`GET /permissions/tree` (`permission:read`), all under `/api/v1`.
+Menu endpoints return flat-field trees including `code`. Permission seeds come
+from `go run ./cmd/permgen`; api/button actions share a code and `execute`.
+The canonical rate-limit prefix is `rate-limit`, and reads use `:read`.
+
+Pair this version with admin-services-kitex v2 and its migrations. Existing
+handler files marked `skip` need explicit application updates. See
+[micro-admin's permission contract](../micro-admin/README.md#permission-contract-v2)
+for upgrade and verification steps.

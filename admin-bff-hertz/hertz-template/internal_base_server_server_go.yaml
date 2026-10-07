@@ -128,8 +128,9 @@ body: |
         {{ "}" }})
 
         // Register routes
-        health.Register(h)
         router.Register{{.ServiceName}}BffServiceRoutes(h, rbacAuthCli, rbacCli, ruleCli, userCli, resolver)
+
+        health.Register(h)
 
         // Start server
         h.Spin()

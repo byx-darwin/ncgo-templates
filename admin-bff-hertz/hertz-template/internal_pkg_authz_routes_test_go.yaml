@@ -1,0 +1,53 @@
+path: internal/pkg/authz/routes_test.go
+update_behavior:
+    type: cover
+body: |
+    package authz
+
+    import (
+        "go/ast"
+        "go/parser"
+        "go/token"
+        "strconv"
+        "testing"
+    )
+
+    func TestRoutesCoverRouter(t *testing.T) {{ "{" }}
+        file, err := parser.ParseFile(token.NewFileSet(), "../../router/adminbffservice.go", nil, 0)
+        if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        groups := map[string]string{{ "{" }}"h": ""{{ "}" }}
+        declared := map[string]bool{{ "{}" }}
+        literal := func(e ast.Expr) string {{ "{" }}
+            s, ok := e.(*ast.BasicLit); if !ok {{ "{" }} t.Fatalf("route argument must be a string literal: %T", e) {{ "}" }}
+            value, err := strconv.Unquote(s.Value); if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}; return value
+        {{ "}" }}
+        ast.Inspect(file, func(n ast.Node) bool {{ "{" }}
+            if assignment, ok := n.(*ast.AssignStmt); ok && len(assignment.Lhs) == 1 && len(assignment.Rhs) == 1 {{ "{" }}
+                call, ok := assignment.Rhs[0].(*ast.CallExpr); if !ok {{ "{" }} return true {{ "}" }}
+                selector, ok := call.Fun.(*ast.SelectorExpr); if !ok || selector.Sel.Name != "Group" {{ "{" }} return true {{ "}" }}
+                parent, ok := selector.X.(*ast.Ident); if !ok {{ "{" }} return true {{ "}" }}
+                child, ok := assignment.Lhs[0].(*ast.Ident); if !ok {{ "{" }} return true {{ "}" }}
+                prefix, ok := groups[parent.Name]; if !ok {{ "{" }} t.Fatalf("unknown group %s", parent.Name) {{ "}" }}
+                groups[child.Name] = prefix + literal(call.Args[0])
+            {{ "}" }}
+            call, ok := n.(*ast.CallExpr); if !ok {{ "{" }} return true {{ "}" }}
+            selector, ok := call.Fun.(*ast.SelectorExpr); if !ok {{ "{" }} return true {{ "}" }}
+            switch selector.Sel.Name {{ "{" }} case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS": default: return true {{ "}" }}
+            group, ok := selector.X.(*ast.Ident); if !ok {{ "{" }} return true {{ "}" }}
+            prefix, ok := groups[group.Name]; if !ok {{ "{" }} t.Fatalf("unresolved route group %s", group.Name) {{ "}" }}
+            path := prefix + literal(call.Args[0])
+            key := selector.Sel.Name + " " + path
+            if declared[key] {{ "{" }} t.Fatalf("duplicate HTTP route %s", key) {{ "}" }}
+            declared[key] = true
+            if _, ok := Lookup(selector.Sel.Name, path); !ok {{ "{" }} t.Errorf("route missing permission registration: %s", key) {{ "}" }}
+            return true
+        {{ "}" }})
+        registered := map[string]bool{{ "{}" }}
+        for _, rp := range Routes {{ "{" }}
+            key := rp.Method + " " + rp.Path
+            if registered[key] {{ "{" }} t.Errorf("duplicate permission registration: %s", key) {{ "}" }}
+            registered[key] = true
+            if !declared[key] {{ "{" }} t.Errorf("stale permission registration: %s", key) {{ "}" }}
+            if rp.Public && rp.Code != "" {{ "{" }} t.Errorf("public route has a permission: %s", key) {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}

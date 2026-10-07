@@ -16,6 +16,7 @@ body: |
 
     // Role is the aggregate root for the role aggregate.
     type Role struct {{ "{" }}
+        IsSuper bool
     	ID     int64
     	Code   string
     	Name   string

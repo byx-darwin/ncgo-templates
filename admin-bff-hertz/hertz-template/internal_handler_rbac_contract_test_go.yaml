@@ -1,0 +1,71 @@
+path: internal/handler/rbac_contract_test.go
+update_behavior:
+    type: cover
+body: |
+    package handler
+
+    import (
+        "context"
+        "encoding/json"
+        "strings"
+        "testing"
+
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/kitex/client/callopt"
+
+        api "{{.Module}}/kitex_gen/api/rbac/v1"
+        "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
+    )
+
+    type grantClient struct {{ "{" }}
+        rbacservice.Client
+        roleReq *api.GrantPermissionsToRoleReq
+        userReq *api.AssignRolesToUserReq
+        pages []int32
+    {{ "}" }}
+    func (f *grantClient) GrantPermissionsToRole(ctx context.Context, req *api.GrantPermissionsToRoleReq, opts ...callopt.Option) (*api.GrantPermissionsToRoleResp,error) {{ "{" }}
+        f.roleReq = req; return &api.GrantPermissionsToRoleResp{{ "{}" }},nil
+    {{ "}" }}
+    func (f *grantClient) AssignRolesToUser(ctx context.Context, req *api.AssignRolesToUserReq, opts ...callopt.Option) (*api.AssignRolesToUserResp,error) {{ "{" }}
+        f.userReq = req; return &api.AssignRolesToUserResp{{ "{}" }},nil
+    {{ "}" }}
+    func (f *grantClient) ListPermissions(ctx context.Context, req *api.ListPermissionsReq, opts ...callopt.Option) (*api.ListPermissionsResp,error) {{ "{" }}
+        f.pages = append(f.pages,req.Page)
+        if req.Page == 1 {{ "{" }} return &api.ListPermissionsResp{{ "{" }}Permissions:[]*api.Permission{{ "{{" }}Id:"1",Code:"system:view",Type:"catalog"{{ "}}" }},Total:2{{ "}" }},nil {{ "}" }}
+        return &api.ListPermissionsResp{{ "{" }}Permissions:[]*api.Permission{{ "{{" }}Id:"2",Code:"user:read",ParentId:"1",Type:"api"{{ "}}" }},Total:2{{ "}" }},nil
+    {{ "}" }}
+
+    func TestGrantHTTPUsesPathIDAndAcceptsExplicitRevoke(t *testing.T) {{ "{" }}
+        cli := &grantClient{{ "{}" }}
+        h := server.New()
+        h.POST("/roles/:id/permissions",NewRoleHandler(cli).GrantPermissions)
+        h.POST("/users/:id/roles",NewUserHandler(cli).AssignRoles)
+        perform := func(path, payload string) int {{ "{" }}
+            return ut.PerformRequest(h.Engine,"POST",path,&ut.Body{{ "{" }}Body:strings.NewReader(payload),Len:len(payload){{ "}" }},ut.Header{{ "{" }}Key:"Content-Type",Value:"application/json"{{ "}" }}).Result().StatusCode()
+        {{ "}" }}
+        if got:=perform("/roles/7/permissions",`{{ "{" }}"role_id":"attacker","permission_codes":["*"]{{ "}" }}`);got!=200 {{ "{" }} t.Fatal(got) {{ "}" }}
+        if cli.roleReq.RoleId!="7" || len(cli.roleReq.PermissionCodes)!=1 || cli.roleReq.PermissionCodes[0]!="*" {{ "{" }} t.Fatalf("grant request: %+v",cli.roleReq) {{ "}" }}
+        if got:=perform("/roles/7/permissions",`{{ "{" }}"permission_codes":[]{{ "}" }}`);got!=200 {{ "{" }} t.Fatal(got) {{ "}" }}
+        if len(cli.roleReq.PermissionCodes)!=0 {{ "{" }} t.Fatal("explicit revoke not forwarded") {{ "}" }}
+        cli.roleReq=nil
+        if got:=perform("/roles/7/permissions",`{{ "{}" }}`);got!=400 || cli.roleReq!=nil {{ "{" }} t.Fatalf("missing grant list reached RPC: %d",got) {{ "}" }}
+        if got:=perform("/users/9/roles",`{{ "{" }}"user_id":"attacker","role_ids":["7"]{{ "}" }}`);got!=200 {{ "{" }} t.Fatal(got) {{ "}" }}
+        if cli.userReq.UserId!="9" || cli.userReq.RoleIds[0]!="7" {{ "{" }} t.Fatalf("assignment request: %+v",cli.userReq) {{ "}" }}
+    {{ "}" }}
+
+    func TestPermissionTreeLoadsAllPagesAndKeepsCodes(t *testing.T) {{ "{" }}
+        cli:=&grantClient{{ "{}" }}
+        h:=server.New();h.GET("/tree",NewPermissionHandler(cli).Tree)
+        resp:=ut.PerformRequest(h.Engine,"GET","/tree",nil).Result()
+        if resp.StatusCode()!=200 || len(cli.pages)!=2 {{ "{" }} t.Fatalf("tree pagination: %d, %v",resp.StatusCode(),cli.pages) {{ "}" }}
+        var body struct {{ "{" }} Data []struct {{ "{" }} Code string; Children []struct{{ "{" }}Code string{{ "}" }} {{ "}" }} {{ "}" }}
+        if err:=json.Unmarshal(resp.Body(),&body);err!=nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        if len(body.Data)!=1 || body.Data[0].Code!="system:view" || len(body.Data[0].Children)!=1 || body.Data[0].Children[0].Code!="user:read" {{ "{" }} t.Fatalf("tree lost hierarchy/codes: %s",resp.Body()) {{ "}" }}
+    {{ "}" }}
+
+    func TestMenuJSONIncludesPermissionCodeAtEveryLevel(t *testing.T) {{ "{" }}
+        node:= &api.MenuNode{{ "{" }}Menu:&api.Menu{{ "{" }}Id:"1",Code:"system:view"{{ "}" }},Children:[]*api.MenuNode{{ "{{" }}Menu:&api.Menu{{ "{" }}Id:"2",Code:"system:user"{{ "}}}}" }}
+        result:=menuNodeJSON(node)
+        if result["code"]!="system:view" || result["children"].([]map[string]interface{{ "{}" }})[0]["code"]!="system:user" {{ "{" }} t.Fatalf("menu code missing: %+v",result) {{ "}" }}
+    {{ "}" }}

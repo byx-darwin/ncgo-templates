@@ -249,6 +249,7 @@ body: |
     func toDomainRole(row gen.Role) *role.Role {{ "{" }}
     	r := &role.Role{{ "{" }}
     		ID:     row.ID,
+            IsSuper: row.IsSuper,
     		Code:   row.Code,
     		Name:   row.Name,
     		Status: int(row.Status),

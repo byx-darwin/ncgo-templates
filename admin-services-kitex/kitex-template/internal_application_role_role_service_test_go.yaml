@@ -69,7 +69,8 @@ body: |
     	return nil
     {{ "}" }}
 
-    func (f *fakeRoleRepo) AssignPermissions(ctx context.Context, roleID int64, permissionIDs []int64) error {{ "{" }}
+    func (f *fakeRoleRepo) SetPermissionsAndSuper(ctx context.Context, roleID int64, permissionIDs []int64, isSuper bool) error {{ "{" }}
+        f.roles[roleID].IsSuper = isSuper
     	return nil
     {{ "}" }}
 
@@ -234,7 +235,7 @@ body: |
     	return false, e.removeErr
     {{ "}" }}
 
-    func TestGrantPermissionsCasbinCleanupErrorDoesNotFailRequest(t *testing.T) {{ "{" }}
+    func TestGrantPermissionsCasbinCleanupErrorIsReturned(t *testing.T) {{ "{" }}
     	ctx := context.Background()
     	store := casbin.NewMemoryPolicyStore()
     	e, err := casbin.NewEnforcer(store)
@@ -248,7 +249,43 @@ body: |
     	aud := audit.NewMemoryWriter()
     	svc := New(roles, perms, &errEnforcer{{ "{" }}Enforcer: e, removeErr: errors.New("boom"){{ "}" }}, aud)
 
-    	if err := svc.GrantPermissions(ctx, "1", []string{{ "{" }}"user:create"{{ "}" }}); err != nil {{ "{" }}
-    		t.Fatalf("GrantPermissions with casbin cleanup error = %v, want nil (cleanup failure must not fail the request)", err)
+        if err := svc.GrantPermissions(ctx, "1", []string{{ "{" }}"user:create"{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("GrantPermissions must report authorization sync failure")
     	{{ "}" }}
+    {{ "}" }}
+
+    func TestGrantWildcardAndRevoke(t *testing.T) {{ "{" }}
+        svc, store, _ := newRoleService(t)
+        ctx := context.Background()
+        if err := svc.GrantPermissions(ctx, "1", []string{{ "{" }}"*"{{ "}" }}); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        r, _ := svc.roles.GetByID(ctx, 1)
+        if !r.IsSuper {{ "{" }} t.Fatal("wildcard grant did not set IsSuper") {{ "}" }}
+        e, err := casbin.NewEnforcer(store); if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        allowed, err := e.Enforce("admin", "anything:new", "execute")
+        if err != nil || !allowed {{ "{" }} t.Fatalf("wildcard not effective: %v %v", allowed,err) {{ "}" }}
+        if err := svc.GrantPermissions(ctx, "1", []string{{ "{" }}"*","user:create"{{ "}" }}); err == nil {{ "{" }} t.Fatal("mixed wildcard grant accepted") {{ "}" }}
+        if err := svc.GrantPermissions(ctx, "1", []string{{ "{}" }}); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        if r.IsSuper {{ "{" }} t.Fatal("concrete grant did not clear IsSuper") {{ "}" }}
+        e, err = casbin.NewEnforcer(store); if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        allowed, err = e.Enforce("admin", "anything:new", "execute")
+        if err != nil || allowed {{ "{" }} t.Fatalf("wildcard persisted after revoke: %v %v",allowed,err) {{ "}" }}
+    {{ "}" }}
+
+    func TestGrantWildcardSyncErrorIsReturned(t *testing.T) {{ "{" }}
+        store:=casbin.NewMemoryPolicyStore();e,err:=casbin.NewEnforcer(store);if err!=nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        roles:=&fakeRoleRepo{{ "{" }}roles:map[int64]*role.Role{{ "{" }}1:{{ "{" }}ID:1,Code:"ops"{{ "}}}" }}
+        svc:=New(roles,&fakePermReader{{ "{" }}perms:map[string]*permission.Permission{{ "{}}" }},&errEnforcer{{ "{" }}Enforcer:e,removeErr:errors.New("sync failed"){{ "}" }},audit.NewMemoryWriter())
+        if err:=svc.GrantPermissions(context.Background(),"1",[]string{{ "{" }}"*"{{ "}" }});err==nil {{ "{" }} t.Fatal("wildcard sync failure hidden") {{ "}" }}
+    {{ "}" }}
+
+    func TestButtonAndAPIUseExecuteRegardlessOfMethod(t *testing.T) {{ "{" }}
+        svc, store, _ := newRoleService(t)
+        reader:=svc.perms.(*fakePermReader)
+        reader.perms["user:approve"]=&permission.Permission{{ "{" }}ID:2,Code:"user:approve",Type:permission.TypeButton{{ "}" }}
+        if err:=svc.GrantPermissions(context.Background(),"1",[]string{{ "{" }}"user:create","user:approve"{{ "}" }});err!=nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        e,err:=casbin.NewEnforcer(store);if err!=nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        for _,code:=range []string{{ "{" }}"user:create","user:approve"{{ "}" }} {{ "{" }}
+            if allowed,err:=e.Enforce("admin",code,"execute");err!=nil || !allowed {{ "{" }} t.Fatalf("execute rejected %s: %v",code,err) {{ "}" }}
+            if allowed,_:=e.Enforce("admin",code,"POST");allowed {{ "{" }} t.Fatalf("HTTP method accepted as action for %s",code) {{ "}" }}
+        {{ "}" }}
     {{ "}" }}

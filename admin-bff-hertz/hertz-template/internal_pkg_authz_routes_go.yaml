@@ -1,0 +1,76 @@
+path: internal/pkg/authz/routes.go
+update_behavior:
+    type: cover
+body: |
+    package authz
+
+    // ActExecute is the action used by both Casbin policies and checks.
+    const ActExecute = "execute"
+
+    // RoutePerm is the authoritative HTTP-to-permission binding. DB path/method
+    // store representative display values only: a code can cover multiple routes.
+    type RoutePerm struct {{ "{" }}
+        Method string
+        Path string
+        Code string
+        Public bool // anonymous; empty code alone still requires authentication
+        Menu string
+        Button string // shared code for an optional UI action
+    {{ "}" }}
+
+    var Routes = []RoutePerm{{ "{" }}
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth/login", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth/refresh", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth/dingtalk/login", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth/dingtalk/apply", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth/logout", Code: "", Public: false, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/me/menus", Code: "", Public: false, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/me/perms", Code: "", Public: false, Menu: "", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/rbac/dingtalk-applications", Code: "user:approve", Public: false, Menu: "system:user", Button: "user:approve"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/rbac/dingtalk-applications/:id/approve", Code: "user:approve", Public: false, Menu: "system:user", Button: "user:approve"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/rbac/dingtalk-applications/:id/reject", Code: "user:approve", Public: false, Menu: "system:user", Button: "user:approve"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/users", Code: "user:read", Public: false, Menu: "system:user", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/users/:id", Code: "user:read", Public: false, Menu: "system:user", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/users", Code: "user:create", Public: false, Menu: "system:user", Button: "user:create"{{ "}" }},
+        {{ "{" }}Method: "PUT", Path: "/api/v1/users/:id", Code: "user:update", Public: false, Menu: "system:user", Button: "user:update"{{ "}" }},
+        {{ "{" }}Method: "DELETE", Path: "/api/v1/users/:id", Code: "user:delete", Public: false, Menu: "system:user", Button: "user:delete"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/roles", Code: "role:read", Public: false, Menu: "system:role", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/roles", Code: "role:create", Public: false, Menu: "system:role", Button: "role:create"{{ "}" }},
+        {{ "{" }}Method: "PUT", Path: "/api/v1/roles/:id", Code: "role:update", Public: false, Menu: "system:role", Button: "role:update"{{ "}" }},
+        {{ "{" }}Method: "DELETE", Path: "/api/v1/roles/:id", Code: "role:delete", Public: false, Menu: "system:role", Button: "role:delete"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/permissions", Code: "permission:read", Public: false, Menu: "system:permission", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/permissions/:id", Code: "permission:read", Public: false, Menu: "system:permission", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/permissions", Code: "permission:create", Public: false, Menu: "system:permission", Button: "permission:create"{{ "}" }},
+        {{ "{" }}Method: "PUT", Path: "/api/v1/permissions/:id", Code: "permission:update", Public: false, Menu: "system:permission", Button: "permission:update"{{ "}" }},
+        {{ "{" }}Method: "DELETE", Path: "/api/v1/permissions/:id", Code: "permission:delete", Public: false, Menu: "system:permission", Button: "permission:delete"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/menus", Code: "menu:read", Public: false, Menu: "system:permission", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/rate-limit-rules", Code: "rate-limit:read", Public: false, Menu: "system:rate-limit", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/rate-limit-rules", Code: "rate-limit:create", Public: false, Menu: "system:rate-limit", Button: "rate-limit:create"{{ "}" }},
+        {{ "{" }}Method: "PUT", Path: "/api/v1/rate-limit-rules/:id", Code: "rate-limit:update", Public: false, Menu: "system:rate-limit", Button: "rate-limit:update"{{ "}" }},
+        {{ "{" }}Method: "DELETE", Path: "/api/v1/rate-limit-rules/:id", Code: "rate-limit:delete", Public: false, Menu: "system:rate-limit", Button: "rate-limit:delete"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/terminal-users", Code: "terminal_user:list", Public: false, Menu: "system:terminal-user", Button: ""{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/terminal-users/:uid", Code: "terminal_user:read", Public: false, Menu: "system:terminal-user", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/terminal-users/:uid/ban", Code: "terminal_user:ban", Public: false, Menu: "system:terminal-user", Button: "terminal_user:ban"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/terminal-users/:uid/unban", Code: "terminal_user:unban", Public: false, Menu: "system:terminal-user", Button: "terminal_user:unban"{{ "}" }},
+        {{ "{" }}Method: "DELETE", Path: "/api/v1/terminal-users/:uid/identities/:provider", Code: "terminal_user:unbind-identity", Public: false, Menu: "system:terminal-user", Button: "terminal_user:unbind-identity"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/terminal-users/:uid/reset-password", Code: "terminal_user:password-reset", Public: false, Menu: "system:terminal-user", Button: "terminal_user:password-reset"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/terminal-users/:uid/audit-logs", Code: "terminal_user:audit-log:read", Public: false, Menu: "system:terminal-user", Button: ""{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/users/:id/roles", Code: "user:assignRole", Public: false, Menu: "system:user", Button: "user:assignRole"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/roles/:id/permissions", Code: "role:assignPerm", Public: false, Menu: "system:role", Button: "role:assignPerm"{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/api/v1/permissions/tree", Code: "permission:read", Public: false, Menu: "system:permission", Button: ""{{ "}" }},
+    {{ "}" }}
+
+    var NonProtoExempt = []RoutePerm{{ "{" }}
+        {{ "{" }}Method: "GET", Path: "/ping", Public: true{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/healthz", Public: true{{ "}" }},
+        {{ "{" }}Method: "GET", Path: "/readyz", Public: true{{ "}" }},
+    {{ "}" }}
+
+    func Lookup(method, path string) (RoutePerm, bool) {{ "{" }}
+        for _, routes := range [][]RoutePerm{{ "{" }}Routes, NonProtoExempt{{ "}" }} {{ "{" }}
+            for _, rp := range routes {{ "{" }}
+                if rp.Method == method && rp.Path == path {{ "{" }} return rp, true {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        return RoutePerm{{ "{}" }}, false
+    {{ "}" }}

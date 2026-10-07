@@ -369,3 +369,22 @@ grpc:
 ## License
 
 Part of the ncgo template registry.
+
+## RBAC v2 alignment
+
+`roles.is_super` is the source of full menu and permission visibility; role names
+have no bypass. Granting only `*` creates a wildcard Casbin policy and atomically
+clears concrete DB grants while setting the super flag. Concrete or empty grants
+clear the flag. Ordinary button/API policies use `execute`, irrespective of HTTP
+method, and the Casbin matcher supports wildcard object/action values.
+Role responses expose `is_super` and return `permissions: ["*"]` for super roles.
+Casbin sync failures are returned and audited; retry the same grant to reconcile.
+
+Apply `000003_rbac_super` and `000004_permission_contract`, regenerate sqlc and
+Kitex code, and update the application/repository files together when upgrading
+an existing generated service. Legacy code merges preserve grants; they and the
+`execute` repair are intentionally not reversed. Files marked `skip` require
+explicit project updates. Fresh workspace permission seeds are generated from
+admin-bff-hertz's route table rather than copied from frontend mocks.
+See [micro-admin](../micro-admin/README.md#permission-contract-v2) for complete
+upgrade and verification steps.

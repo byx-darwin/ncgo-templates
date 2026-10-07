@@ -163,8 +163,10 @@ body: |-
       case CodeTokenMissing, CodeTokenInvalid, CodeTokenExpired:
           return consts.StatusUnauthorized
 
+      case frameworkerror.CodeParamInvalid:
+          return consts.StatusBadRequest
       case frameworkerror.CodeAuthFailed:
-          return consts.StatusForbidden
+          return consts.StatusUnauthorized
       case CodePermissionDenied:
           return consts.StatusForbidden
       case CodeCacheUnavailable:

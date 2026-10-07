@@ -1,0 +1,37 @@
+path: internal/db/migrations/000004_permission_contract.sql
+update_behavior:
+    type: cover
+body: |
+    -- +goose Up
+    -- Canonicalize legacy template codes while preserving existing grants and
+    -- parent relationships. This migration does not promote any role to super.
+    CREATE TEMP TABLE permission_code_aliases (old_code text,new_code text,typ text) ON COMMIT DROP;
+    INSERT INTO permission_code_aliases VALUES
+    ('dashboard','dashboard:view','menu'),('system','system:view','catalog'),
+    ('user','system:user','menu'),('role','system:role','menu'),('permission','system:permission','menu'),
+    ('user:list','user:read','api'),('role:list','role:read','api'),
+    ('permission:list','permission:read','api'),('menu:list','menu:read','api'),
+    ('rate_limit:list','rate-limit:read','api'),('rate_limit:create','rate-limit:create','api'),
+    ('rate_limit:update','rate-limit:update','api'),('rate_limit:delete','rate-limit:delete','api');
+    INSERT INTO permissions (code,type,name,parent_id,path,icon,route_name,redirect,keep_alive,hide_in_menu,is_external,method,sort,status,description)
+    SELECT a.new_code,p.type,p.name,p.parent_id,p.path,p.icon,p.route_name,p.redirect,p.keep_alive,p.hide_in_menu,p.is_external,p.method,p.sort,p.status,p.description
+    FROM permissions p JOIN permission_code_aliases a ON p.code=a.old_code AND p.type=a.typ
+    ON CONFLICT (code,type) DO NOTHING;
+    INSERT INTO role_permissions (role_id,permission_id)
+    SELECT rp.role_id,new.id FROM role_permissions rp JOIN permissions old ON old.id=rp.permission_id
+    JOIN permission_code_aliases a ON a.old_code=old.code AND a.typ=old.type
+    JOIN permissions new ON new.code=a.new_code AND new.type=a.typ
+    ON CONFLICT DO NOTHING;
+    UPDATE permissions child SET parent_id=new.id
+    FROM permissions old,permission_code_aliases a,permissions new
+    WHERE child.parent_id=old.id AND old.code=a.old_code AND old.type=a.typ
+    AND new.code=a.new_code AND new.type=a.typ;
+    INSERT INTO casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
+    SELECT c.ptype,c.v0,a.new_code,c.v2,c.v3,c.v4,c.v5
+    FROM casbin_rule c JOIN permission_code_aliases a ON c.v1=a.old_code WHERE c.ptype='p'
+    ON CONFLICT DO NOTHING;
+    DELETE FROM casbin_rule c USING permission_code_aliases a WHERE c.ptype='p' AND c.v1=a.old_code;
+    DELETE FROM permissions p USING permission_code_aliases a WHERE p.code=a.old_code AND p.type=a.typ;
+
+    -- +goose Down
+    -- Code merges are not reversed: doing so could lose grants added after upgrade.

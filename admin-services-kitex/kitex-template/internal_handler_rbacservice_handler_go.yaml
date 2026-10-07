@@ -303,9 +303,10 @@ body: |
     {{ "}" }}
 
     func toV1Role(r *role.Role, permCodes []string) *v1.Role {{ "{" }}
+        if r.IsSuper {{ "{" }} permCodes = []string{{ "{" }}"*"{{ "}" }} {{ "}" }}
     	return &v1.Role{{ "{" }}
     		Id: strconv.FormatInt(r.ID, 10), Code: r.Code, Name: r.Name,
-    		Status: int32(r.Status), Remark: r.Remark, Permissions: permCodes,
+            Status: int32(r.Status), Remark: r.Remark, Permissions: permCodes, IsSuper: r.IsSuper,
     	{{ "}" }}
     {{ "}" }}
 

@@ -143,6 +143,7 @@ message Role {
   int32 status = 4;                     // 1=enabled, 0=disabled
   string remark = 5;
   repeated string permissions = 6;      // permission codes (derived from role_permissions)
+  bool is_super = 7;
 }
 message CreateRoleReq { string code = 1; string name = 2; string remark = 3; }
 message UpdateRoleReq { string id = 1; string name = 2; optional int32 status = 3; optional string remark = 4; }

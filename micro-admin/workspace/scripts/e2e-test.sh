@@ -43,8 +43,8 @@ test "$ready" -eq 1 || { echo 'PostgreSQL did not become ready' >&2; exit 1; }
 
 echo '==> Migrating and seeding authority database'
 (cd services/authority && DATABASE_URL="$DATABASE_URL" make migrate-up)
-docker compose -f compose.infra.yaml exec -T postgres \
-  psql -U postgres -d micro_admin -v ON_ERROR_STOP=1 < scripts/seed.sql
+cat scripts/seed-permissions.sql scripts/seed.sql | docker compose -f compose.infra.yaml exec -T postgres \
+  psql -U postgres -d micro_admin -v ON_ERROR_STOP=1
 
 echo '==> Starting authority and BFF'
 (cd services/authority && GO_ENV=dev "$ROOT/.authority-test") > "$ROOT/authority-e2e.log" 2>&1 &

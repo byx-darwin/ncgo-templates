@@ -112,3 +112,14 @@ body: |
     	c.Request.Header.Set("X-Signature", ComputeSignature(secret, CanonicalRequest(c, timestamp, nonce)))
     	return c
     {{ "}" }}
+
+    func TestSignaturePreservesVerifiedJWTIdentity(t *testing.T) {{ "{" }}
+        cfg := conf.SignatureConfig{{ "{" }}Enabled:true,StaticSecret:"secret"{{ "}" }}
+        c := newSignedSignatureContext(t,"secret","app-1","nonce-identity",strconv.FormatInt(time.Now().Unix(),10))
+        c.Set(ContextKeyTokenClaims, &Claims{{ "{" }}Uid:"verified-user",Roles:[]string{{ "{" }}"operator"{{ "}}" }})
+        SignatureAuth(cfg,StaticSecretResolver{{ "{" }}SecretValue:"secret"{{ "}" }})(context.Background(),c)
+        claims, ok := GetClaims(c)
+        if !ok || claims.Uid!="verified-user" || claims.AK!="app-1" || len(claims.Roles)!=1 {{ "{" }}
+            t.Fatalf("signature replaced verified JWT claims: %+v",claims)
+        {{ "}" }}
+    {{ "}" }}

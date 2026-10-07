@@ -77,3 +77,16 @@ body: |
     	{{ "}" }}
     	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
     {{ "}" }}
+
+    func (h *RoleHandler) GrantPermissions(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        var req api.GrantPermissionsToRoleReq
+        if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid); return
+        {{ "}" }}
+        if req.PermissionCodes == nil {{ "{" }} response.ErrorCode(c, response.CodeRequestParamInvalid); return {{ "}" }}
+        req.RoleId = c.Param("id")
+        if _, err := h.rbacCli.GrantPermissionsToRole(ctx, &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError); return
+        {{ "}" }}
+        response.OK(c, map[string]string{{ "{" }}"status": "assigned"{{ "}" }})
+    {{ "}" }}

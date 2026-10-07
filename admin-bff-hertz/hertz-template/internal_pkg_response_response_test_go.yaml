@@ -12,3 +12,15 @@ body: |
     		t.Fatalf("CodeNotImplemented = %d, want 10402", CodeNotImplemented)
     	{{ "}" }}
     {{ "}" }}
+
+    func TestPermissionContractHTTPStatuses(t *testing.T) {{ "{" }}
+        for _, test := range []struct {{ "{" }} code, status int {{ "}" }}{{ "{" }}
+            {{ "{" }}CodeRequestParamInvalid, 400{{ "}" }},
+            {{ "{" }}CodeUnauthorized, 401{{ "}" }},
+            {{ "{" }}CodePermissionDenied, 403{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            if got := StatusFromCode(test.code); got != test.status {{ "{" }}
+                t.Errorf("code %d returned HTTP %d, want %d", test.code, got, test.status)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}

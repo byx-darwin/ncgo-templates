@@ -26,6 +26,8 @@ TOKEN=$(jq -r '.data.access_token // empty' <<<"$login")
 test -n "$TOKEN" || { echo 'Login returned no access token' >&2; exit 1; }
 menus=$(request GET /api/v1/me/menus)
 jq -e '.data | arrays | length > 0' >/dev/null <<<"$menus"
+jq -e '[.data | .. | objects | select(has("children")) | .code] | all(. != null and . != "")' >/dev/null <<<"$menus"
+request GET /api/v1/permissions/tree >/dev/null
 jq -e '.data | .. | objects | select(.path? == "/system/user")' >/dev/null <<<"$menus"
 perms=$(request GET /api/v1/me/perms)
 jq -e '.data | arrays | length > 0' >/dev/null <<<"$perms"
@@ -56,6 +58,33 @@ rule_id=$(jq -r '.data.id // empty' <<<"$rule")
 test -n "$rule_id" || { echo "Create rule response has no ID: $rule" >&2; exit 1; }
 rules=$(request GET /api/v1/rate-limit-rules)
 jq -e --argjson id "$rule_id" '.data[] | select(.id == $id)' >/dev/null <<<"$rules"
+
+echo '==> Checking role grants, menu codes, super roles, and revocation'
+admin_token=$TOKEN
+request POST "/api/v1/roles/$role_id/permissions" '{"permission_codes":["system:view","system:user","user:read"]}' >/dev/null
+request POST "/api/v1/users/$user_id/roles" "{\"role_ids\":[\"$role_id\"]}" >/dev/null
+TOKEN=''
+limited_login=$(request POST /api/v1/auth/login "{\"username\":\"smoke_$suffix\",\"password\":\"Test@12345\"}")
+limited_token=$(jq -r '.data.access_token // empty' <<<"$limited_login")
+test -n "$limited_token"
+TOKEN=$limited_token
+request GET /api/v1/users >/dev/null
+limited_menus=$(request GET /api/v1/me/menus)
+jq -e '.data | .. | objects | select(.code? == "system:user")' >/dev/null <<<"$limited_menus"
+status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' "$BFF_URL/api/v1/users")
+test "$status" = 403 || { echo "Restricted write returned HTTP $status" >&2; exit 1; }
+TOKEN=$admin_token
+request POST "/api/v1/roles/$role_id/permissions" '{"permission_codes":["*"]}' >/dev/null
+TOKEN=$limited_token
+request GET /api/v1/roles >/dev/null
+super_perms=$(request GET /api/v1/me/perms)
+jq -e --arg code "smoke:$suffix" '.data | index($code) != null' >/dev/null <<<"$super_perms"
+TOKEN=$admin_token
+request POST "/api/v1/roles/$role_id/permissions" '{"permission_codes":[]}' >/dev/null
+TOKEN=$limited_token
+status=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$BFF_URL/api/v1/users")
+test "$status" = 403 || { echo "Revoked grant returned HTTP $status" >&2; exit 1; }
+TOKEN=$admin_token
 
 request DELETE "/api/v1/rate-limit-rules/$rule_id" >/dev/null
 request DELETE "/api/v1/permissions/$permission_id" >/dev/null

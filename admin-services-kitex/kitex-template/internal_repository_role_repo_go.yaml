@@ -173,6 +173,7 @@ body: |
     func toDomainRole(row gen.Role) *role.Role {{ "{" }}
     	r := &role.Role{{ "{" }}
     		ID:     row.ID,
+            IsSuper: row.IsSuper,
     		Code:   row.Code,
     		Name:   row.Name,
     		Status: int(row.Status),
@@ -226,4 +227,12 @@ body: |
     		return role.NotFoundError{{ "{" }}Key: fmt.Sprint(key){{ "}" }}
     	{{ "}" }}
     	return err
+    {{ "}" }}
+
+    // SetPermissionsAndSuper updates menu grants and the super flag atomically.
+    func (r *Repo) SetPermissionsAndSuper(ctx context.Context, roleID int64, ids []int64, isSuper bool) error {{ "{" }}
+        return r.WithTx(ctx, func(tx *Repo) error {{ "{" }}
+            if err := tx.AssignPermissions(ctx, roleID, ids); err != nil {{ "{" }} return err {{ "}" }}
+            return tx.q.SetRoleSuper(ctx, gen.SetRoleSuperParams{{ "{" }}ID: roleID, IsSuper: isSuper{{ "}" }})
+        {{ "}" }})
     {{ "}" }}

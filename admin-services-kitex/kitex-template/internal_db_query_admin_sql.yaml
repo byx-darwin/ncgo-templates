@@ -2,7 +2,7 @@
 path: internal/db/query/admin.sql
 update_behavior:
     type: cover
-body: |-
+body: |
     -- =============================================
     -- User queries
     -- =============================================
@@ -248,3 +248,5 @@ body: |-
     SELECT count(*) FROM rate_limit_rules
     WHERE (sqlc.narg('service')::text IS NULL OR service = sqlc.narg('service')::text)
       AND (sqlc.narg('phase')::text IS NULL OR phase = sqlc.narg('phase')::text);
+    -- name: SetRoleSuper :exec
+    UPDATE roles SET is_super = $2, updated_at = now() WHERE id = $1;

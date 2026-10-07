@@ -54,7 +54,7 @@ body: |
             children = append(children, menuNodeJSON(child))
         {{ "}" }}
         return map[string]interface{{ "{" }}{{ "}" }}{{ "{" }}
-            "id": menu.Id, "name": menu.Name, "path": menu.Path,
+            "code": menu.Code, "id": menu.Id, "name": menu.Name, "path": menu.Path,
             "icon": menu.Icon, "parent_id": menu.ParentId, "order": menu.Sort,
             "children": children,
         {{ "}" }}

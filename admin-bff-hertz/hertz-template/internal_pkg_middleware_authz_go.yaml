@@ -7,6 +7,8 @@ body: |
 
     import (
     	"context"
+        "{{.Module}}/internal/pkg/authz"
+        "{{.Module}}/internal/base/conf"
 
     	"github.com/cloudwego/hertz/pkg/app"
 
@@ -50,16 +52,21 @@ body: |
     		{{ "}" }}
 
     		claims, ok := GetClaims(c)
-    		if !ok {{ "{" }}
+            if !ok || claims == nil || claims.Uid == "" {{ "{" }}
     			response.ErrorCode(c, response.CodeUnauthorized)
     			c.Abort()
     			return
     		{{ "}" }}
 
+            if rbacCli == nil {{ "{" }}
+                response.ErrorCode(c, response.CodeInternalError)
+                c.Abort()
+                return
+            {{ "}" }}
     		resp, err := rbacCli.Enforce(ctx, &api.EnforceReq{{ "{" }}
     			Uid: claims.Uid,
     			Obj: perm,
-    			Act: "execute",
+                Act: authz.ActExecute,
     		{{ "}" }})
     		if err != nil {{ "{" }}
     			response.ErrorCode(c, response.CodeInternalError)
@@ -67,7 +74,7 @@ body: |
     			return
     		{{ "}" }}
 
-    		if !resp.Allowed {{ "{" }}
+            if resp == nil || !resp.Allowed {{ "{" }}
     			response.ErrorCode(c, response.CodePermissionDenied)
     			c.Abort()
     			return
@@ -75,4 +82,37 @@ body: |
 
     		c.Next(ctx)
     	{{ "}" }}
+    {{ "}" }}
+
+    // RouteTokenAuth authenticates every registered non-public route before the
+    // global permission gate. Public exemptions are explicit in authz.Routes.
+    func RouteTokenAuth(cfg conf.TokenConfig, verifier TokenVerifier) app.HandlerFunc {{ "{" }}
+        authenticate := TokenAuth(cfg, verifier)
+        return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+            rp, ok := authz.Lookup(string(c.Request.Method()), c.FullPath())
+            if !ok || rp.Public {{ "{" }}
+                c.Next(ctx)
+                return
+            {{ "}" }}
+            authenticate(ctx, c)
+        {{ "}" }}
+    {{ "}" }}
+
+    // EnforceRoutes denies matched routes absent from the table, including new
+    // routes that accidentally omit a guard. Unmatched paths retain Hertz's 404.
+    func EnforceRoutes(rbacCli rbacservice.Client) app.HandlerFunc {{ "{" }}
+        enforce := Authz(rbacCli)
+        return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+            if c.FullPath() == "" {{ "{" }} c.Next(ctx); return {{ "}" }}
+            rp, ok := authz.Lookup(string(c.Request.Method()), c.FullPath())
+            if !ok {{ "{" }} response.ErrorCode(c, response.CodePermissionDenied); c.Abort(); return {{ "}" }}
+            if !rp.Public {{ "{" }}
+                claims, authenticated := GetClaims(c)
+                if !authenticated || claims == nil || claims.Uid == "" {{ "{" }}
+                    response.ErrorCode(c, response.CodeUnauthorized); c.Abort(); return
+                {{ "}" }}
+            {{ "}" }}
+            SetPermission(c, rp.Code)
+            enforce(ctx, c)
+        {{ "}" }}
     {{ "}" }}

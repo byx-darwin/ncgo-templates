@@ -2,7 +2,7 @@
 path: internal/db/schema/000001_admin.sql
 update_behavior:
     type: cover
-body: |-
+body: |
     -- =============================================
     -- RBAC tables (users, roles, permissions)
     -- =============================================
@@ -22,6 +22,7 @@ body: |-
     );
 
     CREATE TABLE roles (
+        is_super BOOLEAN NOT NULL DEFAULT false,
         id BIGSERIAL PRIMARY KEY,
         code TEXT NOT NULL UNIQUE,
         name TEXT NOT NULL,
@@ -44,7 +45,7 @@ body: |-
         keep_alive BOOLEAN,
         hide_in_menu BOOLEAN,
         is_external BOOLEAN,
-        method TEXT CHECK (method IS NULL OR method IN ('GET','POST','PUT','DELETE')),
+        method TEXT CHECK (method IS NULL OR method IN ('GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS')),
         sort INTEGER,
         status INTEGER NOT NULL DEFAULT 1,
         description TEXT,

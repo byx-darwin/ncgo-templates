@@ -1,0 +1,58 @@
+# ncgo exported template — internal/handler/rbacservice/role_read_test.go
+path: internal/handler/rbacservice/role_read_test.go
+update_behavior:
+    type: skip
+body: |
+    package rbacservicehandler
+
+    import (
+    	"context"
+    	"errors"
+    	"reflect"
+    	"testing"
+
+    	rolesvc "{{.Module}}/internal/application/role"
+    	"{{.Module}}/internal/domain/role"
+    	v1 "{{.Module}}/kitex_gen/api/admin/v1"
+    )
+
+    type roleReadRepo struct {{ "{" }}
+    	rolesvc.RoleRepo
+    	err error
+    {{ "}" }}
+
+    func (r *roleReadRepo) List(context.Context, int32, int32) ([]*role.Role, error) {{ "{" }}
+    	return []*role.Role{{ "{" }}{{ "{" }}ID: 1, Code: "operator", Name: "Operator"{{ "}" }}, {{ "{" }}ID: 2, Code: "super", IsSuper: true{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+    func (r *roleReadRepo) Count(context.Context) (int64, error) {{ "{" }} return 2, nil {{ "}" }}
+    func (r *roleReadRepo) ListPermissionCodes(_ context.Context, id int64) ([]string, error) {{ "{" }}
+    	if r.err != nil {{ "{" }}
+    		return nil, r.err
+    	{{ "}" }}
+    	if id == 1 {{ "{" }}
+    		return []string{{ "{" }}"user:read", "dashboard:view"{{ "}" }}, nil
+    	{{ "}" }}
+    	return []string{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    func TestListRolesReturnsCurrentGrants(t *testing.T) {{ "{" }}
+    	h := &RBACServiceImpl{{ "{" }}role: rolesvc.New(&roleReadRepo{{ "{" }}{{ "}" }}, nil, nil, nil){{ "}" }}
+    	resp, err := h.ListRoles(context.Background(), &v1.ListRolesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
+    	if err != nil {{ "{" }}
+    		t.Fatal(err)
+    	{{ "}" }}
+    	if !reflect.DeepEqual(resp.Roles[0].Permissions, []string{{ "{" }}"user:read", "dashboard:view"{{ "}" }}) {{ "{" }}
+    		t.Fatalf("ordinary role permissions = %v, want current concrete grants", resp.Roles[0].Permissions)
+    	{{ "}" }}
+    	if !resp.Roles[1].IsSuper || !reflect.DeepEqual(resp.Roles[1].Permissions, []string{{ "{" }}"*"{{ "}" }}) {{ "{" }}
+    		t.Fatalf("super role = %+v, want is_super and wildcard", resp.Roles[1])
+    	{{ "}" }}
+    {{ "}" }}
+
+    func TestListRolesPermissionReadFailureDoesNotReturnEmptyGrants(t *testing.T) {{ "{" }}
+    	h := &RBACServiceImpl{{ "{" }}role: rolesvc.New(&roleReadRepo{{ "{" }}err: errors.New("read failed"){{ "}" }}, nil, nil, nil){{ "}" }}
+    	resp, err := h.ListRoles(context.Background(), &v1.ListRolesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
+    	if err == nil || resp != nil {{ "{" }}
+    		t.Fatalf("got resp=%+v err=%v, want an error instead of empty permissions", resp, err)
+    	{{ "}" }}
+    {{ "}" }}

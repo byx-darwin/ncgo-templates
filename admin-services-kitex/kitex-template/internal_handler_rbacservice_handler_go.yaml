@@ -166,7 +166,14 @@ body: |
     	{{ "}" }}
     	out := make([]*v1.Role, 0, len(roles))
     	for _, r := range roles {{ "{" }}
-    		out = append(out, toV1Role(r, nil))
+    		var codes []string
+    		if !r.IsSuper {{ "{" }}
+    			codes, err = s.role.GetPermissionCodes(ctx, strconv.FormatInt(r.ID, 10))
+    			if err != nil {{ "{" }}
+    				return nil, rpcerror.ToBizError(err)
+    			{{ "}" }}
+    		{{ "}" }}
+    		out = append(out, toV1Role(r, codes))
     	{{ "}" }}
     	return &v1.ListRolesResp{{ "{" }}Roles: out, Total: total{{ "}" }}, nil
     {{ "}" }}

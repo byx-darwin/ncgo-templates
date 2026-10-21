@@ -7,174 +7,215 @@ body: |
     package handler
 
     import (
-    	"context"
-    	"encoding/json"
-    	"strings"
+        "context"
+        "encoding/json"
+        "strings"
 
-    	"github.com/cloudwego/hertz/pkg/app"
-
-    	"{{.Module}}/internal/base/conf"
-    	"{{.Module}}/internal/pkg/middleware"
-    	"{{.Module}}/internal/pkg/ratelimit"
-    	"{{.Module}}/internal/pkg/response"
-    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "{{.Module}}/internal/pkg/response"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/hertz/pkg/app"
     )
 
-    type AuthHandler struct {{ "{" }}
-    	userCli  userservice.Client
-    	resolver *ratelimit.Resolver
-    	store    ratelimit.Store
-    	cfg      conf.RateLimitConfig
+    // AccountHandler forwards only request-derived credentials and client identity.
+    // Persistent session verification is mandatory even when local JWT auth is disabled.
+    type AccountHandler struct{{ "{" }} userCli userservice.Client {{ "}" }}
+
+    func NewAccountHandler(cli userservice.Client) *AccountHandler {{ "{" }} return &AccountHandler{{ "{" }}userCli: cli{{ "}" }} {{ "}" }}
+
+    type accountRequest struct {{ "{" }}
+        ClientID     string `json:"client_id"`
+        Kind         string `json:"kind"`
+        Mode         string `json:"mode"`
+        Identifier   string `json:"identifier"`
+        Credential   string `json:"credential"`
+        Purpose      string `json:"purpose"`
+        RefreshToken string `json:"refresh_token"`
+        Nickname     string `json:"nickname"`
+        Avatar       string `json:"avatar"`
+        Operation    string `json:"operation"`
+        Code         string `json:"code"`
+        Proof        string `json:"proof"`
+        NewPassword  string `json:"new_password"`
+        OldPassword  string `json:"old_password"`
+        State        string `json:"state"`
     {{ "}" }}
 
-    // NewAuthHandler builds the auth handler. resolver/store/cfg back the
-    // identifier-scoped rate-limit check that RequestPasswordReset and
-    // ConfirmPasswordReset run after parsing their request bodies — see
-    // docs/superpowers/specs/2026-09-20-ratelimit-identifier-dimension-design.md.
-    func NewAuthHandler(userCli userservice.Client, resolver *ratelimit.Resolver, store ratelimit.Store, cfg conf.RateLimitConfig) *AuthHandler {{ "{" }}
-    	return &AuthHandler{{ "{" }}userCli: userCli, resolver: resolver, store: store, cfg: cfg{{ "}" }}
+    func accountInput(c *app.RequestContext) (*accountRequest, bool) {{ "{" }}
+        r := &accountRequest{{ "{" }}{{ "}" }}
+        if len(c.Request.Body()) > 0 {{ "{" }}
+            if json.Unmarshal(c.Request.Body(), r) != nil {{ "{" }}
+                response.ErrorCode(c, response.CodeRequestParamInvalid)
+                return nil, false
+            {{ "}" }}
+        {{ "}" }}
+        client, ok := accountClient(c, r.ClientID, true)
+        if !ok {{ "{" }}
+            return nil, false
+        {{ "}" }}
+        r.ClientID = client
+        return r, true
     {{ "}" }}
-
-    type registerReq struct {{ "{" }}
-    	Username string `json:"username"`
-    	Password string `json:"password"`
+    func accountClient(c *app.RequestContext, body string, required bool) (string, bool) {{ "{" }}
+        header := strings.TrimSpace(c.Request.Header.Get("X-Client-ID"))
+        body = strings.TrimSpace(body)
+        if header != "" && body != "" && header != body {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return "", false
+        {{ "}" }}
+        if header == "" {{ "{" }}
+            header = body
+        {{ "}" }}
+        if required && header == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return "", false
+        {{ "}" }}
+        return header, true
     {{ "}" }}
-
-    func (h *AuthHandler) Register(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req registerReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	resp, err := h.userCli.Register(ctx, &userv1.RegisterReq{{ "{" }}Username: req.Username, Password: req.Password{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"uid": resp.Uid{{ "}" }})
+    func accountBearer(c *app.RequestContext) string {{ "{" }}
+        parts := strings.Fields(c.Request.Header.Get("Authorization"))
+        if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {{ "{" }}
+            return ""
+        {{ "}" }}
+        return parts[1]
     {{ "}" }}
-
-    type loginReq struct {{ "{" }}
-    	Username string `json:"username"`
-    	Password string `json:"password"`
+    func (h *AccountHandler) verify(ctx context.Context, c *app.RequestContext, client string) bool {{ "{" }}
+        if header := strings.TrimSpace(c.Request.Header.Get("X-Client-ID")); header == "" || header != client {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return false
+        {{ "}" }}
+        token := accountBearer(c)
+        if token == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenMissing)
+            return false
+        {{ "}" }}
+        session, err := h.userCli.AccountVerify(ctx, &userv1.AccountTokenReq{{ "{" }}AccessToken: token, ClientId: client{{ "}" }})
+        if err != nil || session == nil || session.Uid == "" || session.ClientId != client {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return false
+        {{ "}" }}
+        return true
     {{ "}" }}
-
-    func (h *AuthHandler) Login(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req loginReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	// Forward the end-user's IP and User-Agent so user-kitex can record
-    	// them on the login audit entry (both fields are optional; an empty
-    	// string simply means "unknown" downstream).
-    	resp, err := h.userCli.Login(ctx, &userv1.LoginReq{{ "{" }}Username: req.Username, Password: req.Password, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"uid": resp.Uid, "token": resp.Token{{ "}" }})
+    func (h *AccountHandler) SessionAuth() app.HandlerFunc {{ "{" }}
+        return func(ctx context.Context, c *app.RequestContext) {{ "{" }}
+            client := strings.TrimSpace(c.Request.Header.Get("X-Client-ID"))
+            if client == "" {{ "{" }}
+                response.ErrorCode(c, response.CodeRequestParamInvalid)
+                c.Abort()
+                return
+            {{ "}" }}
+            if !h.verify(ctx, c, client) {{ "{" }}
+                c.Abort()
+                return
+            {{ "}" }}
+            c.Next(ctx)
+        {{ "}" }}
     {{ "}" }}
-
-    type changePasswordReq struct {{ "{" }}
-    	OldPassword string `json:"old_password"`
-    	NewPassword string `json:"new_password"`
+    func accountResult(c *app.RequestContext, r any, err error) {{ "{" }}
+        if err != nil {{ "{" }}
+            response.Err(c, err)
+            return
+        {{ "}" }}
+        response.OK(c, r)
     {{ "}" }}
-
-    func (h *AuthHandler) ChangePassword(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	claims, ok := middleware.GetClaims(c)
-    	if !ok {{ "{" }}
-    		response.ErrorCode(c, response.CodeTokenInvalid)
-    		return
-    	{{ "}" }}
-    	var req changePasswordReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	// ClientIp/UserAgent feed the password-change audit entries (success
-    	// and failed-old-password) in user-kitex — see Login above.
-    	if _, err := h.userCli.ChangePassword(ctx, &userv1.ChangePasswordReq{{ "{" }}Uid: claims.Uid, OldPassword: req.OldPassword, NewPassword: req.NewPassword, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }}); err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "password_changed"{{ "}" }})
+    func (h *AccountHandler) Methods(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        client, ok := accountClient(c, "", true)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        r, e := h.userCli.AccountMethods(ctx, &userv1.AccountClientReq{{ "{" }}ClientId: client{{ "}" }})
+        accountResult(c, r, e)
     {{ "}" }}
-
-    type requestPasswordResetReq struct {{ "{" }}
-    	Identifier string `json:"identifier"`
-    	Channel    string `json:"channel"`
+    func (h *AccountHandler) Code(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        if r.Purpose != "login" && r.Purpose != "reset" {{ "{" }}
+            if !h.verify(ctx, c, r.ClientID) {{ "{" }}
+                return
+            {{ "}" }}
+        {{ "}" }}
+        v, e := h.userCli.AccountSendCode(ctx, &userv1.AccountCodeReq{{ "{" }}ClientId: r.ClientID, Kind: r.Kind, Identifier: r.Identifier, Purpose: r.Purpose, AccessToken: accountBearer(c), ClientIp: c.ClientIP(){{ "}" }})
+        accountResult(c, v, e)
     {{ "}" }}
-
-    func (h *AuthHandler) RequestPasswordReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req requestPasswordResetReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_request_identifier", h.cfg.PasswordResetRequestIdentifier, strings.TrimSpace(req.Identifier)) {{ "{" }}
-    		return
-    	{{ "}" }}
-    	if _, err := h.userCli.RequestPasswordReset(ctx, &userv1.RequestPasswordResetReq{{ "{" }}Identifier: req.Identifier, Channel: req.Channel{{ "}" }}); err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	// Always the same success body, regardless of whether identifier
-    	// matched an account — see usersvc.RequestPasswordReset's doc comment.
-    	response.OK(c, map[string]string{{ "{" }}"status": "reset_requested"{{ "}" }})
+    func (h *AccountHandler) Login(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountLogin(ctx, &userv1.AccountLoginReq{{ "{" }}ClientId: r.ClientID, Kind: r.Kind, Mode: r.Mode, Identifier: r.Identifier, Credential: r.Credential, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }})
+        accountResult(c, v, e)
     {{ "}" }}
-
-    type confirmPasswordResetReq struct {{ "{" }}
-    	Credential  string `json:"credential"`
-    	NewPassword string `json:"new_password"`
-    	Phone       string `json:"phone"`
+    func (h *AccountHandler) Refresh(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountRefresh(ctx, &userv1.AccountRefreshReq{{ "{" }}ClientId: r.ClientID, RefreshToken: r.RefreshToken{{ "}" }})
+        accountResult(c, v, e)
     {{ "}" }}
-
-    func (h *AuthHandler) ConfirmPasswordReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req confirmPasswordResetReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	if !h.checkIdentifierRateLimit(ctx, c, "password_reset_confirm_identifier", h.cfg.PasswordResetConfirmIdentifier, strings.TrimSpace(req.Phone)) {{ "{" }}
-    		return
-    	{{ "}" }}
-    	if _, err := h.userCli.ConfirmPasswordReset(ctx, &userv1.ConfirmPasswordResetReq{{ "{" }}Credential: req.Credential, NewPassword: req.NewPassword, Phone: req.Phone{{ "}" }}); err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
+    func (h *AccountHandler) Logout(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountLogout(ctx, &userv1.AccountTokenReq{{ "{" }}ClientId: r.ClientID, AccessToken: accountBearer(c){{ "}" }})
+        accountResult(c, v, e)
     {{ "}" }}
-
-    // checkIdentifierRateLimit runs the identifier-scoped fine-grained
-    // rate-limit check for phase, using identifier (already trimmed by the
-    // caller) alongside the caller's IP. It writes the rate-limited error
-    // response and returns false when the request must be rejected;
-    // otherwise it returns true and writes nothing. A disabled phaseCfg or an
-    // empty resolver/store (e.g. not wired up by the caller) is treated as
-    // "allow" — this mirrors the middleware's own FailOpen-style behavior
-    // for the coarse IP check, applied here to the fine-grained check.
-    func (h *AuthHandler) checkIdentifierRateLimit(ctx context.Context, c *app.RequestContext, phase string, phaseCfg conf.RateLimitPhaseConfig, identifier string) bool {{ "{" }}
-    	if !phaseCfg.Enabled || h.resolver == nil || h.store == nil || identifier == "" {{ "{" }}
-    		return true
-    	{{ "}" }}
-    	lookup := ratelimit.Lookup{{ "{" }}
-    		Phase:      phase,
-    		ClientIP:   c.ClientIP(),
-    		Identifier: identifier,
-    	{{ "}" }}
-    	allowed, err := ratelimit.Check(ctx, h.resolver, h.store, h.cfg, lookup)
-    	if err != nil {{ "{" }}
-    		if h.cfg.FailOpen {{ "{" }}
-    			return true
-    		{{ "}" }}
-    		response.ErrorCode(c, response.CodeCacheUnavailable)
-    		return false
-    	{{ "}" }}
-    	if !allowed {{ "{" }}
-    		response.ErrorCode(c, response.CodeRateLimited)
-    		return false
-    	{{ "}" }}
-    	return true
+    func (h *AccountHandler) Me(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountProfile(ctx, &userv1.AccountTokenReq{{ "{" }}ClientId: r.ClientID, AccessToken: accountBearer(c){{ "}" }})
+        accountResult(c, v, e)
+    {{ "}" }}
+    func (h *AccountHandler) UpdateMe(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountUpdateProfile(ctx, &userv1.AccountProfileReq{{ "{" }}ClientId: r.ClientID, AccessToken: accountBearer(c), Nickname: r.Nickname, Avatar: r.Avatar{{ "}" }})
+        accountResult(c, v, e)
+    {{ "}" }}
+    func (h *AccountHandler) Reauthenticate(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountReauthenticate(ctx, &userv1.AccountProofReq{{ "{" }}ClientId: r.ClientID, AccessToken: accountBearer(c), Kind: r.Kind, Mode: r.Mode, Identifier: r.Identifier, Credential: r.Credential, ClientIp: c.ClientIP(){{ "}" }})
+        accountResult(c, v, e)
+    {{ "}" }}
+    func (h *AccountHandler) Contact(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountContact(ctx, &userv1.AccountContactReq{{ "{" }}ClientId: r.ClientID, AccessToken: accountBearer(c), Kind: r.Kind, Operation: r.Operation, Identifier: r.Identifier, Code: r.Code, Proof: r.Proof, ClientIp: c.ClientIP(){{ "}" }})
+        accountResult(c, v, e)
+    {{ "}" }}
+    func (h *AccountHandler) Password(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountPassword(ctx, &userv1.AccountPasswordReq{{ "{" }}ClientId: r.ClientID, AccessToken: accountBearer(c), NewPassword: r.NewPassword, OldPassword: r.OldPassword, Proof: r.Proof{{ "}" }})
+        accountResult(c, v, e)
+    {{ "}" }}
+    func (h *AccountHandler) RequestReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        _, e := h.userCli.AccountSendCode(ctx, &userv1.AccountCodeReq{{ "{" }}ClientId: r.ClientID, Kind: r.Kind, Identifier: r.Identifier, Purpose: "reset", ClientIp: c.ClientIP(){{ "}" }})
+        accountResult(c, map[string]string{{ "{" }}"status": "ok"{{ "}" }}, e)
+    {{ "}" }}
+    func (h *AccountHandler) ConfirmReset(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        _, e := h.userCli.AccountResetPassword(ctx, &userv1.AccountResetReq{{ "{" }}ClientId: r.ClientID, Kind: r.Kind, Identifier: r.Identifier, Code: r.Code, NewPassword: r.NewPassword, ClientIp: c.ClientIP(){{ "}" }})
+        accountResult(c, map[string]string{{ "{" }}"status": "ok"{{ "}" }}, e)
     {{ "}" }}

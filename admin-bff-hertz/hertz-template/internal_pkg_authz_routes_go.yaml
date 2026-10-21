@@ -11,14 +11,17 @@ body: |
     // store representative display values only: a code can cover multiple routes.
     type RoutePerm struct {{ "{" }}
         Method string
-        Path string
-        Code string
+        Path   string
+        Code   string
         Public bool // anonymous; empty code alone still requires authentication
-        Menu string
+        Menu   string
         Button string // shared code for an optional UI action
     {{ "}" }}
 
     var Routes = []RoutePerm{{ "{" }}
+        {{ "{" }}Method: "GET", Path: "/api/v1/auth-configs", Code: "auth-config:read", Menu: "system:auth"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth-configs", Code: "auth-config:update", Menu: "system:auth", Button: "auth-config:update"{{ "}" }},
+        {{ "{" }}Method: "POST", Path: "/api/v1/auth-configs/:id/test", Code: "auth-config:test", Menu: "system:auth", Button: "auth-config:test"{{ "}" }},
         {{ "{" }}Method: "POST", Path: "/api/v1/auth/login", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
         {{ "{" }}Method: "POST", Path: "/api/v1/auth/refresh", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
         {{ "{" }}Method: "POST", Path: "/api/v1/auth/dingtalk/login", Code: "", Public: true, Menu: "", Button: ""{{ "}" }},
@@ -69,8 +72,10 @@ body: |
     func Lookup(method, path string) (RoutePerm, bool) {{ "{" }}
         for _, routes := range [][]RoutePerm{{ "{" }}Routes, NonProtoExempt{{ "}" }} {{ "{" }}
             for _, rp := range routes {{ "{" }}
-                if rp.Method == method && rp.Path == path {{ "{" }} return rp, true {{ "}" }}
+                if rp.Method == method && rp.Path == path {{ "{" }}
+                    return rp, true
+                {{ "}" }}
             {{ "}" }}
         {{ "}" }}
-        return RoutePerm{{ "{}" }}, false
+        return RoutePerm{{ "{" }}{{ "}" }}, false
     {{ "}" }}

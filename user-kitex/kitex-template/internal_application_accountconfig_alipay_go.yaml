@@ -1,0 +1,190 @@
+# ncgo exported template — internal/application/accountconfig/alipay.go
+path: internal/application/accountconfig/alipay.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "context"
+        "crypto"
+        "crypto/rand"
+        "crypto/rsa"
+        "crypto/sha256"
+        "crypto/x509"
+        "encoding/base64"
+        "encoding/hex"
+        "encoding/json"
+        "encoding/pem"
+        "errors"
+        "net/url"
+        "sort"
+        "strings"
+        "time"
+    )
+
+    func keyBytes(raw string) ([]byte, error) {{ "{" }}
+        if block, _ := pem.Decode([]byte(raw)); block != nil {{ "{" }}
+            return block.Bytes, nil
+        {{ "}" }}
+        der, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(raw), ""))
+        if err != nil || len(der) == 0 {{ "{" }}
+            return nil, errors.New("invalid RSA credential")
+        {{ "}" }}
+        return der, nil
+    {{ "}" }}
+    func parsePrivateKey(raw string) (*rsa.PrivateKey, error) {{ "{" }}
+        der, err := keyBytes(raw)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        key, err := x509.ParsePKCS1PrivateKey(der)
+        if err != nil {{ "{" }}
+            parsed, e := x509.ParsePKCS8PrivateKey(der)
+            if e != nil {{ "{" }}
+                return nil, errors.New("invalid RSA private key")
+            {{ "}" }}
+            var ok bool
+            key, ok = parsed.(*rsa.PrivateKey)
+            if !ok {{ "{" }}
+                return nil, errors.New("credential must be RSA")
+            {{ "}" }}
+        {{ "}" }}
+        if key.N.BitLen() < 2048 || key.Validate() != nil {{ "{" }}
+            return nil, errors.New("RSA key must have at least 2048 bits")
+        {{ "}" }}
+        return key, nil
+    {{ "}" }}
+    func parsePublicKey(raw string) (*rsa.PublicKey, error) {{ "{" }}
+        der, err := keyBytes(raw)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        parsed, err := x509.ParsePKIXPublicKey(der)
+        if err != nil {{ "{" }}
+            key, e := x509.ParsePKCS1PublicKey(der)
+            if e != nil {{ "{" }}
+                return nil, errors.New("invalid RSA public key")
+            {{ "}" }}
+            parsed = key
+        {{ "}" }}
+        key, ok := parsed.(*rsa.PublicKey)
+        if !ok || key.N.BitLen() < 2048 {{ "{" }}
+            return nil, errors.New("RSA public key must have at least 2048 bits")
+        {{ "}" }}
+        return key, nil
+    {{ "}" }}
+    func (m *Manager) alipayRequest(ctx context.Context, c Config, method string, params url.Values) (json.RawMessage, error) {{ "{" }}
+        private, err := parsePrivateKey(c.Secret["private_key"])
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        public, err := parsePublicKey(c.Secret["public_key"])
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        q := url.Values{{ "{" }}"app_id": {{ "{" }}c.Settings["client_id"]{{ "}" }}, "method": {{ "{" }}method{{ "}" }}, "format": {{ "{" }}"JSON"{{ "}" }}, "charset": {{ "{" }}"utf-8"{{ "}" }}, "sign_type": {{ "{" }}"RSA2"{{ "}" }}, "timestamp": {{ "{" }}time.Now().In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05"){{ "}" }}, "version": {{ "{" }}"1.0"{{ "}" }}{{ "}" }}
+        for k, v := range params {{ "{" }}
+            q[k] = v
+        {{ "}" }}
+        keys := make([]string, 0, len(q))
+        for k := range q {{ "{" }}
+            keys = append(keys, k)
+        {{ "}" }}
+        sort.Strings(keys)
+        parts := make([]string, 0, len(keys))
+        for _, k := range keys {{ "{" }}
+            if q.Get(k) != "" {{ "{" }}
+                parts = append(parts, k+"="+q.Get(k))
+            {{ "}" }}
+        {{ "}" }}
+        digest := sha256.Sum256([]byte(strings.Join(parts, "&")))
+        signature, err := rsa.SignPKCS1v15(rand.Reader, private, crypto.SHA256, digest[:])
+        if err != nil {{ "{" }}
+            return nil, errors.New("Alipay request signing failed")
+        {{ "}" }}
+        q.Set("sign", base64.StdEncoding.EncodeToString(signature))
+        raw, err := m.request(ctx, "POST", "https://openapi.alipay.com/gateway.do", strings.NewReader(q.Encode()), formHeaders())
+        if err != nil {{ "{" }}
+            return nil, errors.New("Alipay API request failed")
+        {{ "}" }}
+        var envelope map[string]json.RawMessage
+        if json.Unmarshal(raw, &envelope) != nil {{ "{" }}
+            return nil, errors.New("Alipay response is invalid")
+        {{ "}" }}
+        body := envelope[strings.ReplaceAll(method, ".", "_")+"_response"]
+        var sig string
+        if len(body) == 0 || json.Unmarshal(envelope["sign"], &sig) != nil {{ "{" }}
+            return nil, errors.New("Alipay signed response is missing")
+        {{ "}" }}
+        decoded, err := base64.StdEncoding.DecodeString(sig)
+        if err != nil {{ "{" }}
+            return nil, errors.New("Alipay response signature is invalid")
+        {{ "}" }}
+        digest = sha256.Sum256(body)
+        if rsa.VerifyPKCS1v15(public, crypto.SHA256, digest[:], decoded) != nil {{ "{" }}
+            return nil, errors.New("Alipay response signature verification failed")
+        {{ "}" }}
+        return body, nil
+    {{ "}" }}
+    func (m *Manager) exchangeAlipay(ctx context.Context, c Config, code string) (ExternalIdentity, error) {{ "{" }}
+        raw, err := m.alipayRequest(ctx, c, "alipay.system.oauth.token", url.Values{{ "{" }}"grant_type": {{ "{" }}"authorization_code"{{ "}" }}, "code": {{ "{" }}code{{ "}" }}{{ "}" }})
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        var token struct {{ "{" }}
+            Code        string `json:"code"`
+            UserID      string `json:"user_id"`
+            AccessToken string `json:"access_token"`
+        {{ "}" }}
+        if json.Unmarshal(raw, &token) != nil || (token.Code != "" && token.Code != "10000") || token.UserID == "" || token.AccessToken == "" || len(token.UserID) > 512 {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("Alipay authorization response is invalid")
+        {{ "}" }}
+        identity := ExternalIdentity{{ "{" }}Subject: token.UserID{{ "}" }}
+        if !strings.Contains(valueOr(c.Settings["scopes"], "auth_user"), "auth_user") {{ "{" }}
+            return identity, nil
+        {{ "}" }}
+        raw, err = m.alipayRequest(ctx, c, "alipay.user.info.share", url.Values{{ "{" }}"auth_token": {{ "{" }}token.AccessToken{{ "}" }}{{ "}" }})
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        var user struct {{ "{" }}
+            Code     string `json:"code"`
+            UserID   string `json:"user_id"`
+            Nickname string `json:"nick_name"`
+            Avatar   string `json:"avatar"`
+        {{ "}" }}
+        if json.Unmarshal(raw, &user) != nil || user.Code != "10000" || user.UserID != token.UserID {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("Alipay identity response is invalid")
+        {{ "}" }}
+        identity.Nickname = profileText(user.Nickname)
+        identity.Avatar = profileAvatar(user.Avatar)
+        return identity, nil
+    {{ "}" }}
+
+    // alipayAuthInfo creates the SDK request locally; private keys stay on the server.
+    // Parameter contract: https://developer.alibaba.com/docs/doc.htm?articleId=105327&docType=1&treeId=218
+    func alipayAuthInfo(c Config, state string) (string, error) {{ "{" }}
+        key, err := parsePrivateKey(c.Secret["private_key"])
+        if err != nil {{ "{" }}
+            return "", err
+        {{ "}" }}
+        requestID := sha256.Sum256([]byte(state))
+        q := url.Values{{ "{" }}"apiname": {{ "{" }}"com.alipay.account.auth"{{ "}" }}, "method": {{ "{" }}"alipay.open.auth.sdk.code.get"{{ "}" }}, "app_id": {{ "{" }}c.Settings["client_id"]{{ "}" }}, "app_name": {{ "{" }}"mc"{{ "}" }}, "biz_type": {{ "{" }}"openservice"{{ "}" }}, "pid": {{ "{" }}c.Settings["pid"]{{ "}" }}, "product_id": {{ "{" }}"APP_FAST_LOGIN"{{ "}" }}, "scope": {{ "{" }}"kuaijie"{{ "}" }}, "target_id": {{ "{" }}hex.EncodeToString(requestID[:16]){{ "}" }}, "auth_type": {{ "{" }}"AUTHACCOUNT"{{ "}" }}, "sign_type": {{ "{" }}"RSA2"{{ "}" }}{{ "}" }}
+        keys := make([]string, 0, len(q))
+        for key := range q {{ "{" }}
+            keys = append(keys, key)
+        {{ "}" }}
+        sort.Strings(keys)
+        parts := make([]string, 0, len(keys))
+        for _, key := range keys {{ "{" }}
+            parts = append(parts, key+"="+q.Get(key))
+        {{ "}" }}
+        digest := sha256.Sum256([]byte(strings.Join(parts, "&")))
+        signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
+        if err != nil {{ "{" }}
+            return "", errors.New("Alipay native authorization signing failed")
+        {{ "}" }}
+        q.Set("sign", base64.StdEncoding.EncodeToString(signature))
+        return q.Encode(), nil
+    {{ "}" }}

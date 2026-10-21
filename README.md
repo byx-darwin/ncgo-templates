@@ -23,7 +23,7 @@ The registry URL defaults to this repository; override with `--registry <url>` o
 | `base-hertz` | Standard Hertz HTTP service (DDD layered layout + JWT + signature + idempotency) | ✅ `ncgo new --kind hertz --template base-hertz` |
 | `ratelimit-hertz` | Hertz HTTP service with rate limiting execution (two-phase: pre-auth + post-auth) | ✅ `ncgo new --kind hertz --template ratelimit-hertz` |
 | `admin-bff-hertz` | Admin BFF with RBAC authorization and terminal-user management (JWT + Casbin + gRPC to authority + user-kitex) | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
-| `user-bff-hertz` | End-user HTTP gateway (local login + third-party OAuth login, one-time code JWT exchange, account bind/unbind) | ✅ `ncgo new --kind hertz --template user-bff-hertz` |
+| `user-bff-hertz` | End-user HTTP gateway (phone/email code and password login, configured OAuth apps, device sessions and identity management) | ✅ `ncgo new --kind hertz --template user-bff-hertz` |
 
 ### RPC Services (Kitex)
 
@@ -31,7 +31,7 @@ The registry URL defaults to this repository; override with `--registry <url>` o
 |---|---|---|
 | `base-kitex` | Standard Kitex RPC service (layered layout + health check) | ✅ `ncgo new --kind kitex --template base-kitex` |
 | `rbac-kitex` | RBAC + auth authority service (DDD, Casbin sqlc adapter, JWT login, audit) | ✅ `ncgo new --kind kitex --template rbac-kitex` |
-| `user-kitex` | End-user account service (local password + wechat/alipay/github/google/oidc third-party login, admin management RPCs) | ✅ `ncgo new --kind kitex --template user-kitex` |
+| `user-kitex` | End-user account service (phone/email code/password + dynamic multi-app OAuth, persistent sessions and admin channel configuration) | ✅ `ncgo new --kind kitex --template user-kitex` |
 | `admin-services-kitex` | Merged admin authority (RBAC + Rule Center in one service) | ✅ `ncgo new --kind kitex --template admin-services-kitex` |
 | `rule-center` | Rate-limit rule-center service (standalone) | ⚠️ asset-ready; use `admin-services-kitex` for merged version |
 

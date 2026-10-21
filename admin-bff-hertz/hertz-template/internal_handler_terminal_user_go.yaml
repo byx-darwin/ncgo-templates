@@ -7,208 +7,236 @@ body: |
     package handler
 
     import (
-    	"context"
-    	"encoding/json"
-    	"strconv"
+        "context"
+        "encoding/json"
+        "strconv"
 
-    	"github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/app"
 
-    	"{{.Module}}/internal/pkg/middleware"
-    	"{{.Module}}/internal/pkg/response"
-    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/response"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     type TerminalUserHandler struct {{ "{" }}
-    	userCli userservice.Client
+        userCli userservice.Client
     {{ "}" }}
 
     func NewTerminalUserHandler(userCli userservice.Client) *TerminalUserHandler {{ "{" }}
-    	return &TerminalUserHandler{{ "{" }}userCli: userCli{{ "}" }}
+        return &TerminalUserHandler{{ "{" }}userCli: userCli{{ "}" }}
+    {{ "}" }}
+
+    // terminalAccountJSON keeps the account profile contract stable even when a
+    // contact is absent. Username is retained only for older management clients.
+    type terminalAccountJSON struct {{ "{" }}
+        UID      string `json:"uid"`
+        Nickname string `json:"nickname"`
+        Phone    string `json:"phone"`
+        Email    string `json:"email"`
+        Avatar   string `json:"avatar"`
+        Status   int32  `json:"status"`
+        Username string `json:"username,omitempty"`
+    {{ "}" }}
+
+    func terminalAccount(item *userv1.UserItem) *terminalAccountJSON {{ "{" }}
+        if item == nil {{ "{" }}
+            return nil
+        {{ "}" }}
+        return &terminalAccountJSON{{ "{" }}UID: item.Uid, Nickname: item.Nickname, Phone: item.Phone, Email: item.Email, Avatar: item.Avatar, Status: item.Status, Username: item.Username{{ "}" }}
     {{ "}" }}
 
     func (h *TerminalUserHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	limit := int32(20)
-    	offset := int32(0)
-    	if v := string(c.Query("limit")); v != "" {{ "{" }}
-    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
-    			limit = int32(n)
-    		{{ "}" }}
-    	{{ "}" }}
-    	if v := string(c.Query("offset")); v != "" {{ "{" }}
-    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
-    			offset = int32(n)
-    		{{ "}" }}
-    	{{ "}" }}
+        limit := int32(20)
+        offset := int32(0)
+        if v := string(c.Query("limit")); v != "" {{ "{" }}
+            if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+                limit = int32(n)
+            {{ "}" }}
+        {{ "}" }}
+        if v := string(c.Query("offset")); v != "" {{ "{" }}
+            if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+                offset = int32(n)
+            {{ "}" }}
+        {{ "}" }}
 
-    	resp, err := h.userCli.ListUsers(ctx, &userv1.ListUsersReq{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
-    	response.OK(c, resp)
+        resp, err := h.userCli.ListUsers(ctx, &userv1.ListUsersReq{{ "{" }}Limit: limit, Offset: offset{{ "}" }})
+        if err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
+        users := make([]*terminalAccountJSON, 0, len(resp.Users))
+        for _, item := range resp.Users {{ "{" }}
+            users = append(users, terminalAccount(item))
+        {{ "}" }}
+        response.OK(c, map[string]any{{ "{" }}"users": users, "total": resp.Total{{ "}" }})
     {{ "}" }}
 
     func (h *TerminalUserHandler) Get(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	uid := c.Param("uid")
-    	if uid == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
+        uid := c.Param("uid")
+        if uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
 
-    	userResp, err := h.userCli.GetUser(ctx, &userv1.GetUserReq{{ "{" }}Uid: uid{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
+        userResp, err := h.userCli.GetUser(ctx, &userv1.GetUserReq{{ "{" }}Uid: uid{{ "}" }})
+        if err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
 
-    	identitiesResp, err := h.userCli.ListUserIdentities(ctx, &userv1.ListUserIdentitiesReq{{ "{" }}Uid: uid{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
+        identitiesResp, err := h.userCli.ListUserIdentities(ctx, &userv1.ListUserIdentitiesReq{{ "{" }}Uid: uid{{ "}" }})
+        if err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
 
-    	response.OK(c, map[string]any{{ "{" }}
-    		"user":       userResp.User,
-    		"identities": identitiesResp.Identities,
-    	{{ "}" }})
+        response.OK(c, map[string]any{{ "{" }}
+            "user":       terminalAccount(userResp.User),
+            "identities": identitiesResp.Identities,
+        {{ "}" }})
     {{ "}" }}
 
     func (h *TerminalUserHandler) Ban(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	uid := c.Param("uid")
-    	if uid == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
+        uid := c.Param("uid")
+        if uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
 
-    	// operatorUID is the calling admin, forwarded so user-kitex records the
-    	// audit entry with actor_uid = the operator and target = uid. These
-    	// routes sit behind TokenAuth + RBAC so claims are normally present; an
-    	// empty value is tolerated rather than failing an already-authorized
-    	// request (user-kitex then attributes the action to the target, as it
-    	// did before operator_uid existed). Extracted inline rather than via a
-    	// package-level helper because this template is loop_service.
-    	operatorUID := ""
-    	if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
-    		operatorUID = claims.Uid
-    	{{ "}" }}
+        // operatorUID is the calling admin, forwarded so user-kitex records the
+        // audit entry with actor_uid = the operator and target = uid. These
+        // routes sit behind TokenAuth + RBAC so claims are normally present; an
+        // empty value is tolerated rather than failing an already-authorized
+        // request (user-kitex then attributes the action to the target, as it
+        // did before operator_uid existed). Extracted inline rather than via a
+        // package-level helper because this template is loop_service.
+        operatorUID := ""
+        if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
+            operatorUID = claims.Uid
+        {{ "}" }}
 
-    	if _, err := h.userCli.BanUser(ctx, &userv1.BanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
+        if _, err := h.userCli.BanUser(ctx, &userv1.BanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
 
-    	// Ban carries an implicit "force logout" per this plan's design: a
-    	// banned account should not keep using an already-issued token. A
-    	// ForceLogout failure here does not roll back the ban (the ban
-    	// itself, recorded in user-kitex's own database, is the source of
-    	// truth and already succeeded) — it's surfaced to the caller as a
-    	// concern rather than an outright failure, since ForceLogout is a
-    	// best-effort revoke (see user-kitex's own noopBlacklist fallback
-    	// when Redis is disabled — it's designed to degrade, not to be
-    	// load-bearing for the ban itself).
-    	logoutErr := ""
-    	if _, err := h.userCli.ForceLogout(ctx, &userv1.ForceLogoutReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		logoutErr = err.Error()
-    	{{ "}" }}
-    	response.OK(c, map[string]any{{ "{" }}"banned": true, "force_logout_error": logoutErr{{ "}" }})
+        // Ban carries an implicit "force logout" per this plan's design: a
+        // banned account should not keep using an already-issued token. A
+        // ForceLogout failure here does not roll back the ban (the ban
+        // itself, recorded in user-kitex's own database, is the source of
+        // truth and already succeeded) — it's surfaced to the caller as a
+        // concern rather than an outright failure, since ForceLogout is a
+        // best-effort revoke (see user-kitex's own noopBlacklist fallback
+        // when Redis is disabled — it's designed to degrade, not to be
+        // load-bearing for the ban itself).
+        logoutErr := ""
+        if _, err := h.userCli.ForceLogout(ctx, &userv1.ForceLogoutReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
+            logoutErr = err.Error()
+        {{ "}" }}
+        response.OK(c, map[string]any{{ "{" }}"banned": true, "force_logout_error": logoutErr{{ "}" }})
     {{ "}" }}
 
     func (h *TerminalUserHandler) Unban(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	uid := c.Param("uid")
-    	if uid == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
+        uid := c.Param("uid")
+        if uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
 
-    	// See Ban's operatorUID comment.
-    	operatorUID := ""
-    	if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
-    		operatorUID = claims.Uid
-    	{{ "}" }}
+        // See Ban's operatorUID comment.
+        operatorUID := ""
+        if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
+            operatorUID = claims.Uid
+        {{ "}" }}
 
-    	if _, err := h.userCli.UnbanUser(ctx, &userv1.UnbanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "unbanned"{{ "}" }})
+        if _, err := h.userCli.UnbanUser(ctx, &userv1.UnbanUserReq{{ "{" }}Uid: uid, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
+        response.OK(c, map[string]string{{ "{" }}"status": "unbanned"{{ "}" }})
     {{ "}" }}
 
     func (h *TerminalUserHandler) UnbindIdentity(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	uid := c.Param("uid")
-    	provider := c.Param("provider")
-    	if uid == "" || provider == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
+        uid := c.Param("uid")
+        provider := c.Param("provider")
+        if uid == "" || provider == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
 
-    	if _, err := h.userCli.AdminUnbindProvider(ctx, &userv1.AdminUnbindProviderReq{{ "{" }}Uid: uid, Provider: provider{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "unbound"{{ "}" }})
+        claims, ok := middleware.GetClaims(c)
+        if !ok || claims == nil || claims.Uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return
+        {{ "}" }}
+        if _, err := h.userCli.AdminUnbindProvider(ctx, &userv1.AdminUnbindProviderReq{{ "{" }}Uid: uid, Provider: provider, OperatorUid: claims.Uid{{ "}" }}); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
+        response.OK(c, map[string]string{{ "{" }}"status": "unbound"{{ "}" }})
     {{ "}" }}
 
     type resetPasswordRequest struct {{ "{" }}
-    	NewPassword string `json:"new_password"`
+        NewPassword string `json:"new_password"`
     {{ "}" }}
 
     func (h *TerminalUserHandler) ResetPassword(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	uid := c.Param("uid")
-    	if uid == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	var req resetPasswordRequest
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	// See Ban's operatorUID comment.
-    	operatorUID := ""
-    	if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
-    		operatorUID = claims.Uid
-    	{{ "}" }}
-    	if _, err := h.userCli.ResetPassword(ctx, &userv1.ResetPasswordReq{{ "{" }}Uid: uid, NewPassword: req.NewPassword, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
+        uid := c.Param("uid")
+        if uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        var req resetPasswordRequest
+        if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        // See Ban's operatorUID comment.
+        operatorUID := ""
+        if claims, ok := middleware.GetClaims(c); ok {{ "{" }}
+            operatorUID = claims.Uid
+        {{ "}" }}
+        if _, err := h.userCli.ResetPassword(ctx, &userv1.ResetPasswordReq{{ "{" }}Uid: uid, NewPassword: req.NewPassword, OperatorUid: operatorUID{{ "}" }}); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
+        response.OK(c, map[string]string{{ "{" }}"status": "password_reset"{{ "}" }})
     {{ "}" }}
 
     func (h *TerminalUserHandler) ListAuditLogs(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	uid := c.Param("uid")
-    	if uid == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	limit := int32(20)
-    	offset := int32(0)
-    	if v := string(c.Query("limit")); v != "" {{ "{" }}
-    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
-    			limit = int32(n)
-    		{{ "}" }}
-    	{{ "}" }}
-    	if v := string(c.Query("offset")); v != "" {{ "{" }}
-    		if n, err := strconv.Atoi(v); err == nil {{ "{" }}
-    			offset = int32(n)
-    		{{ "}" }}
-    	{{ "}" }}
-    	req := &userv1.ListAuditLogsReq{{ "{" }}
-    		// The path uid is the SUBJECT of the query, not strictly the actor:
-    		// user-kitex matches it against actor_uid OR target, so this returns
-    		// both the user's own actions and admin actions taken against them.
-    		ActorUid:  uid,
-    		Action:    string(c.Query("action")),
-    		StartTime: string(c.Query("start_time")),
-    		EndTime:   string(c.Query("end_time")),
-    		Limit:     limit,
-    		Offset:    offset,
-    	{{ "}" }}
-    	resp, err := h.userCli.ListAuditLogs(ctx, req)
-    	if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-    		return
-    	{{ "}" }}
-    	response.OK(c, resp)
+        uid := c.Param("uid")
+        if uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        limit := int32(20)
+        offset := int32(0)
+        if v := string(c.Query("limit")); v != "" {{ "{" }}
+            if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+                limit = int32(n)
+            {{ "}" }}
+        {{ "}" }}
+        if v := string(c.Query("offset")); v != "" {{ "{" }}
+            if n, err := strconv.Atoi(v); err == nil {{ "{" }}
+                offset = int32(n)
+            {{ "}" }}
+        {{ "}" }}
+        req := &userv1.ListAuditLogsReq{{ "{" }}
+            // The path uid is the SUBJECT of the query, not strictly the actor:
+            // user-kitex matches it against actor_uid OR target, so this returns
+            // both the user's own actions and admin actions taken against them.
+            ActorUid:  uid,
+            Action:    string(c.Query("action")),
+            StartTime: string(c.Query("start_time")),
+            EndTime:   string(c.Query("end_time")),
+            Limit:     limit,
+            Offset:    offset,
+        {{ "}" }}
+        resp, err := h.userCli.ListAuditLogs(ctx, req)
+        if err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
+        response.OK(c, resp)
     {{ "}" }}

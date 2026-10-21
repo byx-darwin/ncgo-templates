@@ -1,0 +1,282 @@
+# ncgo exported template — internal/application/account/oauth.go
+path: internal/application/account/oauth.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "crypto/sha256"
+        "encoding/base64"
+        "encoding/json"
+        "errors"
+        "strings"
+        "time"
+
+        "{{.Module}}/internal/application/accountconfig"
+        "github.com/google/uuid"
+        "github.com/jackc/pgx/v5"
+    )
+
+    func returnURL(c accountconfig.Config, requested string) (string, error) {{ "{" }}
+        var allowed []string
+        if json.Unmarshal([]byte(c.Settings["return_urls"]), &allowed) != nil || len(allowed) == 0 {{ "{" }}
+            return "", ErrInput
+        {{ "}" }}
+        if requested == "" {{ "{" }}
+            requested = allowed[0]
+        {{ "}" }}
+        for _, v := range allowed {{ "{" }}
+            if v == requested && v != "" {{ "{" }}
+                return v, nil
+            {{ "}" }}
+        {{ "}" }}
+        return "", ErrInput
+    {{ "}" }}
+    func (s *Service) OAuthStart(ctx context.Context, in OAuthStartInput) (OAuthStartResult, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if !validClient(in.ClientID) {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, ErrInput
+        {{ "}" }}
+        if in.Purpose == "" {{ "{" }}
+            in.Purpose = "login"
+        {{ "}" }}
+        if in.Purpose != "login" && in.Purpose != "bind" && in.Purpose != "reauth" && in.Purpose != "replace" {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, ErrInput
+        {{ "}" }}
+        cfg, e := s.config.Enabled(ctx, in.ConfigID, in.ClientID)
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        redirect, e := returnURL(cfg, in.ReturnURL)
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        session := Session{{ "{" }}{{ "}" }}
+        if in.Purpose != "login" {{ "{" }}
+            session, e = s.Verify(ctx, in.AccessToken, in.ClientID)
+            if e != nil {{ "{" }}
+                return OAuthStartResult{{ "{" }}{{ "}" }}, e
+            {{ "}" }}
+        {{ "}" }}
+        state, e := randomToken()
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        nonce, e := randomToken()
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        verifier, e := randomToken()
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        challengeHash := sha256.Sum256([]byte(verifier))
+        challenge := base64.RawURLEncoding.EncodeToString(challengeHash[:])
+        url, e := s.config.OAuthStart(ctx, cfg, state, nonce, challenge)
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        if in.Purpose != "login" {{ "{" }}
+            if _, e = s.lockSession(ctx, tx, session); e != nil {{ "{" }}
+                return OAuthStartResult{{ "{" }}{{ "}" }}, e
+            {{ "}" }}
+            if in.Purpose == "bind" || in.Purpose == "replace" {{ "{" }}
+                if e = s.consumeProof(ctx, tx, in.Proof, session); e != nil {{ "{" }}
+                    return OAuthStartResult{{ "{" }}{{ "}" }}, e
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "INSERT INTO account_oauth_states(hash,config_id,client_id,purpose,user_id,session_id,return_url,verifier,nonce,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)", hash(state), cfg.ID, in.ClientID, in.Purpose, session.UID, session.ID, redirect, verifier, nonce, s.now().Add(10*time.Minute)); e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = tx.Commit(ctx); e != nil {{ "{" }}
+            return OAuthStartResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        flow := cfg.Settings["mode"]
+        if flow == "" {{ "{" }}
+            flow = "web"
+        {{ "}" }}
+        out := OAuthStartResult{{ "{" }}RedirectURL: url, State: state, Flow: flow, AppID: cfg.Settings["client_id"]{{ "}" }}
+        if cfg.Provider == "alipay" && flow == "app" {{ "{" }}
+            out.AuthInfo = url
+            out.RedirectURL = ""
+        {{ "}" }}
+        return out, nil
+    {{ "}" }}
+    func (s *Service) OAuthComplete(ctx context.Context, in OAuthCompleteInput) (OAuthResult, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if in.State == "" || len(in.State) > 200 || in.Code == "" || len(in.Code) > 8192 {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, ErrInput
+        {{ "}" }}
+        var cfgID, client, purpose, uid, sid, url, verifier, nonce string
+        e := s.pool.QueryRow(ctx, `DELETE FROM account_oauth_states WHERE hash=$1 AND expires_at>$2 RETURNING config_id,client_id,purpose,user_id,session_id,return_url,verifier,nonce`, hash(in.State), s.now()).Scan(&cfgID, &client, &purpose, &uid, &sid, &url, &verifier, &nonce)
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        if e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if (in.ClientID != "" && in.ClientID != client) || (in.ConfigID != "" && in.ConfigID != cfgID) {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        cfg, e := s.config.Enabled(ctx, cfgID, client)
+        if e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if _, e = returnURL(cfg, url); e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = s.limit(ctx, "oauth:ip:"+in.IP, 100, 15*time.Minute); e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        external, e := s.config.OAuthExchange(ctx, cfg, in.Code, verifier, nonce)
+        if e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, errors.New("account: third-party authorization failed")
+        {{ "}" }}
+        if external.Subject == "" || len(external.Subject) > 512 {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "oauth:"+cfgID+":"+external.Subject); e != nil {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        var owner string
+        e = tx.QueryRow(ctx, "SELECT user_id::text FROM account_identities WHERE config_id=$1 AND subject=$2", cfgID, external.Subject).Scan(&owner)
+        if e != nil && !errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return OAuthResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        out := OAuthResult{{ "{" }}ReturnURL: url, Purpose: purpose, ClientID: client{{ "}" }}
+        if purpose == "login" {{ "{" }}
+            isNew := owner == ""
+            if isNew {{ "{" }}
+                id, err := uuid.NewV7()
+                if err != nil {{ "{" }}
+                    return out, err
+                {{ "}" }}
+                owner = id.String()
+                nickname := strings.TrimSpace(external.Nickname)
+                if nickname == "" || len([]rune(nickname)) > 64 {{ "{" }}
+                    nickname = "用户" + id.String()[:8]
+                {{ "}" }}
+                avatar := external.Avatar
+                if !strings.HasPrefix(avatar, "https://") || len(avatar) > 2048 {{ "{" }}
+                    avatar = ""
+                {{ "}" }}
+                if _, e = tx.Exec(ctx, "INSERT INTO users(id,nickname,avatar) VALUES($1,$2,$3)", owner, nickname, avatar); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+                if _, e = tx.Exec(ctx, "INSERT INTO account_identities(config_id,user_id,subject) VALUES($1,$2,$3)", cfgID, owner, external.Subject); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+            {{ "}" }}
+            u, err := lockUser(ctx, tx, owner)
+            if err != nil {{ "{" }}
+                return out, err
+            {{ "}" }}
+            if u.Status != 1 {{ "{" }}
+                return out, ErrInvalid
+            {{ "}" }}
+            // Identity mutations lock the user before changing ownership. Recheck
+            // after that lock so a callback cannot resurrect a removed identity.
+            var stillOwned bool
+            if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM account_identities WHERE config_id=$1 AND subject=$2 AND user_id=$3)", cfgID, external.Subject, owner).Scan(&stillOwned); e != nil {{ "{" }}
+                return out, e
+            {{ "}" }}
+            if !stillOwned {{ "{" }}
+                return out, ErrInvalid
+            {{ "}" }}
+            grant, err := s.createGrant(ctx, tx, owner, client, cfgID, "login", "", isNew)
+            if err != nil {{ "{" }}
+                return out, err
+            {{ "}" }}
+            out.ExchangeCode = grant
+            if e = audit(ctx, tx, owner, "account.oauth_login", cfgID); e != nil {{ "{" }}
+                return out, e
+            {{ "}" }}
+        {{ "}" }} else {{ "{" }}
+            session := Session{{ "{" }}UID: uid, ID: sid, ClientID: client{{ "}" }}
+            if _, e = s.lockSession(ctx, tx, session); e != nil {{ "{" }}
+                return out, e
+            {{ "}" }}
+            owner = ""
+            e = tx.QueryRow(ctx, "SELECT user_id::text FROM account_identities WHERE config_id=$1 AND subject=$2", cfgID, external.Subject).Scan(&owner)
+            if e != nil && !errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+                return out, e
+            {{ "}" }}
+            switch purpose {{ "{" }}
+            case "bind":
+                if owner != "" && owner != uid {{ "{" }}
+                    return out, ErrConflict
+                {{ "}" }}
+                if owner == "" {{ "{" }}
+                    var already bool
+                    if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM account_identities WHERE user_id=$1 AND config_id=$2)", uid, cfgID).Scan(&already); e != nil {{ "{" }}
+                        return out, e
+                    {{ "}" }}
+                    if already {{ "{" }}
+                        return out, ErrConflict
+                    {{ "}" }}
+                    if _, e = tx.Exec(ctx, "INSERT INTO account_identities(config_id,user_id,subject) VALUES($1,$2,$3)", cfgID, uid, external.Subject); e != nil {{ "{" }}
+                        return out, e
+                    {{ "}" }}
+                {{ "}" }}
+                if e = audit(ctx, tx, uid, "account.oauth_bind", cfgID); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+
+            case "replace":
+                if owner != "" {{ "{" }}
+                    return out, ErrConflict
+                {{ "}" }}
+                var previous string
+                if e = tx.QueryRow(ctx, "SELECT subject FROM account_identities WHERE user_id=$1 AND config_id=$2 FOR UPDATE", uid, cfgID).Scan(&previous); e != nil {{ "{" }}
+                    return out, ErrInput
+                {{ "}" }}
+                if previous == external.Subject {{ "{" }}
+                    return out, ErrInput
+                {{ "}" }}
+                if _, e = tx.Exec(ctx, "UPDATE account_identities SET subject=$1 WHERE user_id=$2 AND config_id=$3", external.Subject, uid, cfgID); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+                if _, e = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", uid); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+                if _, e = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", uid); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+                if e = audit(ctx, tx, uid, "account.oauth_replace", cfgID); e != nil {{ "{" }}
+                    return out, e
+                {{ "}" }}
+            case "reauth":
+                if owner != uid {{ "{" }}
+                    return out, ErrInvalid
+                {{ "}" }}
+                grant, err := s.createGrant(ctx, tx, uid, client, cfgID, "reauth", sid, false)
+                if err != nil {{ "{" }}
+                    return out, err
+                {{ "}" }}
+                out.ExchangeCode = grant
+            default:
+                return out, ErrInput
+            {{ "}" }}
+        {{ "}" }}
+        if e = tx.Commit(ctx); e != nil {{ "{" }}
+            return out, e
+        {{ "}" }}
+        return out, nil
+    {{ "}" }}

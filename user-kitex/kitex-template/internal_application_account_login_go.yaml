@@ -1,0 +1,305 @@
+# ncgo exported template — internal/application/account/login.go
+path: internal/application/account/login.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "crypto/hmac"
+        "crypto/sha256"
+        "encoding/hex"
+        "errors"
+        "strings"
+        "sync"
+        "time"
+
+        auth "{{.Module}}/internal/infrastructure/auth"
+        "github.com/google/uuid"
+        "github.com/jackc/pgx/v5"
+    )
+
+    var dummy struct {{ "{" }}
+        sync.Once
+        hash string
+    {{ "}" }}
+
+    func dummyHash() string {{ "{" }}
+        dummy.Do(func() {{ "{" }} dummy.hash, _ = auth.HashPassword("unused-account-password") {{ "}" }})
+        return dummy.hash
+    {{ "}" }}
+    func (s *Service) codeKey(client, kind, id, purpose, uid string) string {{ "{" }}
+        return hash(strings.Join([]string{{ "{" }}s.environment, client, kind, id, purpose, uid{{ "}" }}, "\x00"))
+    {{ "}" }}
+    func (s *Service) codeHash(key, code string) string {{ "{" }}
+        h := hmac.New(sha256.New, s.key)
+        h.Write([]byte(key + "\x00" + code))
+        return hex.EncodeToString(h.Sum(nil))
+    {{ "}" }}
+    func (s *Service) limit(ctx context.Context, key string, max int, window time.Duration) error {{ "{" }}
+        var n int
+        e := s.pool.QueryRow(ctx, `INSERT INTO account_limits(key,window_start,count) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET count=CASE WHEN account_limits.window_start<=$3 THEN 1 ELSE account_limits.count+1 END,window_start=CASE WHEN account_limits.window_start<=$3 THEN $2 ELSE account_limits.window_start END RETURNING count`, s.environment+":"+hash(key), s.now(), s.now().Add(-window)).Scan(&n)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if n > max {{ "{" }}
+            return ErrRate
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func (s *Service) allowContact(ctx context.Context, client, kind string) error {{ "{" }}
+        if e := s.config.Allowed(ctx, client, kind+"_code"); e == nil {{ "{" }}
+            return nil
+        {{ "}" }}
+        return s.config.Allowed(ctx, client, kind+"_password")
+    {{ "}" }}
+    func (s *Service) SendCode(ctx context.Context, in CodeInput) error {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        id, e := Normalize(in.Kind, in.Identifier)
+        if e != nil || !validClient(in.ClientID) {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        uid := ""
+        switch in.Purpose {{ "{" }}
+        case "login":
+            if e = s.config.Allowed(ctx, in.ClientID, in.Kind+"_code"); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        case "reset":
+            if e = s.allowContact(ctx, in.ClientID, in.Kind); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        case "reauth", "bind", "replace":
+            session, err := s.Verify(ctx, in.AccessToken, in.ClientID)
+            if err != nil {{ "{" }}
+                return err
+            {{ "}" }}
+            uid = session.UID
+            if e = s.allowContact(ctx, in.ClientID, in.Kind); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        default:
+            return ErrInput
+        {{ "}" }}
+        if e = s.limit(ctx, "send:ip:"+in.IP, s.policy.SendIPHourly, time.Hour); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = s.limit(ctx, "send:subject:"+in.Kind+":"+id, s.policy.SendSubjectHourly, time.Hour); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if in.Purpose == "reauth" {{ "{" }}
+            u, err := readUser(s.pool.QueryRow(ctx, "SELECT "+userColumns+" FROM users WHERE id=$1", uid))
+            if err != nil {{ "{" }}
+                return err
+            {{ "}" }}
+            if (in.Kind == "phone" && u.Phone != id) || (in.Kind == "email" && u.Email != id) {{ "{" }}
+                return ErrInvalid
+            {{ "}" }}
+        {{ "}" }}
+        key := s.codeKey(in.ClientID, in.Kind, id, in.Purpose, uid)
+        code, e := numericCode()
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        tag, e := s.pool.Exec(ctx, `INSERT INTO account_codes(key,code_hash,sent_at,expires_at) VALUES($1,$2,$3,$4) ON CONFLICT(key) DO UPDATE SET code_hash=$2,sent_at=$3,expires_at=$4,attempts=0,consumed=false WHERE account_codes.sent_at<=$5`, key, s.codeHash(key, code), s.now(), s.now().Add(CodeTTL), s.now().Add(-60*time.Second))
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if tag.RowsAffected() == 0 {{ "{" }}
+            return ErrRate
+        {{ "}" }}
+        if in.Purpose == "reset" {{ "{" }}
+            var exists bool
+            column := "email"
+            if in.Kind == "phone" {{ "{" }}
+                column = "phone"
+            {{ "}" }}
+            if e = s.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE "+column+"=$1 AND status=1)", id).Scan(&exists); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if !exists {{ "{" }}
+                return nil
+            {{ "}" }}
+        {{ "}" }}
+        if e = s.config.SendCode(ctx, in.Kind, id, in.Purpose, code); e != nil {{ "{" }}
+            _, _ = s.pool.Exec(ctx, "UPDATE account_codes SET consumed=true WHERE key=$1 AND code_hash=$2", key, s.codeHash(key, code))
+            if in.Purpose == "reset" {{ "{" }}
+                return nil
+            {{ "}" }}
+            return errors.New("account: verification delivery unavailable")
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+
+    func (s *Service) consumeCode(ctx context.Context, client, kind, id, purpose, uid, code string) error {{ "{" }}
+        key := s.codeKey(client, kind, id, purpose, uid)
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        var expected string
+        var attempts int
+        var consumed bool
+        var expiry time.Time
+        e = tx.QueryRow(ctx, "SELECT code_hash,attempts,consumed,expires_at FROM account_codes WHERE key=$1 FOR UPDATE", key).Scan(&expected, &attempts, &consumed, &expiry)
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return ErrInvalid
+        {{ "}" }}
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if consumed || attempts >= 5 || !expiry.After(s.now()) {{ "{" }}
+            return ErrInvalid
+        {{ "}" }}
+        if !hmac.Equal([]byte(expected), []byte(s.codeHash(key, code))) {{ "{" }}
+            if _, e = tx.Exec(ctx, "UPDATE account_codes SET attempts=attempts+1 WHERE key=$1", key); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if e = tx.Commit(ctx); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            return ErrInvalid
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "UPDATE account_codes SET consumed=true WHERE key=$1", key); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        return tx.Commit(ctx)
+    {{ "}" }}
+
+    func (s *Service) Login(ctx context.Context, in LoginInput) (Tokens, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        id, e := Normalize(in.Kind, in.Identifier)
+        if e != nil || !validClient(in.ClientID) || (in.Mode != "code" && in.Mode != "password") {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInput
+        {{ "}" }}
+        if e = s.config.Allowed(ctx, in.ClientID, in.Kind+"_"+in.Mode); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = s.limit(ctx, "verify:ip:"+in.IP, s.policy.VerifyIPQuarterHour, 15*time.Minute); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = s.limit(ctx, "verify:subject:"+id, s.policy.VerifySubjectQuarterHour, 15*time.Minute); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if in.Mode == "code" {{ "{" }}
+            if e = s.consumeCode(ctx, in.ClientID, in.Kind, id, "login", "", in.Credential); e != nil {{ "{" }}
+                return Tokens{{ "{" }}{{ "}" }}, e
+            {{ "}" }}
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", in.Kind+":"+id); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        column := "email"
+        if in.Kind == "phone" {{ "{" }}
+            column = "phone"
+        {{ "}" }}
+        u, e := readUser(tx.QueryRow(ctx, "SELECT "+userColumns+" FROM users WHERE "+column+"=$1 FOR UPDATE", id))
+        isNew := false
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            if in.Mode == "password" {{ "{" }}
+                _, _ = auth.VerifyPassword(in.Credential, dummyHash())
+                return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+            {{ "}" }}
+            key, err := uuid.NewV7()
+            if err != nil {{ "{" }}
+                return Tokens{{ "{" }}{{ "}" }}, err
+            {{ "}" }}
+            u = userRow{{ "{" }}ID: key.String(), Nickname: "用户" + key.String()[:8], Status: 1{{ "}" }}
+            if _, e = tx.Exec(ctx, "INSERT INTO users(id,nickname,"+column+") VALUES($1,$2,$3)", u.ID, u.Nickname, id); e != nil {{ "{" }}
+                return Tokens{{ "{" }}{{ "}" }}, e
+            {{ "}" }}
+            isNew = true
+        {{ "}" }} else if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if u.Status != 1 {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        if in.Mode == "password" {{ "{" }}
+            stored := u.Password
+            if stored == "" {{ "{" }}
+                stored = dummyHash()
+            {{ "}" }}
+            ok, err := auth.VerifyPassword(in.Credential, stored)
+            if err != nil || !ok || u.Password == "" {{ "{" }}
+                return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+            {{ "}" }}
+        {{ "}" }}
+        tokens, e := s.newSession(ctx, tx, u.ID, in.ClientID, isNew)
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = audit(ctx, tx, u.ID, "account.login", u.ID); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = tx.Commit(ctx); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        return tokens, nil
+    {{ "}" }}
+
+    func (s *Service) ResetPassword(ctx context.Context, in ResetInput) error {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        id, e := Normalize(in.Kind, in.Identifier)
+        if e != nil || !validClient(in.ClientID) || !validPassword(in.NewPassword) {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        if e = s.allowContact(ctx, in.ClientID, in.Kind); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = s.limit(ctx, "reset:ip:"+in.IP, s.policy.VerifyIPQuarterHour, 15*time.Minute); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = s.limit(ctx, "reset:subject:"+id, s.policy.VerifySubjectQuarterHour, 15*time.Minute); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = s.consumeCode(ctx, in.ClientID, in.Kind, id, "reset", "", in.Code); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        hashed, e := auth.HashPassword(in.NewPassword)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        column := "email"
+        if in.Kind == "phone" {{ "{" }}
+            column = "phone"
+        {{ "}" }}
+        u, e := readUser(tx.QueryRow(ctx, "SELECT "+userColumns+" FROM users WHERE "+column+"=$1 FOR UPDATE", id))
+        if errors.Is(e, pgx.ErrNoRows) || u.Status != 1 {{ "{" }}
+            return ErrInvalid
+        {{ "}" }}
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "UPDATE users SET password_hash=$1,updated_at=now() WHERE id=$2", hashed, u.ID); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", u.ID); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", u.ID); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = audit(ctx, tx, u.ID, "account.password_reset", u.ID); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        return tx.Commit(ctx)
+    {{ "}" }}

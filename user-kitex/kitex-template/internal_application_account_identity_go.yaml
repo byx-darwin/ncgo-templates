@@ -1,0 +1,313 @@
+# ncgo exported template — internal/application/account/identity.go
+path: internal/application/account/identity.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "{{.Module}}/internal/application/accountconfig"
+        "time"
+
+        auth "{{.Module}}/internal/infrastructure/auth"
+        "github.com/jackc/pgx/v5"
+    )
+
+    func (s *Service) newProof(ctx context.Context, uid, sid, method string) (string, error) {{ "{" }}
+        proof, e := randomToken()
+        if e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        tag, e := s.pool.Exec(ctx, "INSERT INTO account_proofs(hash,user_id,session_id,expires_at,method) SELECT $1,$2,$3,$4,$6 FROM account_sessions WHERE id=$3 AND user_id=$2 AND expires_at>$5", hash(proof), uid, sid, s.now().Add(5*time.Minute), s.now(), method)
+        if e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        if tag.RowsAffected() != 1 {{ "{" }}
+            return "", ErrInvalid
+        {{ "}" }}
+        return proof, nil
+    {{ "}" }}
+    func (s *Service) Reauthenticate(ctx context.Context, in ProofInput) (string, error) {{ "{" }}
+        session, e := s.Verify(ctx, in.AccessToken, in.ClientID)
+        if e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        if e = s.limit(ctx, "reauth:ip:"+in.IP, 100, 15*time.Minute); e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        if e = s.limit(ctx, "reauth:"+session.UID, 25, 15*time.Minute); e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        u, e := readUser(s.pool.QueryRow(ctx, "SELECT "+userColumns+" FROM users WHERE id=$1", session.UID))
+        if e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        switch in.Mode {{ "{" }}
+        case "password":
+            ok, err := auth.VerifyPassword(in.Credential, u.Password)
+            if err != nil || !ok {{ "{" }}
+                return "", ErrInvalid
+            {{ "}" }}
+        case "code":
+            id, err := Normalize(in.Kind, in.Identifier)
+            if err != nil {{ "{" }}
+                return "", err
+            {{ "}" }}
+            if (in.Kind == "phone" && u.Phone != id) || (in.Kind == "email" && u.Email != id) {{ "{" }}
+                return "", ErrInvalid
+            {{ "}" }}
+            if e = s.allowContact(ctx, in.ClientID, in.Kind); e != nil {{ "{" }}
+                return "", e
+            {{ "}" }}
+            if e = s.consumeCode(ctx, in.ClientID, in.Kind, id, "reauth", session.UID, in.Credential); e != nil {{ "{" }}
+                return "", e
+            {{ "}" }}
+        default:
+            return "", ErrInput
+        {{ "}" }}
+        method := in.Mode
+        if in.Mode == "code" {{ "{" }}
+            method = in.Kind
+        {{ "}" }}
+        return s.newProof(ctx, session.UID, session.ID, method)
+    {{ "}" }}
+    func (s *Service) consumeProof(ctx context.Context, tx pgx.Tx, proof string, session Session) error {{ "{" }}
+        return s.consumeProofKinds(ctx, tx, proof, session, nil)
+    {{ "}" }}
+    func (s *Service) consumeProofKinds(ctx context.Context, tx pgx.Tx, proof string, session Session, kinds []string) error {{ "{" }}
+        if proof == "" {{ "{" }}
+            return ErrInvalid
+        {{ "}" }}
+        tag, e := tx.Exec(ctx, "DELETE FROM account_proofs WHERE hash=$1 AND user_id=$2 AND session_id=$3 AND expires_at>$4 AND ($5::text[] IS NULL OR method=ANY($5))", hash(proof), session.UID, session.ID, s.now(), kinds)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if tag.RowsAffected() != 1 {{ "{" }}
+            return ErrInvalid
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func (s *Service) lockSession(ctx context.Context, tx pgx.Tx, session Session) (userRow, error) {{ "{" }}
+        u, e := lockUser(ctx, tx, session.UID)
+        if e != nil {{ "{" }}
+            return u, e
+        {{ "}" }}
+        if u.Status != 1 {{ "{" }}
+            return u, ErrInvalid
+        {{ "}" }}
+        var ok bool
+        e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM account_sessions WHERE id=$1 AND user_id=$2 AND client_id=$3 AND environment=$4 AND expires_at>$5)", session.ID, session.UID, session.ClientID, s.environment, s.now()).Scan(&ok)
+        if e != nil {{ "{" }}
+            return u, e
+        {{ "}" }}
+        if !ok {{ "{" }}
+            return u, ErrInvalid
+        {{ "}" }}
+        return u, nil
+    {{ "}" }}
+    func (s *Service) Contact(ctx context.Context, in ContactInput) error {{ "{" }}
+        session, e := s.Verify(ctx, in.AccessToken, in.ClientID)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e := s.limit(ctx, "contact:ip:"+in.IP, 100, 15*time.Minute); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if in.Kind != "phone" && in.Kind != "email" && in.Kind != "oauth" {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        if in.Operation != "bind" && in.Operation != "replace" && in.Operation != "unbind" {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        id := ""
+        if in.Kind == "oauth" {{ "{" }}
+            if in.Operation != "unbind" || in.Identifier == "" {{ "{" }}
+                return ErrInput
+            {{ "}" }}
+            id = in.Identifier
+        {{ "}" }} else if in.Operation != "unbind" {{ "{" }}
+            id, e = Normalize(in.Kind, in.Identifier)
+            if e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if e = s.allowContact(ctx, in.ClientID, in.Kind); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if e = s.limit(ctx, "contact:subject:"+id, 25, 15*time.Minute); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if e = s.consumeCode(ctx, in.ClientID, in.Kind, id, in.Operation, session.UID, in.Code); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        {{ "}" }}
+        policy, e := s.config.Methods(ctx, in.ClientID)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        if id != "" && in.Kind != "oauth" {{ "{" }}
+            if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", in.Kind+":"+id); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        {{ "}" }}
+        u, e := s.lockSession(ctx, tx, session)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = s.consumeProof(ctx, tx, in.Proof, session); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if in.Kind == "oauth" {{ "{" }}
+            tag, err := tx.Exec(ctx, "DELETE FROM account_identities WHERE user_id=$1 AND config_id=$2", u.ID, id)
+            if err != nil {{ "{" }}
+                return err
+            {{ "}" }}
+            if tag.RowsAffected() != 1 {{ "{" }}
+                return ErrInput
+            {{ "}" }}
+        {{ "}" }} else {{ "{" }}
+            column := in.Kind
+            old := u.Email
+            if column == "phone" {{ "{" }}
+                old = u.Phone
+            {{ "}" }}
+            if in.Operation == "bind" && old != "" {{ "{" }}
+                return ErrConflict
+            {{ "}" }}
+            if in.Operation == "replace" && (old == "" || old == id) {{ "{" }}
+                return ErrInput
+            {{ "}" }}
+            if in.Operation == "unbind" && old == "" {{ "{" }}
+                return ErrInput
+            {{ "}" }}
+            if id != "" {{ "{" }}
+                var taken bool
+                if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE "+column+"=$1 AND id<>$2)", id, u.ID).Scan(&taken); e != nil {{ "{" }}
+                    return e
+                {{ "}" }}
+                if taken {{ "{" }}
+                    return ErrConflict
+                {{ "}" }}
+            {{ "}" }}
+            if _, e = tx.Exec(ctx, "UPDATE users SET "+column+"=NULLIF($1,''),updated_at=now() WHERE id=$2", id, u.ID); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        {{ "}" }}
+        if in.Operation == "unbind" || in.Operation == "replace" {{ "{" }}
+            if e = s.hasUsableIdentity(ctx, tx, u.ID, policy); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if _, e = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", u.ID); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if _, e = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", u.ID); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        {{ "}" }}
+        if e = audit(ctx, tx, u.ID, "account.identity_"+in.Operation, in.Kind); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        return tx.Commit(ctx)
+    {{ "}" }}
+    func (s *Service) hasUsableIdentity(ctx context.Context, tx pgx.Tx, uid string, policy []accountconfig.Method) error {{ "{" }}
+        u, e := lockUser(ctx, tx, uid)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        allowed := map[string]bool{{ "{" }}{{ "}" }}
+        oauth := map[string]bool{{ "{" }}{{ "}" }}
+        for _, m := range policy {{ "{" }}
+            if m.Kind == "oauth" {{ "{" }}
+                oauth[m.ID] = true
+            {{ "}" }} else {{ "{" }}
+                allowed[m.Kind] = true
+            {{ "}" }}
+        {{ "}" }}
+        if u.Phone != "" && (allowed["phone_code"] || (u.Password != "" && allowed["phone_password"])) {{ "{" }}
+            return nil
+        {{ "}" }}
+        if u.Email != "" && (allowed["email_code"] || (u.Password != "" && allowed["email_password"])) {{ "{" }}
+            return nil
+        {{ "}" }}
+        rows, e := tx.Query(ctx, "SELECT config_id FROM account_identities WHERE user_id=$1", uid)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        var ids []string
+        for rows.Next() {{ "{" }}
+            var id string
+            if e = rows.Scan(&id); e != nil {{ "{" }}
+                rows.Close()
+                return e
+            {{ "}" }}
+            ids = append(ids, id)
+        {{ "}" }}
+        rows.Close()
+        if e = rows.Err(); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        for _, id := range ids {{ "{" }}
+            if oauth[id] {{ "{" }}
+                return nil
+            {{ "}" }}
+        {{ "}" }}
+        return ErrLastIdentity
+    {{ "}" }}
+    func (s *Service) Password(ctx context.Context, in PasswordInput) error {{ "{" }}
+        session, e := s.Verify(ctx, in.AccessToken, in.ClientID)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if !validPassword(in.NewPassword) {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        if e = s.limit(ctx, "password:"+session.UID, 20, 15*time.Minute); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        hashed, e := auth.HashPassword(in.NewPassword)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        u, e := s.lockSession(ctx, tx, session)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if u.Phone == "" && u.Email == "" {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        if u.Password == "" {{ "{" }}
+            if e = s.consumeProofKinds(ctx, tx, in.Proof, session, []string{{ "{" }}"phone", "email"{{ "}" }}); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        {{ "}" }} else {{ "{" }}
+            ok, err := auth.VerifyPassword(in.OldPassword, u.Password)
+            if err != nil || !ok {{ "{" }}
+                return ErrInvalid
+            {{ "}" }}
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "UPDATE users SET password_hash=$1,updated_at=now() WHERE id=$2", hashed, u.ID); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if u.Password != "" {{ "{" }}
+            if _, e = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", u.ID); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+            if _, e = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", u.ID); e != nil {{ "{" }}
+                return e
+            {{ "}" }}
+        {{ "}" }}
+        if e = audit(ctx, tx, u.ID, "account.password_set", u.ID); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        return tx.Commit(ctx)
+    {{ "}" }}

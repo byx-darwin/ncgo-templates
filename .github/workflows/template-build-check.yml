@@ -152,3 +152,41 @@ jobs:
       - name: Vet
         working-directory: /tmp/scratch-${{ matrix.name }}
         run: go vet ./...
+
+  application-account-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: account-test
+          POSTGRES_DB: account_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - name: Export GOPATH
+        run: echo "GOPATH=$(go env GOPATH)" >> "$GITHUB_ENV"
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '25.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install generators
+        run: |
+          go install github.com/byx-darwin/ncgo@e964198c816f
+          go install github.com/cloudwego/hertz/cmd/hz@v0.9.7
+          go install github.com/cloudwego/kitex/tool/cmd/kitex@v0.16.3
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: Verify application account participants with PostgreSQL
+        env:
+          ACCOUNT_TEST_DSN: postgres://postgres:account-test@127.0.0.1:5432/account_test?sslmode=disable
+        run: bash scripts/test-application-accounts.sh

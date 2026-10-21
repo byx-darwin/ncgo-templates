@@ -1,0 +1,202 @@
+# ncgo exported template — internal/application/accountconfig/delivery.go
+path: internal/application/accountconfig/delivery.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "context"
+        "crypto/hmac"
+        "crypto/sha1" // Aliyun RPC authentication requires HMAC-SHA1.
+        "crypto/sha256"
+        "crypto/tls"
+        "encoding/base64"
+        "encoding/hex"
+        "encoding/json"
+        "errors"
+        "fmt"
+        "mime"
+        "net"
+        "net/mail"
+        "net/smtp"
+        "net/url"
+        "sort"
+        "strconv"
+        "strings"
+        "time"
+    )
+
+    func (m *Manager) deliver(ctx context.Context, c Config, to, purpose, code string) error {{ "{" }}
+        switch c.Kind {{ "{" }}
+        case "sms":
+            return m.sendSMS(ctx, c, to, purpose, code)
+        case "smtp":
+            return m.sendEmail(ctx, c, to, purpose, code)
+        default:
+            return errors.New("unsupported delivery transport")
+        {{ "}" }}
+    {{ "}" }}
+    func percent(s string) string {{ "{" }} return strings.ReplaceAll(url.QueryEscape(s), "+", "%20") {{ "}" }}
+    func (m *Manager) sendSMS(ctx context.Context, c Config, to, purpose, code string) error {{ "{" }}
+        if !phonePattern.MatchString(to) || !validCode(code) || !validPurpose(purpose) {{ "{" }}
+            return errors.New("invalid SMS destination or verification code")
+        {{ "}" }}
+        templateID := valueOr(c.Settings["template_"+purpose], c.Settings["template_id"])
+        if strings.TrimSpace(templateID) == "" {{ "{" }}
+            return errors.New("SMS purpose has no configured template")
+        {{ "}" }}
+        settings := make(map[string]string, len(c.Settings)+1)
+        for key, value := range c.Settings {{ "{" }}
+            settings[key] = value
+        {{ "}" }}
+        settings["template_id"] = templateID
+        c.Settings = settings
+        switch c.Provider {{ "{" }}
+        case "aliyun":
+            return m.sendAliyun(ctx, c, to, code)
+        case "tencent":
+            return m.sendTencent(ctx, c, to, code)
+        default:
+            return errors.New("unsupported SMS provider")
+        {{ "}" }}
+    {{ "}" }}
+    func (m *Manager) sendAliyun(ctx context.Context, c Config, to, code string) error {{ "{" }}
+        template, _ := json.Marshal(map[string]string{{ "{" }}valueOr(c.Settings["code_parameter"], "code"): code{{ "}" }})
+        q := url.Values{{ "{" }}"Action": {{ "{" }}"SendSms"{{ "}" }}, "Version": {{ "{" }}"2017-05-25"{{ "}" }}, "Format": {{ "{" }}"JSON"{{ "}" }}, "AccessKeyId": {{ "{" }}c.Secret["access_key_id"]{{ "}" }}, "SignatureMethod": {{ "{" }}"HMAC-SHA1"{{ "}" }}, "SignatureVersion": {{ "{" }}"1.0"{{ "}" }}, "SignatureNonce": {{ "{" }}randomID(){{ "}" }}, "Timestamp": {{ "{" }}time.Now().UTC().Format("2006-01-02T15:04:05Z"){{ "}" }}, "RegionId": {{ "{" }}valueOr(c.Settings["region"], "cn-hangzhou"){{ "}" }}, "PhoneNumbers": {{ "{" }}strings.TrimPrefix(to, "+86"){{ "}" }}, "SignName": {{ "{" }}c.Settings["sign_name"]{{ "}" }}, "TemplateCode": {{ "{" }}c.Settings["template_id"]{{ "}" }}, "TemplateParam": {{ "{" }}string(template){{ "}" }}{{ "}" }}
+        keys := make([]string, 0, len(q))
+        for key := range q {{ "{" }}
+            keys = append(keys, key)
+        {{ "}" }}
+        sort.Strings(keys)
+        parts := make([]string, 0, len(keys))
+        for _, key := range keys {{ "{" }}
+            parts = append(parts, percent(key)+"="+percent(q.Get(key)))
+        {{ "}" }}
+        mac := hmac.New(sha1.New, []byte(c.Secret["access_key_secret"]+"&"))
+        mac.Write([]byte("POST&%2F&" + percent(strings.Join(parts, "&"))))
+        q.Set("Signature", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+        raw, err := m.request(ctx, "POST", "https://dysmsapi.aliyuncs.com/", strings.NewReader(q.Encode()), formHeaders())
+        if err != nil {{ "{" }}
+            return errors.New("Aliyun SMS delivery request failed")
+        {{ "}" }}
+        var response struct{{ "{" }} Code string {{ "}" }}
+        if json.Unmarshal(raw, &response) != nil || response.Code != "OK" {{ "{" }}
+            return errors.New("Aliyun SMS delivery was rejected")
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func sha256hex(b []byte) string {{ "{" }} v := sha256.Sum256(b); return hex.EncodeToString(v[:]) {{ "}" }}
+    func hmac256(key []byte, s string) []byte {{ "{" }}
+        mac := hmac.New(sha256.New, key)
+        mac.Write([]byte(s))
+        return mac.Sum(nil)
+    {{ "}" }}
+    func (m *Manager) sendTencent(ctx context.Context, c Config, to, code string) error {{ "{" }}
+        body, _ := json.Marshal(struct {{ "{" }}
+            PhoneNumberSet   []string
+            SmsSdkAppId      string
+            SignName         string
+            TemplateId       string
+            TemplateParamSet []string
+        {{ "}" }}{{ "{" }}[]string{{ "{" }}to{{ "}" }}, c.Settings["sdk_app_id"], c.Settings["sign_name"], c.Settings["template_id"], []string{{ "{" }}code{{ "}" }}{{ "}" }})
+        now := time.Now().UTC()
+        date := now.Format("2006-01-02")
+        timestamp := strconv.FormatInt(now.Unix(), 10)
+        scope := date + "/sms/tc3_request"
+        canonical := "POST\n/\n\ncontent-type:application/json; charset=utf-8\nhost:sms.tencentcloudapi.com\n\ncontent-type;host\n" + sha256hex(body)
+        signing := hmac256(hmac256(hmac256([]byte("TC3"+c.Secret["secret_key"]), date), "sms"), "tc3_request")
+        signature := hex.EncodeToString(hmac256(signing, "TC3-HMAC-SHA256\n"+timestamp+"\n"+scope+"\n"+sha256hex([]byte(canonical))))
+        headers := map[string]string{{ "{" }}"Content-Type": "application/json; charset=utf-8", "Authorization": "TC3-HMAC-SHA256 Credential=" + c.Secret["secret_id"] + "/" + scope + ", SignedHeaders=content-type;host, Signature=" + signature, "X-TC-Action": "SendSms", "X-TC-Version": "2021-01-11", "X-TC-Region": valueOr(c.Settings["region"], "ap-guangzhou"), "X-TC-Timestamp": timestamp{{ "}" }}
+        raw, err := m.request(ctx, "POST", "https://sms.tencentcloudapi.com/", strings.NewReader(string(body)), headers)
+        if err != nil {{ "{" }}
+            return errors.New("Tencent SMS delivery request failed")
+        {{ "}" }}
+        var response struct {{ "{" }}
+            Response struct {{ "{" }}
+                Error         json.RawMessage
+                SendStatusSet []struct{{ "{" }} Code string {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        if json.Unmarshal(raw, &response) != nil || len(response.Response.Error) > 0 || len(response.Response.SendStatusSet) != 1 || response.Response.SendStatusSet[0].Code != "Ok" {{ "{" }}
+            return errors.New("Tencent SMS delivery was rejected")
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func (m *Manager) sendEmail(ctx context.Context, c Config, to, purpose, code string) error {{ "{" }}
+        if !validEmail(to) || !validEmail(c.Settings["from"]) || !validCode(code) || !validPurpose(purpose) || !validSMTPHeaders(c.Settings) {{ "{" }}
+            return errors.New("invalid email delivery request")
+        {{ "}" }}
+        bodyTemplate := valueOr(c.Settings["body_template"], "Your verification code is {{ "{" }}code{{ "}" }}. It expires in {{ "{" }}minutes{{ "}" }} minutes.")
+        if !strings.Contains(bodyTemplate, "{{ "{" }}code{{ "}" }}") || strings.ContainsRune(bodyTemplate, 0) {{ "{" }}
+            return errors.New("SMTP body template is invalid")
+        {{ "}" }}
+        body := strings.NewReplacer("{{ "{" }}code{{ "}" }}", code, "{{ "{" }}purpose{{ "}" }}", purpose, "{{ "{" }}minutes{{ "}" }}", "5").Replace(bodyTemplate)
+        body = strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n"), "\n", "\r\n")
+        mode := c.Settings["tls_mode"]
+        if mode != "tls" && mode != "starttls" {{ "{" }}
+            return errors.New("SMTP transport must require TLS")
+        {{ "}" }}
+        host := c.Settings["host"]
+        port, err := strconv.Atoi(c.Settings["port"])
+        if err != nil || port < 1 || port > 65535 {{ "{" }}
+            return errors.New("invalid SMTP port")
+        {{ "}" }}
+        ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+        defer cancel()
+        conn, err := m.dial(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+        if err != nil {{ "{" }}
+            return errors.New("SMTP connection failed")
+        {{ "}" }}
+        defer conn.Close()
+        rawConn := conn
+        stop := context.AfterFunc(ctx, func() {{ "{" }} rawConn.Close() {{ "}" }})
+        defer stop()
+        deadline, _ := ctx.Deadline()
+        conn.SetDeadline(deadline)
+        tlsConfig := &tls.Config{{ "{" }}ServerName: host, MinVersion: tls.VersionTLS12, RootCAs: m.roots{{ "}" }}
+        if mode == "tls" {{ "{" }}
+            secure := tls.Client(conn, tlsConfig)
+            if secure.HandshakeContext(ctx) != nil {{ "{" }}
+                return errors.New("SMTP TLS handshake failed")
+            {{ "}" }}
+            conn = secure
+        {{ "}" }}
+        client, err := smtp.NewClient(conn, host)
+        if err != nil {{ "{" }}
+            return errors.New("SMTP greeting failed")
+        {{ "}" }}
+        defer client.Close()
+        if mode == "starttls" {{ "{" }}
+            if ok, _ := client.Extension("STARTTLS"); !ok {{ "{" }}
+                return errors.New("SMTP server does not support required STARTTLS")
+            {{ "}" }}
+            if client.StartTLS(tlsConfig) != nil {{ "{" }}
+                return errors.New("SMTP STARTTLS handshake failed")
+            {{ "}" }}
+        {{ "}" }}
+        if client.Auth(smtp.PlainAuth("", c.Secret["username"], c.Secret["password"], host)) != nil {{ "{" }}
+            return errors.New("SMTP authentication failed")
+        {{ "}" }}
+        if client.Mail(c.Settings["from"]) != nil || client.Rcpt(to) != nil {{ "{" }}
+            return errors.New("SMTP recipient was rejected")
+        {{ "}" }}
+        writer, err := client.Data()
+        if err != nil {{ "{" }}
+            return errors.New("SMTP message delivery failed")
+        {{ "}" }}
+        from := (&mail.Address{{ "{" }}Name: c.Settings["from_name"], Address: c.Settings["from"]{{ "}" }}).String()
+        recipient := (&mail.Address{{ "{" }}Address: to{{ "}" }}).String()
+        subject := mime.QEncoding.Encode("UTF-8", valueOr(c.Settings["subject_"+purpose], valueOr(c.Settings["subject"], "Your verification code")))
+        message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s@%s>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s\r\n", from, recipient, subject, time.Now().UTC().Format(time.RFC1123Z), randomID(), strings.Split(c.Settings["from"], "@")[1], body)
+        if _, err = writer.Write([]byte(message)); err != nil {{ "{" }}
+            return errors.New("SMTP message write failed")
+        {{ "}" }}
+        if writer.Close() != nil {{ "{" }}
+            return errors.New("SMTP message was rejected")
+        {{ "}" }}
+        if client.Quit() != nil {{ "{" }}
+            return errors.New("SMTP session did not close cleanly")
+        {{ "}" }}
+        return nil
+    {{ "}" }}

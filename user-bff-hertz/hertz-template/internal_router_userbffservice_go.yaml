@@ -7,68 +7,37 @@ body: |
     package router
 
     import (
-    	"github.com/cloudwego/hertz/pkg/app/server"
-    	"github.com/redis/go-redis/v9"
-
-    	"{{.Module}}/internal/base/conf"
-    	"{{.Module}}/internal/handler"
-    	"{{.Module}}/internal/pkg/middleware"
-    	"{{.Module}}/internal/pkg/oauthcode"
-    	"{{.Module}}/internal/pkg/ratelimit"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/handler"
+        "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/oauthcode"
+        "{{.Module}}/internal/pkg/ratelimit"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/hertz/pkg/app/server"
     )
 
-    // Register{{.ServiceName}}BffServiceRoutes registers all user-bff-hertz routes.
     func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, userCli userservice.Client, codeStore oauthcode.Store, resolver *ratelimit.Resolver) {{ "{" }}
-    	cfg := conf.Get()
-
-    	var rateLimitClient redis.UniversalClient
-    	if cfg.RateLimit.Backend == "redis" {{ "{" }}
-    		rateLimitClient = middleware.SharedRedisClient(cfg.RateLimit.Redis)
-    	{{ "}" }}
-    	rateLimitStore := ratelimit.NewStore(cfg.RateLimit, rateLimitClient)
-    	authHandler := handler.NewAuthHandler(userCli, resolver, rateLimitStore, cfg.RateLimit)
-    	oauthHandler := handler.NewOAuthHandler(userCli, codeStore, cfg.OAuthRedirect, cfg.OAuthCode.TTLSeconds.Duration)
-
-    	h.Use(middleware.CORS(cfg.CORS))
-
-    	auth := h.Group("/auth")
-
-    	// Public: register/login (idempotency on register, rate limit on both)
-    	if cfg.Idempotency.Enabled {{ "{" }}
-    		auth.POST("/register", middleware.Idempotency(cfg.Idempotency), middleware.RateLimit("pre_auth", cfg.RateLimit, cfg.RateLimit.PreAuth, resolver), authHandler.Register)
-    	{{ "}" }} else {{ "{" }}
-    		auth.POST("/register", middleware.RateLimit("pre_auth", cfg.RateLimit, cfg.RateLimit.PreAuth, resolver), authHandler.Register)
-    	{{ "}" }}
-    	auth.POST("/login", middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, resolver), authHandler.Login)
-
-    	// Public: forgot-password self-reset (no token available — the user
-    	// is locked out — so these must stay outside authProtected below).
-    	auth.POST("/password-reset/request", middleware.RateLimit("password_reset_request", cfg.RateLimit, cfg.RateLimit.PasswordResetRequest, resolver), authHandler.RequestPasswordReset)
-    	auth.POST("/password-reset/confirm", middleware.RateLimit("password_reset_confirm", cfg.RateLimit, cfg.RateLimit.PasswordResetConfirm, resolver), authHandler.ConfirmPasswordReset)
-
-    	// Protected: self-service password change
-    	authProtected := auth.Group("")
-    	authProtected.Use(middleware.JWTAuth(cfg.Auth.Token))
-    	authProtected.POST("/change-password", middleware.RateLimit("password_change", cfg.RateLimit, cfg.RateLimit.PasswordChange, resolver), authHandler.ChangePassword)
-
-    	// Public: OAuth login flow
-    	oauth := auth.Group("/oauth")
-    	oauth.GET("/:provider/start", oauthHandler.Start)
-    	oauth.GET("/:provider/callback", oauthHandler.Callback)
-    	oauth.POST("/exchange", oauthHandler.Exchange)
-
-    	// bind-callback is a browser redirect from the OAuth provider and
-    	// cannot carry an Authorization header; identity comes from the
-    	// OAuth state (embedded with uid at bind-start time), not from a
-    	// JWT here. It MUST stay outside the protected group below — same
-    	// reasoning as the login flow's own /:provider/callback above.
-    	oauth.GET("/:provider/bind-callback", oauthHandler.BindCallback)
-
-    	// Protected: bind-start and unbind require an authenticated user
-    	// (bind-callback does NOT — see above)
-    	protected := oauth.Group("")
-    	protected.Use(middleware.JWTAuth(cfg.Auth.Token))
-    	protected.GET("/:provider/bind-start", oauthHandler.BindStart)
-    	protected.DELETE("/:provider/bind", oauthHandler.Unbind)
+        cfg := conf.Get()
+        account := handler.NewAccountHandler(userCli)
+        oauth := handler.NewOAuthHandler(userCli, codeStore, cfg.OAuthRedirect, cfg.OAuthCode.TTLSeconds.Duration)
+        h.Use(middleware.CORS(cfg.CORS))
+        auth := h.Group("/auth")
+        auth.GET("/methods", account.Methods)
+        auth.POST("/code", account.Code)
+        auth.POST("/login", middleware.RateLimit("post_auth", cfg.RateLimit, cfg.RateLimit.PostAuth, resolver), account.Login)
+        auth.POST("/refresh", account.Refresh)
+        auth.POST("/password-reset/request", middleware.RateLimit("password_reset_request", cfg.RateLimit, cfg.RateLimit.PasswordResetRequest, resolver), account.RequestReset)
+        auth.POST("/password-reset/confirm", middleware.RateLimit("password_reset_confirm", cfg.RateLimit, cfg.RateLimit.PasswordResetConfirm, resolver), account.ConfirmReset)
+        protected := auth.Group("", account.SessionAuth())
+        protected.POST("/logout", account.Logout)
+        protected.GET("/me", account.Me)
+        protected.PATCH("/me", account.UpdateMe)
+        protected.POST("/reauth", account.Reauthenticate)
+        protected.POST("/contact", account.Contact)
+        protected.POST("/password", account.Password)
+        auth.GET("/oauth/:config/start", oauth.Start)
+        auth.POST("/oauth/:config/start", oauth.Start)
+        auth.GET("/oauth/:config/callback", oauth.Callback)
+        auth.POST("/oauth/:config/callback", oauth.Callback)
+        auth.POST("/oauth/exchange", oauth.Exchange)
     {{ "}" }}

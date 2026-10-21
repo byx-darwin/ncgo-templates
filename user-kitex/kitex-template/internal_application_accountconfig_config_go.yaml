@@ -1,0 +1,468 @@
+# ncgo exported template — internal/application/accountconfig/config.go
+path: internal/application/accountconfig/config.go
+update_behavior:
+    type: cover
+body: |-
+    // Package accountconfig stores environment-scoped login policy and encrypted provider credentials.
+    package accountconfig
+
+    import (
+        "context"
+        "crypto/aes"
+        "crypto/cipher"
+        "crypto/rand"
+        "crypto/x509"
+        "encoding/hex"
+        "encoding/json"
+        "errors"
+        "fmt"
+        "net/http"
+        "os"
+        "sort"
+        "strings"
+
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
+    )
+
+    type Config struct {{ "{" }}
+        ID          string            `json:"id"`
+        Kind        string            `json:"kind"`
+        Provider    string            `json:"provider"`
+        Name        string            `json:"name"`
+        Environment string            `json:"environment"`
+        Clients     []string          `json:"clients"`
+        Enabled     bool              `json:"enabled"`
+        Sort        int               `json:"sort"`
+        Settings    map[string]string `json:"settings"`
+        Secret      map[string]string `json:"secret,omitempty"`
+        HasSecret   bool              `json:"has_secret"`
+    {{ "}" }}
+    type Method struct {{ "{" }}
+        ID       string `json:"id"`
+        Kind     string `json:"kind"`
+        Provider string `json:"provider"`
+        Name     string `json:"name"`
+        Icon     string `json:"icon"`
+        Sort     int    `json:"sort"`
+    {{ "}" }}
+    type ExternalIdentity struct{{ "{" }} Subject, Nickname, Avatar string {{ "}" }}
+
+    type Manager struct {{ "{" }}
+        pool         *pgxpool.Pool
+        environment  string
+        aead         cipher.AEAD
+        initErr      error
+        http         *http.Client
+        allowPrivate bool
+        roots        *x509.CertPool
+    {{ "}" }}
+
+    // New requires a deployment-supplied decoded 32-byte key; invalid keys fail closed.
+    // Private endpoints are only available when the server explicitly opts into a local/development/test environment.
+    func New(pool *pgxpool.Pool, environment string, encryptionKey []byte) *Manager {{ "{" }}
+        m := &Manager{{ "{" }}pool: pool, environment: strings.TrimSpace(environment){{ "}" }}
+        if m.environment == "" {{ "{" }}
+            m.initErr = errors.New("account environment is required")
+        {{ "}" }}
+        if len(encryptionKey) != 32 {{ "{" }}
+            m.initErr = errors.New("account configuration requires a 32-byte deployment key")
+        {{ "}" }} else {{ "{" }}
+            block, err := aes.NewCipher(encryptionKey)
+            if err == nil {{ "{" }}
+                m.aead, err = cipher.NewGCM(block)
+            {{ "}" }}
+            if err != nil {{ "{" }}
+                m.initErr = errors.New("account configuration encryption initialization failed")
+            {{ "}" }}
+        {{ "}" }}
+        m.allowPrivate = (environment == "development" || environment == "test" || environment == "local") && os.Getenv("ACCOUNT_PROVIDER_ALLOW_PRIVATE_ENDPOINTS") == "1"
+        m.http = m.newHTTPClient()
+        return m
+    {{ "}" }}
+    func randomID() string {{ "{" }}
+        var b [16]byte
+        if _, err := rand.Read(b[:]); err != nil {{ "{" }}
+            return ""
+        {{ "}" }}
+        return hex.EncodeToString(b[:])
+    {{ "}" }}
+    func (m *Manager) ready() error {{ "{" }}
+        if m.initErr != nil {{ "{" }}
+            return m.initErr
+        {{ "}" }}
+        if m.pool == nil {{ "{" }}
+            return errors.New("account configuration storage is unavailable")
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func (m *Manager) encrypt(c Config) ([]byte, error) {{ "{" }}
+        if m.initErr != nil {{ "{" }}
+            return nil, m.initErr
+        {{ "}" }}
+        if m.aead == nil {{ "{" }}
+            return nil, errors.New("account configuration key is unavailable")
+        {{ "}" }}
+        if len(c.Secret) == 0 {{ "{" }}
+            return nil, nil
+        {{ "}" }}
+        raw, err := json.Marshal(c.Secret)
+        if err != nil {{ "{" }}
+            return nil, errors.New("invalid provider credentials")
+        {{ "}" }}
+        nonce := make([]byte, m.aead.NonceSize())
+        if _, err = rand.Read(nonce); err != nil {{ "{" }}
+            return nil, errors.New("credential encryption failed")
+        {{ "}" }}
+        return m.aead.Seal(nonce, nonce, raw, []byte(c.Environment+"\x00"+c.ID)), nil
+    {{ "}" }}
+    func (m *Manager) decrypt(c Config, encrypted []byte) (map[string]string, error) {{ "{" }}
+        if m.initErr != nil {{ "{" }}
+            return nil, m.initErr
+        {{ "}" }}
+        if m.aead == nil {{ "{" }}
+            return nil, errors.New("account configuration key is unavailable")
+        {{ "}" }}
+        if len(encrypted) == 0 {{ "{" }}
+            return map[string]string{{ "{" }}{{ "}" }}, nil
+        {{ "}" }}
+        n := m.aead.NonceSize()
+        if len(encrypted) < n {{ "{" }}
+            return nil, errors.New("invalid encrypted provider credentials")
+        {{ "}" }}
+        raw, err := m.aead.Open(nil, encrypted[:n], encrypted[n:], []byte(c.Environment+"\x00"+c.ID))
+        if err != nil {{ "{" }}
+            return nil, errors.New("cannot decrypt provider credentials")
+        {{ "}" }}
+        var secret map[string]string
+        if json.Unmarshal(raw, &secret) != nil {{ "{" }}
+            return nil, errors.New("invalid encrypted provider credentials")
+        {{ "}" }}
+        return secret, nil
+    {{ "}" }}
+    func redact(c Config) Config {{ "{" }}
+        c.HasSecret = len(c.Secret) > 0 || c.HasSecret
+        c.Secret = nil
+        return c
+    {{ "}" }}
+    func mergeSecret(old, next map[string]string) map[string]string {{ "{" }}
+        out := map[string]string{{ "{" }}{{ "}" }}
+        for k, v := range old {{ "{" }}
+            out[k] = v
+        {{ "}" }}
+        for k, v := range next {{ "{" }}
+            if v != "" {{ "{" }}
+                out[k] = v
+            {{ "}" }}
+        {{ "}" }}
+        return out
+    {{ "}" }}
+
+    const configColumns = `id,environment,kind,provider,name,clients,enabled,sort,settings,secret`
+
+    type scanner interface{{ "{" }} Scan(...any) error {{ "}" }}
+
+    func (m *Manager) scan(row scanner, decrypt bool) (Config, error) {{ "{" }}
+        var c Config
+        var clients, settings, encrypted []byte
+        err := row.Scan(&c.ID, &c.Environment, &c.Kind, &c.Provider, &c.Name, &clients, &c.Enabled, &c.Sort, &settings, &encrypted)
+        if err != nil {{ "{" }}
+            return c, err
+        {{ "}" }}
+        if json.Unmarshal(clients, &c.Clients) != nil || json.Unmarshal(settings, &c.Settings) != nil {{ "{" }}
+            return c, errors.New("invalid stored login configuration")
+        {{ "}" }}
+        c.HasSecret = len(encrypted) > 0
+        if decrypt {{ "{" }}
+            c.Secret, err = m.decrypt(c, encrypted)
+        {{ "}" }}
+        return c, err
+    {{ "}" }}
+    func (m *Manager) load(ctx context.Context, decrypt bool) ([]Config, error) {{ "{" }}
+        if err := m.ready(); err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        rows, err := m.pool.Query(ctx, `SELECT `+configColumns+` FROM account_login_configs WHERE environment=$1 ORDER BY sort,id`, m.environment)
+        if err != nil {{ "{" }}
+            return nil, errors.New("cannot read account configuration")
+        {{ "}" }}
+        defer rows.Close()
+        out := []Config{{ "{" }}{{ "}" }}
+        for rows.Next() {{ "{" }}
+            c, err := m.scan(rows, decrypt)
+            if err != nil {{ "{" }}
+                return nil, errors.New("cannot decode account configuration")
+            {{ "}" }}
+            out = append(out, c)
+        {{ "}" }}
+        if rows.Err() != nil {{ "{" }}
+            return nil, errors.New("cannot read account configuration")
+        {{ "}" }}
+        return out, nil
+    {{ "}" }}
+    func (m *Manager) List(ctx context.Context) ([]Config, error) {{ "{" }} return m.load(ctx, false) {{ "}" }}
+    func (m *Manager) Save(ctx context.Context, c Config, actor string) (Config, error) {{ "{" }}
+        if err := m.ready(); err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        if c.Environment == "" {{ "{" }}
+            c.Environment = m.environment
+        {{ "}" }}
+        if c.ID == "" {{ "{" }}
+            c.ID = randomID()
+        {{ "}" }}
+        if c.Settings == nil {{ "{" }}
+            c.Settings = map[string]string{{ "{" }}{{ "}" }}
+        {{ "}" }}
+        if c.Clients == nil {{ "{" }}
+            c.Clients = []string{{ "{" }}{{ "}" }}
+        {{ "}" }}
+        c.Secret = mergeSecret(nil, c.Secret)
+        if err := m.validate(c); err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        tx, err := m.pool.Begin(ctx)
+        if err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("cannot save account configuration")
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        // Serialize all config writes, including new IDs and transport-selection checks.
+        if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('account_login_configs'))`); err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("cannot lock account configuration")
+        {{ "}" }}
+        old, err := m.scan(tx.QueryRow(ctx, `SELECT `+configColumns+` FROM account_login_configs WHERE id=$1 FOR UPDATE`, c.ID), true)
+        if err != nil && !errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("cannot read existing account configuration")
+        {{ "}" }}
+        if err == nil {{ "{" }}
+            if old.Environment != m.environment {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("configuration belongs to another environment")
+            {{ "}" }}
+            if old.Kind != c.Kind || old.Provider != c.Provider {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("configuration kind and provider are immutable")
+            {{ "}" }}
+            if c.Kind == "oauth" {{ "{" }}
+                for _, key := range []string{{ "{" }}"client_id", "mode", "issuer_url", "pid"{{ "}" }} {{ "{" }}
+                    before, after := old.Settings[key], c.Settings[key]
+                    if key == "mode" {{ "{" }}
+                        before = valueOr(before, "web")
+                        after = valueOr(after, "web")
+                    {{ "}" }}
+                    if before != after {{ "{" }}
+                        return Config{{ "{" }}{{ "}" }}, errors.New("OAuth identity settings are immutable; create a new configuration ID")
+                    {{ "}" }}
+                {{ "}" }}
+            {{ "}" }}
+            c.Secret = mergeSecret(old.Secret, c.Secret)
+        {{ "}" }}
+        if err = m.validate(c); err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        if c.Enabled && !m.configReady(c) {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("enabled provider configuration is incomplete")
+        {{ "}" }}
+        if c.Enabled && (c.Kind == "sms" || c.Kind == "smtp") {{ "{" }}
+            var count int
+            if err = tx.QueryRow(ctx, `SELECT count(*) FROM account_login_configs WHERE environment=$1 AND kind=$2 AND enabled AND id<>$3`, m.environment, c.Kind, c.ID).Scan(&count); err != nil {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("cannot check transport selection")
+            {{ "}" }}
+            if count > 0 {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("only one enabled transport per kind is allowed")
+            {{ "}" }}
+        {{ "}" }}
+        encrypted, err := m.encrypt(c)
+        if err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        clients, _ := json.Marshal(c.Clients)
+        settings, _ := json.Marshal(c.Settings)
+        _, err = tx.Exec(ctx, `INSERT INTO account_login_configs(id,environment,kind,provider,name,clients,enabled,sort,settings,secret) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET name=excluded.name,clients=excluded.clients,enabled=excluded.enabled,sort=excluded.sort,settings=excluded.settings,secret=excluded.secret,updated_at=now()`, c.ID, c.Environment, c.Kind, c.Provider, c.Name, clients, c.Enabled, c.Sort, settings, encrypted)
+        if err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("cannot store account configuration")
+        {{ "}" }}
+        if c.Enabled && c.Kind == "method" && (c.Provider == "phone_code" || c.Provider == "email_code") {{ "{" }}
+            rows, e := tx.Query(ctx, `SELECT `+configColumns+` FROM account_login_configs WHERE environment=$1 AND enabled`, m.environment)
+            if e != nil {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("cannot check transport readiness")
+            {{ "}" }}
+            var all []Config
+            for rows.Next() {{ "{" }}
+                v, e := m.scan(rows, true)
+                if e != nil {{ "{" }}
+                    rows.Close()
+                    return Config{{ "{" }}{{ "}" }}, errors.New("cannot check transport readiness")
+                {{ "}" }}
+                all = append(all, v)
+            {{ "}" }}
+            rows.Close()
+            if rows.Err() != nil {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("cannot check transport readiness")
+            {{ "}" }}
+            if !m.methodReady(c, all) {{ "{" }}
+                return Config{{ "{" }}{{ "}" }}, errors.New("verification-code login requires a ready delivery transport")
+            {{ "}" }}
+        {{ "}" }}
+        if _, err = tx.Exec(ctx, `INSERT INTO account_config_audit(actor,action,config_id) VALUES($1,'save',$2)`, actor, c.ID); err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("cannot audit configuration change")
+        {{ "}" }}
+        if tx.Commit(ctx) != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("cannot commit configuration change")
+        {{ "}" }}
+        c.HasSecret = len(encrypted) > 0
+        return redact(c), nil
+    {{ "}" }}
+    func clientAllowed(c Config, client string) bool {{ "{" }}
+        if client == "" {{ "{" }}
+            return false
+        {{ "}" }}
+        for _, v := range c.Clients {{ "{" }}
+            if v == client {{ "{" }}
+                return true
+            {{ "}" }}
+        {{ "}" }}
+        return false
+    {{ "}" }}
+    func (m *Manager) transport(configs []Config, kind string) (Config, error) {{ "{" }}
+        var selected Config
+        count := 0
+        for _, c := range configs {{ "{" }}
+            if c.Environment == m.environment && c.Enabled && c.Kind == kind {{ "{" }}
+                count++
+                selected = c
+            {{ "}" }}
+        {{ "}" }}
+        if count != 1 || !m.configReady(selected) {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, errors.New("delivery transport is unavailable or ambiguous")
+        {{ "}" }}
+        return selected, nil
+    {{ "}" }}
+    func (m *Manager) methodReady(c Config, configs []Config) bool {{ "{" }}
+        kind := ""
+        switch c.Provider {{ "{" }}
+        case "phone_password", "email_password":
+            return true
+        case "phone_code":
+            kind = "sms"
+        case "email_code":
+            kind = "smtp"
+        default:
+            return false
+        {{ "}" }}
+        _, err := m.transport(configs, kind)
+        return err == nil
+    {{ "}" }}
+    func (m *Manager) methods(configs []Config, client string) []Method {{ "{" }}
+        out := []Method{{ "{" }}{{ "}" }}
+        for _, c := range configs {{ "{" }}
+            if c.Environment != m.environment || !c.Enabled || !clientAllowed(c, client) {{ "{" }}
+                continue
+            {{ "}" }}
+            kind := c.Kind
+            if kind == "method" {{ "{" }}
+                if !m.methodReady(c, configs) {{ "{" }}
+                    continue
+                {{ "}" }}
+                kind = c.Provider
+            {{ "}" }} else if kind != "oauth" || !m.configReady(c) {{ "{" }}
+                continue
+            {{ "}" }}
+            out = append(out, Method{{ "{" }}ID: c.ID, Kind: kind, Provider: c.Provider, Name: c.Name, Icon: c.Settings["icon"], Sort: c.Sort{{ "}" }})
+        {{ "}" }}
+        sort.SliceStable(out, func(i, j int) bool {{ "{" }}
+            if out[i].Sort == out[j].Sort {{ "{" }}
+                return out[i].ID < out[j].ID
+            {{ "}" }}
+            return out[i].Sort < out[j].Sort
+        {{ "}" }})
+        return out
+    {{ "}" }}
+    func (m *Manager) Methods(ctx context.Context, client string) ([]Method, error) {{ "{" }}
+        configs, err := m.load(ctx, true)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        return m.methods(configs, client), nil
+    {{ "}" }}
+    func (m *Manager) Allowed(ctx context.Context, client, method string) error {{ "{" }}
+        all, err := m.Methods(ctx, client)
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        for _, v := range all {{ "{" }}
+            if v.Kind == method && v.Kind != "oauth" {{ "{" }}
+                return nil
+            {{ "}" }}
+        {{ "}" }}
+        return errors.New("login method is not available for this client")
+    {{ "}" }}
+    func (m *Manager) Enabled(ctx context.Context, id, client string) (Config, error) {{ "{" }}
+        all, err := m.load(ctx, true)
+        if err != nil {{ "{" }}
+            return Config{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        for _, c := range all {{ "{" }}
+            if c.ID == id && c.Kind == "oauth" && c.Enabled && clientAllowed(c, client) && m.configReady(c) {{ "{" }}
+                return c, nil
+            {{ "}" }}
+        {{ "}" }}
+        return Config{{ "{" }}{{ "}" }}, errors.New("OAuth configuration is not available for this client")
+    {{ "}" }}
+    func (m *Manager) SendCode(ctx context.Context, kind, to, purpose, code string) error {{ "{" }}
+        transport := ""
+        switch kind {{ "{" }}
+        case "phone":
+            transport = "sms"
+        case "email":
+            transport = "smtp"
+        default:
+            return errors.New("unsupported code destination")
+        {{ "}" }}
+        if !validCode(code) || !validPurpose(purpose) {{ "{" }}
+            return errors.New("invalid verification code request")
+        {{ "}" }}
+        all, err := m.load(ctx, true)
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        c, err := m.transport(all, transport)
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        return m.deliver(ctx, c, to, purpose, code)
+    {{ "}" }}
+    func (m *Manager) Test(ctx context.Context, id, target, actor string) error {{ "{" }}
+        if strings.TrimSpace(target) == "" {{ "{" }}
+            return errors.New("an explicit test target is required")
+        {{ "}" }}
+        all, err := m.load(ctx, true)
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        for _, c := range all {{ "{" }}
+            if c.ID != id {{ "{" }}
+                continue
+            {{ "}" }}
+            if c.Kind != "sms" && c.Kind != "smtp" {{ "{" }}
+                return errors.New("test delivery requires an SMS or SMTP configuration")
+            {{ "}" }}
+            if !m.configReady(c) {{ "{" }}
+                return errors.New("test provider configuration is incomplete")
+            {{ "}" }}
+            if c.Kind == "sms" {{ "{" }}
+                target = strings.TrimSpace(target)
+                if len(target) == 11 && phonePattern.MatchString("+86"+target) {{ "{" }}
+                    target = "+86" + target
+                {{ "}" }}
+            {{ "}" }}
+            if _, err = m.pool.Exec(ctx, `INSERT INTO account_config_audit(actor,action,config_id) VALUES($1,'test',$2)`, actor, id); err != nil {{ "{" }}
+                return errors.New("cannot audit provider test")
+            {{ "}" }}
+            var b [4]byte
+            if _, err = rand.Read(b[:]); err != nil {{ "{" }}
+                return errors.New("cannot generate test message")
+            {{ "}" }}
+            n := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+            return m.deliver(ctx, c, target, "login", fmt.Sprintf("%06d", n%1000000))
+        {{ "}" }}
+        return errors.New("configuration was not found")
+    {{ "}" }}

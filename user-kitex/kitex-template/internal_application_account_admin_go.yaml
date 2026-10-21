@@ -1,0 +1,113 @@
+# ncgo exported template — internal/application/account/admin.go
+path: internal/application/account/admin.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "encoding/json"
+        "{{.Module}}/internal/application/accountconfig"
+
+        "github.com/google/uuid"
+    )
+
+    // AdminIdentities is called only behind the administrator BFF's RBAC boundary.
+    func (s *Service) AdminIdentities(ctx context.Context, uid string) ([]map[string]string, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        if _, e := uuid.Parse(uid); e != nil {{ "{" }}
+            return nil, ErrInput
+        {{ "}" }}
+        rows, e := s.pool.Query(ctx, "SELECT i.config_id,i.subject,coalesce(c.name,i.config_id),coalesce(c.provider,'') FROM account_identities i LEFT JOIN account_login_configs c ON c.id=i.config_id AND c.environment=$2 WHERE i.user_id=$1", uid, s.environment)
+        if e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        defer rows.Close()
+        out := []map[string]string{{ "{" }}{{ "}" }}
+        for rows.Next() {{ "{" }}
+            var id, subject, name, provider string
+            if e = rows.Scan(&id, &subject, &name, &provider); e != nil {{ "{" }}
+                return nil, e
+            {{ "}" }}
+            out = append(out, map[string]string{{ "{" }}"provider": id, "provider_user_id": subject, "name": name, "provider_type": provider{{ "}" }})
+        {{ "}" }}
+        return out, rows.Err()
+    {{ "}" }}
+    func (s *Service) AdminUnbind(ctx context.Context, uid, configID, operator string) error {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e := uuid.Parse(uid); e != nil || operator == "" {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        policy, e := s.anyClientMethods(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        if _, e = lockUser(ctx, tx, uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        tag, e := tx.Exec(ctx, "DELETE FROM account_identities WHERE user_id=$1 AND config_id=$2", uid, configID)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if tag.RowsAffected() != 1 {{ "{" }}
+            return ErrInput
+        {{ "}" }}
+        if e = s.hasUsableIdentity(ctx, tx, uid, policy); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if e = audit(ctx, tx, operator, "account.admin_unbind", uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        return tx.Commit(ctx)
+    {{ "}" }}
+    func (s *Service) anyClientMethods(ctx context.Context) ([]accountconfig.Method, error) {{ "{" }}
+        rows, e := s.pool.Query(ctx, "SELECT clients FROM account_login_configs WHERE environment=$1 AND enabled AND kind IN ('method','oauth')", s.environment)
+        if e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        clients := map[string]bool{{ "{" }}{{ "}" }}
+        for rows.Next() {{ "{" }}
+            var b []byte
+            if e = rows.Scan(&b); e != nil {{ "{" }}
+                rows.Close()
+                return nil, e
+            {{ "}" }}
+            var c []string
+            if e = json.Unmarshal(b, &c); e != nil {{ "{" }}
+                rows.Close()
+                return nil, e
+            {{ "}" }}
+            for _, v := range c {{ "{" }}
+                clients[v] = true
+            {{ "}" }}
+        {{ "}" }}
+        rows.Close()
+        if e = rows.Err(); e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        all := []accountconfig.Method{{ "{" }}{{ "}" }}
+        for client := range clients {{ "{" }}
+            m, err := s.config.Methods(ctx, client)
+            if err != nil {{ "{" }}
+                return nil, err
+            {{ "}" }}
+            all = append(all, m...)
+        {{ "}" }}
+        return all, nil
+    {{ "}" }}

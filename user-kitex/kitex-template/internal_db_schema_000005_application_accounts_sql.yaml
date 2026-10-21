@@ -1,0 +1,34 @@
+path: internal/db/schema/000005_application_accounts.sql
+update_behavior:
+    type: cover
+body: |
+    CREATE TABLE account_login_configs (
+     id TEXT PRIMARY KEY,environment TEXT NOT NULL,kind TEXT NOT NULL,provider TEXT NOT NULL,name TEXT NOT NULL,
+     clients JSONB NOT NULL DEFAULT '[]',enabled BOOLEAN NOT NULL DEFAULT false,sort INTEGER NOT NULL DEFAULT 0,
+     settings JSONB NOT NULL DEFAULT '{{ "{" }}{{ "}" }}',secret BYTEA,updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX account_configs_env ON account_login_configs(environment,kind,enabled);
+    CREATE TABLE account_config_audit(actor TEXT NOT NULL,action TEXT NOT NULL,config_id TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+    CREATE TABLE account_sessions (
+     id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,client_id TEXT NOT NULL,
+     environment TEXT NOT NULL,refresh_hash TEXT NOT NULL UNIQUE,expires_at TIMESTAMPTZ NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX account_sessions_user ON account_sessions(user_id);
+    CREATE TABLE account_codes (
+     key TEXT PRIMARY KEY,code_hash TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,sent_at TIMESTAMPTZ NOT NULL,
+     expires_at TIMESTAMPTZ NOT NULL,consumed BOOLEAN NOT NULL DEFAULT false
+    );
+    CREATE TABLE account_limits (key TEXT PRIMARY KEY,window_start TIMESTAMPTZ NOT NULL,count INTEGER NOT NULL);
+    CREATE TABLE account_proofs (method TEXT NOT NULL,hash TEXT PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,session_id UUID NOT NULL REFERENCES account_sessions(id) ON DELETE CASCADE,expires_at TIMESTAMPTZ NOT NULL);
+    CREATE TABLE account_oauth_states (
+     hash TEXT PRIMARY KEY,config_id TEXT NOT NULL,client_id TEXT NOT NULL,purpose TEXT NOT NULL,user_id TEXT NOT NULL DEFAULT '',session_id TEXT NOT NULL DEFAULT '',
+     return_url TEXT NOT NULL,verifier TEXT NOT NULL,nonce TEXT NOT NULL,expires_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE TABLE account_identities (
+     config_id TEXT NOT NULL,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,subject TEXT NOT NULL,
+     PRIMARY KEY(config_id,subject),UNIQUE(user_id,config_id)
+    );
+    CREATE INDEX account_identities_user ON account_identities(user_id);
+
+    CREATE TABLE account_grants(hash TEXT PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,client_id TEXT NOT NULL,environment TEXT NOT NULL,config_id TEXT NOT NULL,purpose TEXT NOT NULL,session_id TEXT NOT NULL DEFAULT '',is_new BOOLEAN NOT NULL DEFAULT false,expires_at TIMESTAMPTZ NOT NULL);
+    CREATE INDEX account_grants_user ON account_grants(user_id);

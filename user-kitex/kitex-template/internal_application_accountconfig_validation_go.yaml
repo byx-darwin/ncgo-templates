@@ -1,0 +1,254 @@
+# ncgo exported template — internal/application/accountconfig/validation.go
+path: internal/application/accountconfig/validation.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "encoding/json"
+        "errors"
+        "net"
+        "net/mail"
+        "net/url"
+        "regexp"
+        "strconv"
+        "strings"
+    )
+
+    var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{{ "{" }}0,127{{ "}" }}$`)
+    var phonePattern = regexp.MustCompile(`^\+861[3-9][0-9]{{ "{" }}9{{ "}" }}$`)
+    var codePattern = regexp.MustCompile(`^[0-9]{{ "{" }}6{{ "}" }}$`)
+
+    func validCode(s string) bool {{ "{" }} return codePattern.MatchString(s) {{ "}" }}
+    func validPurpose(s string) bool {{ "{" }}
+        switch s {{ "{" }}
+        case "login", "bind", "replace", "reauth", "reset":
+            return true
+        default:
+            return false
+        {{ "}" }}
+    {{ "}" }}
+    func hasKeys(m map[string]string, keys ...string) bool {{ "{" }}
+        for _, k := range keys {{ "{" }}
+            if strings.TrimSpace(m[k]) == "" {{ "{" }}
+                return false
+            {{ "}" }}
+        {{ "}" }}
+        return true
+    {{ "}" }}
+    func allowedKeys(values map[string]string, keys string) bool {{ "{" }}
+        allowed := map[string]bool{{ "{" }}{{ "}" }}
+        for _, k := range strings.Fields(keys) {{ "{" }}
+            allowed[k] = true
+        {{ "}" }}
+        for k, v := range values {{ "{" }}
+            if !allowed[k] || len(v) > 65536 {{ "{" }}
+                return false
+            {{ "}" }}
+        {{ "}" }}
+        return true
+    {{ "}" }}
+    func (m *Manager) validate(c Config) error {{ "{" }}
+        if c.Environment != m.environment {{ "{" }}
+            return errors.New("configuration environment must match the server environment")
+        {{ "}" }}
+        if !safeID.MatchString(c.ID) || len(c.Name) > 200 || len(c.Clients) > 100 || len(c.Settings) > 24 || len(c.Secret) > 8 {{ "{" }}
+            return errors.New("invalid login configuration")
+        {{ "}" }}
+        seen := map[string]bool{{ "{" }}{{ "}" }}
+        for _, client := range c.Clients {{ "{" }}
+            if !safeID.MatchString(client) || seen[client] {{ "{" }}
+                return errors.New("client IDs must be explicit and unique")
+            {{ "}" }}
+            seen[client] = true
+        {{ "}" }}
+        settings, secrets := "", ""
+        switch c.Kind {{ "{" }}
+        case "method":
+            switch c.Provider {{ "{" }}
+            case "phone_code", "phone_password", "email_code", "email_password":
+            default:
+                return errors.New("unsupported login method")
+            {{ "}" }}
+            settings = "icon"
+        case "sms":
+            switch c.Provider {{ "{" }}
+            case "aliyun":
+                settings = "sign_name template_id code_parameter region template_login template_bind template_replace template_reauth template_reset"
+                secrets = "access_key_id access_key_secret"
+            case "tencent":
+                settings = "sdk_app_id sign_name template_id region template_login template_bind template_replace template_reauth template_reset"
+                secrets = "secret_id secret_key"
+            default:
+                return errors.New("unsupported SMS provider")
+            {{ "}" }}
+        case "smtp":
+            if c.Provider != "smtp" {{ "{" }}
+                return errors.New("unsupported email provider")
+            {{ "}" }}
+            settings = "host port tls_mode from from_name subject body_template subject_login subject_bind subject_replace subject_reauth subject_reset"
+            secrets = "username password"
+        case "oauth":
+            settings = "client_id mode redirect_url return_urls scopes icon"
+            secrets = "client_secret"
+            switch c.Provider {{ "{" }}
+            case "wechat", "github", "google":
+            case "alipay":
+                settings += " pid"
+                secrets = "private_key public_key"
+            case "oidc":
+                settings += " issuer_url"
+            default:
+                return errors.New("unsupported OAuth provider")
+            {{ "}" }}
+        default:
+            return errors.New("unsupported configuration kind")
+        {{ "}" }}
+        if !allowedKeys(c.Settings, settings) || !allowedKeys(c.Secret, secrets) {{ "{" }}
+            return errors.New("unsupported public settings or credential fields")
+        {{ "}" }}
+        if c.Enabled && (c.Kind == "method" || c.Kind == "oauth") && len(c.Clients) == 0 {{ "{" }}
+            return errors.New("enabled login configuration requires explicit client IDs")
+        {{ "}" }}
+        if c.Kind == "smtp" {{ "{" }}
+            if host := c.Settings["host"]; host != "" && !m.publicURL("https://"+net.JoinHostPort(host, valueOr(c.Settings["port"], "465"))) {{ "{" }}
+                return errors.New("SMTP host must use an allowed public endpoint")
+            {{ "}" }}
+            if strings.ContainsAny(c.Settings["host"], "/\\@\r\n\x00") || !validSMTPHeaders(c.Settings) {{ "{" }}
+                return errors.New("invalid SMTP settings")
+            {{ "}" }}
+            if body := c.Settings["body_template"]; body != "" && (!strings.Contains(body, "{{ "{" }}code{{ "}" }}") || strings.ContainsRune(body, 0)) {{ "{" }}
+                return errors.New("SMTP body template must include {{ "{" }}code{{ "}" }} and contain plain text")
+            {{ "}" }}
+            if v := c.Settings["tls_mode"]; v != "" && v != "tls" && v != "starttls" {{ "{" }}
+                return errors.New("SMTP requires TLS or STARTTLS")
+            {{ "}" }}
+            if v := c.Settings["port"]; v != "" {{ "{" }}
+                n, e := strconv.Atoi(v)
+                if e != nil || n < 1 || n > 65535 {{ "{" }}
+                    return errors.New("invalid SMTP port")
+                {{ "}" }}
+            {{ "}" }}
+            if from := c.Settings["from"]; from != "" {{ "{" }}
+                if !validEmail(from) {{ "{" }}
+                    return errors.New("invalid sender address")
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        if c.Kind == "oauth" {{ "{" }}
+            if c.Provider == "wechat" {{ "{" }}
+                switch c.Settings["mode"] {{ "{" }}
+                case "", "web", "app", "miniprogram":
+                default:
+                    return errors.New("unsupported WeChat flow")
+                {{ "}" }}
+            {{ "}" }} else if c.Provider == "alipay" {{ "{" }}
+                switch c.Settings["mode"] {{ "{" }}
+                case "", "web", "app":
+                default:
+                    return errors.New("unsupported Alipay flow")
+                {{ "}" }}
+            {{ "}" }} else if mode := c.Settings["mode"]; mode != "" && mode != "web" {{ "{" }}
+                return errors.New("unsupported OAuth flow")
+            {{ "}" }}
+            for _, k := range []string{{ "{" }}"redirect_url", "issuer_url"{{ "}" }} {{ "{" }}
+                if v := c.Settings[k]; v != "" {{ "{" }}
+                    if !m.publicURL(v) {{ "{" }}
+                        return errors.New("OAuth URLs require HTTPS with a public host")
+                    {{ "}" }}
+                {{ "}" }}
+            {{ "}" }}
+            if raw := c.Settings["return_urls"]; raw != "" {{ "{" }}
+                var values []string
+                if json.Unmarshal([]byte(raw), &values) != nil || len(values) == 0 || len(values) > 50 {{ "{" }}
+                    return errors.New("return_urls must be a nonempty JSON URL array")
+                {{ "}" }}
+                for _, v := range values {{ "{" }}
+                    if !m.publicURL(v) {{ "{" }}
+                        return errors.New("return URLs require HTTPS with a public host")
+                    {{ "}" }}
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func validEmail(s string) bool {{ "{" }}
+        if strings.ContainsAny(s, "\r\n\x00") || len(s) > 254 {{ "{" }}
+            return false
+        {{ "}" }}
+        v, err := mail.ParseAddress(s)
+        return err == nil && v.Address == s && strings.Contains(s, "@")
+    {{ "}" }}
+    func (m *Manager) publicURL(raw string) bool {{ "{" }}
+        u, err := url.Parse(raw)
+        if err != nil || u.Hostname() == "" || u.User != nil || u.Fragment != "" {{ "{" }}
+            return false
+        {{ "}" }}
+        if u.Scheme != "https" && !(m.allowPrivate && u.Scheme == "http") {{ "{" }}
+            return false
+        {{ "}" }}
+        if ip := net.ParseIP(u.Hostname()); ip != nil && !publicIP(ip) && !m.allowPrivate {{ "{" }}
+            return false
+        {{ "}" }}
+        return !strings.EqualFold(u.Hostname(), "localhost") || m.allowPrivate
+    {{ "}" }}
+    func (m *Manager) configReady(c Config) bool {{ "{" }}
+        if c.Environment != m.environment || m.validate(c) != nil {{ "{" }}
+            return false
+        {{ "}" }}
+        switch c.Kind {{ "{" }}
+        case "method":
+            return true
+        case "sms":
+            if !hasKeys(c.Settings, "sign_name") || !hasSMSTemplates(c.Settings) {{ "{" }}
+                return false
+            {{ "}" }}
+            if c.Provider == "aliyun" {{ "{" }}
+                return hasKeys(c.Secret, "access_key_id", "access_key_secret")
+            {{ "}" }}
+            return hasKeys(c.Settings, "sdk_app_id") && hasKeys(c.Secret, "secret_id", "secret_key")
+        case "smtp":
+            return hasKeys(c.Settings, "host", "port", "tls_mode", "from") && hasKeys(c.Secret, "username", "password")
+        case "oauth":
+            if !hasKeys(c.Settings, "client_id") {{ "{" }}
+                return false
+            {{ "}" }}
+            native := (c.Provider == "wechat" && (c.Settings["mode"] == "app" || c.Settings["mode"] == "miniprogram")) || (c.Provider == "alipay" && c.Settings["mode"] == "app")
+            if !native && !hasKeys(c.Settings, "redirect_url") {{ "{" }}
+                return false
+            {{ "}" }}
+            if !hasKeys(c.Settings, "return_urls") {{ "{" }}
+                return false
+            {{ "}" }}
+            switch c.Provider {{ "{" }}
+            case "alipay":
+                if c.Settings["mode"] == "app" && !regexp.MustCompile(`^2088[0-9]{{ "{" }}12{{ "}" }}$`).MatchString(c.Settings["pid"]) {{ "{" }}
+                    return false
+                {{ "}" }}
+                _, err := parsePrivateKey(c.Secret["private_key"])
+                _, err2 := parsePublicKey(c.Secret["public_key"])
+                return err == nil && err2 == nil
+            case "oidc":
+                return hasKeys(c.Settings, "issuer_url") && hasKeys(c.Secret, "client_secret")
+            default:
+                return hasKeys(c.Secret, "client_secret")
+            {{ "}" }}
+        {{ "}" }}
+        return false
+    {{ "}" }}
+
+    func hasSMSTemplates(settings map[string]string) bool {{ "{" }}
+        if hasKeys(settings, "template_id") {{ "{" }}
+            return true
+        {{ "}" }}
+        return hasKeys(settings, "template_login", "template_bind", "template_replace", "template_reauth", "template_reset")
+    {{ "}" }}
+    func validSMTPHeaders(settings map[string]string) bool {{ "{" }}
+        for _, key := range []string{{ "{" }}"from_name", "subject", "subject_login", "subject_bind", "subject_replace", "subject_reauth", "subject_reset"{{ "}" }} {{ "{" }}
+            if strings.ContainsAny(settings[key], "\r\n\x00") {{ "{" }}
+                return false
+            {{ "}" }}
+        {{ "}" }}
+        return true
+    {{ "}" }}

@@ -393,7 +393,7 @@ body: |-
           CORS: CORSConfig{
               AllowOrigins:  []string{"*"},
               AllowMethods:  []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-              AllowHeaders:  []string{"Content-Type", "Authorization", "X-Request-ID", "X-Idempotency-Key"},
+              AllowHeaders:  []string{"Content-Type", "Authorization", "X-Client-ID", "X-Request-ID", "X-Idempotency-Key"},
               ExposeHeaders: []string{"X-Request-ID"},
               MaxAgeSeconds: config.Duration{Duration: 600 * time.Second},
           },

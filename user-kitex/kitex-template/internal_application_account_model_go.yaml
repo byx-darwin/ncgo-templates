@@ -1,0 +1,186 @@
+# ncgo exported template — internal/application/account/model.go
+path: internal/application/account/model.go
+update_behavior:
+    type: cover
+body: |
+    // Package account implements application identities and persistent device sessions.
+    package account
+
+    import (
+        "context"
+        "crypto/rand"
+        "crypto/sha256"
+        "encoding/base64"
+        "encoding/hex"
+        "errors"
+        "math/big"
+        "net/mail"
+        "regexp"
+        "strings"
+        "time"
+
+        "{{.Module}}/internal/application/accountconfig"
+        goerror "github.com/byx-darwin/go-tools/go-common/error"
+        "github.com/jackc/pgx/v5/pgxpool"
+    )
+
+    const AccessTTL = 15 * time.Minute
+    const SessionTTL = 30 * 24 * time.Hour
+    const CodeTTL = 5 * time.Minute
+
+    var (
+        ErrInvalid      = goerror.In("account").Code(10002).Public("invalid_credentials").New("invalid credentials or expired verification")
+        ErrInput        = goerror.In("account").Code(10001).Public("invalid_request").New("invalid account request")
+        ErrConflict     = goerror.In("account").Code(10001).Public("identity_unavailable").New("identity unavailable")
+        ErrLastIdentity = goerror.In("account").Code(10001).Public("last_login_identity").New("at least one available login identity is required")
+        ErrRate         = goerror.In("account").Code(10200).Public("rate_limited").New("too many attempts")
+        phonePattern    = regexp.MustCompile(`^\+861[3-9][0-9]{{ "{" }}9{{ "}" }}$`)
+    )
+
+    type ConfigManager interface {{ "{" }}
+        Methods(context.Context, string) ([]accountconfig.Method, error)
+        Allowed(context.Context, string, string) error
+        Enabled(context.Context, string, string) (accountconfig.Config, error)
+        SendCode(context.Context, string, string, string, string) error
+        OAuthStart(context.Context, accountconfig.Config, string, string, string) (string, error)
+        OAuthExchange(context.Context, accountconfig.Config, string, string, string) (accountconfig.ExternalIdentity, error)
+    {{ "}" }}
+    type Service struct {{ "{" }}
+        pool        *pgxpool.Pool
+        config      ConfigManager
+        key         []byte
+        environment string
+        now         func() time.Time
+        policy      Policy
+        initErr     error
+    {{ "}" }}
+
+    func New(pool *pgxpool.Pool, c ConfigManager, key, environment string) *Service {{ "{" }}
+        policy, err := deploymentPolicy()
+        return &Service{{ "{" }}pool: pool, config: c, key: []byte(key), environment: environment, now: time.Now, policy: policy, initErr: err{{ "}" }}
+    {{ "}" }}
+    func (s *Service) ready() error {{ "{" }}
+        if s.initErr != nil {{ "{" }}
+            return s.initErr
+        {{ "}" }}
+        if s.environment == "production" && (string(s.key) == "development-signing-secret-replace-before-deploy" || string(s.key) == "dev-secret-change-me") {{ "{" }}
+            return errors.New("account: configure a private production JWT signing key")
+        {{ "}" }}
+        if s.pool == nil || s.config == nil || len(s.key) < 32 || s.environment == "" {{ "{" }}
+            return errors.New("account: database, configuration, environment and >=32-byte JWT signing key are required")
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+
+    type CodeInput struct{{ "{" }} ClientID, Kind, Identifier, Purpose, AccessToken, IP string {{ "}" }}
+    type LoginInput struct{{ "{" }} ClientID, Kind, Mode, Identifier, Credential, IP, UserAgent string {{ "}" }}
+    type ResetInput struct{{ "{" }} ClientID, Kind, Identifier, Code, NewPassword, IP string {{ "}" }}
+    type ContactInput struct{{ "{" }} AccessToken, ClientID, Operation, Kind, Identifier, Code, Proof, IP string {{ "}" }}
+    type PasswordInput struct{{ "{" }} AccessToken, ClientID, NewPassword, OldPassword, Proof string {{ "}" }}
+    type ProofInput struct{{ "{" }} AccessToken, ClientID, Mode, Kind, Identifier, Credential, IP string {{ "}" }}
+    type OAuthStartInput struct{{ "{" }} AccessToken, ClientID, ConfigID, Purpose, Proof, ReturnURL string {{ "}" }}
+    type OAuthCompleteInput struct{{ "{" }} ClientID, ConfigID, State, Code, IP, UserAgent string {{ "}" }}
+    type Tokens struct {{ "{" }}
+        UID          string `json:"uid"`
+        AccessToken  string `json:"access_token"`
+        RefreshToken string `json:"refresh_token"`
+        ExpiresIn    int64  `json:"expires_in"`
+        IsNewUser    bool   `json:"is_new_user"`
+    {{ "}" }}
+    type Session struct {{ "{" }}
+        UID      string `json:"uid"`
+        ID       string `json:"session_id"`
+        ClientID string `json:"client_id"`
+    {{ "}" }}
+    type Identity struct {{ "{" }}
+        ConfigID string `json:"config_id"`
+        Provider string `json:"provider"`
+        Name     string `json:"name"`
+    {{ "}" }}
+    type Profile struct {{ "{" }}
+        UID         string     `json:"uid"`
+        Nickname    string     `json:"nickname"`
+        Avatar      string     `json:"avatar"`
+        Phone       string     `json:"phone"`
+        Email       string     `json:"email"`
+        HasPassword bool       `json:"has_password"`
+        Identities  []Identity `json:"identities"`
+    {{ "}" }}
+    type OAuthStartResult struct {{ "{" }}
+        RedirectURL string `json:"redirect_url"`
+        State       string `json:"state"`
+        Flow        string `json:"flow"`
+        AppID       string `json:"app_id"`
+        AuthInfo    string `json:"auth_info"`
+    {{ "}" }}
+    type ExchangeResult struct {{ "{" }}
+        Tokens  *Tokens `json:"tokens,omitempty"`
+        Proof   string  `json:"proof"`
+        Purpose string  `json:"purpose"`
+    {{ "}" }}
+    type OAuthResult struct {{ "{" }}
+        ExchangeCode string  `json:"exchange_code"`
+        ClientID     string  `json:"client_id"`
+        Tokens       *Tokens `json:"tokens,omitempty"`
+        ReturnURL    string  `json:"return_url"`
+        Purpose      string  `json:"purpose"`
+        Proof        string  `json:"proof"`
+    {{ "}" }}
+
+    func Normalize(kind, value string) (string, error) {{ "{" }}
+        value = strings.TrimSpace(value)
+        switch kind {{ "{" }}
+        case "phone":
+            if !strings.HasPrefix(value, "+") {{ "{" }}
+                value = "+86" + value
+            {{ "}" }}
+            if !phonePattern.MatchString(value) {{ "{" }}
+                return "", ErrInput
+            {{ "}" }}
+            return value, nil
+        case "email":
+            if len(value) > 254 || strings.ContainsAny(value, "\r\n") {{ "{" }}
+                return "", ErrInput
+            {{ "}" }}
+            a, e := mail.ParseAddress(value)
+            if e != nil || a.Address != value || !strings.Contains(value, "@") {{ "{" }}
+                return "", ErrInput
+            {{ "}" }}
+            return strings.ToLower(value), nil
+        default:
+            return "", ErrInput
+        {{ "}" }}
+    {{ "}" }}
+    func hash(v string) string {{ "{" }} x := sha256.Sum256([]byte(v)); return hex.EncodeToString(x[:]) {{ "}" }}
+    func randomToken() (string, error) {{ "{" }}
+        b := make([]byte, 32)
+        _, e := rand.Read(b)
+        return base64.RawURLEncoding.EncodeToString(b), e
+    {{ "}" }}
+    func numericCode() (string, error) {{ "{" }}
+        n, e := rand.Int(rand.Reader, big.NewInt(1000000))
+        if e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        return strings.Repeat("0", 6-len(n.String())) + n.String(), nil
+    {{ "}" }}
+    func mask(kind, v string) string {{ "{" }}
+        if v == "" {{ "{" }}
+            return ""
+        {{ "}" }}
+        if kind == "phone" && len(v) >= 11 {{ "{" }}
+            return v[:5] + "****" + v[len(v)-4:]
+        {{ "}" }}
+        p := strings.SplitN(v, "@", 2)
+        if len(p) == 2 {{ "{" }}
+            return string([]rune(p[0])[:1]) + "***@" + p[1]
+        {{ "}" }}
+        return "***"
+    {{ "}" }}
+    func validPassword(v string) bool {{ "{" }} return len(v) >= 8 && len(v) <= 128 {{ "}" }}
+    func validClient(v string) bool {{ "{" }}
+        return len(v) > 0 && len(v) <= 100 && regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(v)
+    {{ "}" }}
+
+    // MaskIdentity returns a display-only contact; verified originals never leave account storage.
+    func MaskIdentity(kind, value string) string {{ "{" }} return mask(kind, value) {{ "}" }}

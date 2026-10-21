@@ -1,0 +1,71 @@
+# ncgo exported template — internal/application/accountconfig/doc.go
+path: internal/application/accountconfig/doc.go
+update_behavior:
+    type: cover
+body: |-
+    // Package accountconfig implements deployment-scoped login configuration.
+    //
+    // Config.Kind is method, oauth, sms or smtp. Method providers are phone_code,
+    // phone_password, email_code and email_password. Every enabled method/OAuth
+    // instance requires explicit client IDs. Transport clients are ignored: exactly
+    // one enabled, complete SMS/SMTP transport serves its deployment environment.
+    // Delivery readiness gates verification-code entries; password login remains
+    // configured independently and stays available when delivery is disabled.
+    //
+    // Public settings and write-only Secret keys are allowlisted:
+    //
+    //   - OAuth common settings: client_id, mode, redirect_url, return_urls, scopes,
+    //     icon. return_urls is a JSON array encoded in a string, containing exact
+    //     HTTPS application return URLs. redirect_url is the registered provider
+    //     callback URL. Secrets: client_secret.
+    //   - WeChat provider=wechat supports mode=web, app, miniprogram. Native modes
+    //     return an empty OAuthStart URL; clients use their official SDK and submit
+    //     the resulting code with the server-issued state. Mini-program session keys
+    //     remain internal and are never returned.
+    //   - GitHub and Google support web mode. Generic oidc additionally requires
+    //     issuer_url and verifies signed ID tokens, issuer, audience and nonce.
+    //   - Alipay supports web/app and uses write-only private_key/public_key RSA PEM
+    //     or base64 DER credentials. public_key is the Alipay platform verification
+    //     key. App mode additionally requires pid (2088-prefixed 16-digit merchant
+    //     ID). OAuthStart returns signed native SDK authInfo for app mode; web mode
+    //     returns an HTTPS authorization URL. Native scope is the SDK's kuaijie.
+    //   - SMS templates: template_login, template_bind, template_replace,
+    //     template_reauth and template_reset select approved provider templates per
+    //     purpose. template_id is an explicit default fallback. Enabled transports
+    //     require either a default or all five purpose templates. Accepted purposes
+    //     are exactly login, bind, replace, reauth and reset.
+    //   - Aliyun SMS settings: sign_name, optional template_id, optional code_parameter
+    //     (default code), optional region (default cn-hangzhou). Secrets:
+    //     access_key_id, access_key_secret.
+    //   - Tencent SMS settings: sdk_app_id, sign_name, optional template_id, region
+    //     (default ap-guangzhou). Secrets: secret_id, secret_key.
+    //   - SMTP settings: host, port, tls_mode (tls or starttls), from, optional
+    //     from_name and subject (fallback). subject_login, subject_bind,
+    //     subject_replace, subject_reauth and subject_reset override the subject per
+    //     purpose. Optional body_template is plain text containing {{ "{" }}code{{ "}" }}; it may
+    //     also use {{ "{" }}purpose{{ "}" }} and {{ "{" }}minutes{{ "}" }} (5). Omitted templates retain the built-in
+    //     message. Header values reject line breaks. Secrets: username, password.
+    //     TLS and certificate
+    //     verification are mandatory for both SMTP modes.
+    //
+    // Provider/kind and OAuth identity namespace fields (client_id, mode, issuer_url,
+    // pid) are immutable for an existing configuration ID. A different application
+    // or issuer must receive a new configuration ID. Secret rotation preserves the
+    // namespace; omitted/empty secret fields preserve existing values.
+    //
+    // Environment and the decoded AES-GCM key come from server configuration. No
+    // request can override the environment. Only Enabled returns decrypted provider
+    // credentials to trusted internal callers; List/Save and audit rows expose none.
+    // Test sends require an explicit administrator action and target and support SMS
+    // and SMTP transports, including disabled configurations being prepared. Test
+    // sends select the login-purpose delivery template and are audited as tests.
+    // Administrator SMS test targets accept trimmed mainland 11-digit numbers or
+    // their +86 form; other country codes remain unsupported.
+    //
+    // HTTP/OIDC and SMTP connections reject private/reserved IPs at dial time, use
+    // deadlines and validate certificates. HTTP redirects and oversized bodies are
+    // rejected. Local fixtures may explicitly opt in using server environment
+    // ACCOUNT_PROVIDER_ALLOW_PRIVATE_ENDPOINTS=1, which is honored only when the
+    // server environment is development, test or local. This does not disable SMTP
+    // TLS or certificate validation. Production has no private-endpoint override.
+    package accountconfig

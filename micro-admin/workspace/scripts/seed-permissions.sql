@@ -8,10 +8,16 @@ INSERT INTO permissions (code,type,name,path,sort,status) VALUES
 ('system:role','menu','Roles','/system/role',2,1),
 ('system:permission','menu','Permissions','/system/permission',3,1),
 ('system:rate-limit','menu','Rate Limits','/system/rate-limit',4,1),
-('system:terminal-user','menu','Terminal Users','/system/terminal-user',5,1)
+('system:terminal-user','menu','Terminal Users','/system/terminal-user',5,1),
+('system:auth','menu','Authentication','/system/auth',6,1)
 ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,sort=EXCLUDED.sort;
 UPDATE permissions SET parent_id=(SELECT id FROM permissions WHERE code='system:view' AND type='catalog')
-WHERE code IN ('system:user','system:role','system:permission','system:rate-limit','system:terminal-user') AND type='menu';
+WHERE code IN ('system:user','system:role','system:permission','system:rate-limit','system:terminal-user','system:auth') AND type='menu';
+INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('auth-config:read','api','auth-config:read','/api/v1/auth-configs','GET',(SELECT id FROM permissions WHERE code='system:auth' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
+INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('auth-config:update','api','auth-config:update','/api/v1/auth-configs','POST',(SELECT id FROM permissions WHERE code='system:auth' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
+INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('auth-config:update','button','auth-config:update',NULL,NULL,(SELECT id FROM permissions WHERE code='system:auth' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
+INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('auth-config:test','api','auth-config:test','/api/v1/auth-configs/:id/test','POST',(SELECT id FROM permissions WHERE code='system:auth' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
+INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('auth-config:test','button','auth-config:test',NULL,NULL,(SELECT id FROM permissions WHERE code='system:auth' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
 INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('user:approve','api','user:approve','/api/v1/rbac/dingtalk-applications','GET',(SELECT id FROM permissions WHERE code='system:user' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
 INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('user:approve','button','user:approve',NULL,NULL,(SELECT id FROM permissions WHERE code='system:user' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;
 INSERT INTO permissions (code,type,name,path,method,parent_id,sort,status) VALUES ('user:read','api','user:read','/api/v1/users','GET',(SELECT id FROM permissions WHERE code='system:user' AND type='menu'),0,1) ON CONFLICT (code,type) DO UPDATE SET name=EXCLUDED.name,path=EXCLUDED.path,method=EXCLUDED.method,parent_id=EXCLUDED.parent_id;

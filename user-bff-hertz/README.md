@@ -1,31 +1,8 @@
 # user-bff-hertz
 
-Official **end-user BFF (Backend for Frontend)** Hertz HTTP template — a login gateway in front of `user-kitex`, supporting local username/password auth and third-party OAuth2/OIDC login, with one-time-code JWT exchange and account binding/unbinding.
+Application-account HTTP gateway for `user-kitex`: phone/email verification codes and account passwords, persistent sessions, and configured OAuth providers. There is no username registration or login endpoint. Administrator operator authentication belongs to `admin-bff-hertz`.
 
-## Overview
-
-`user-bff-hertz` sits in front of `user-kitex` (the authority RPC service for end-user accounts) and exposes an HTTP surface for browser/mobile clients:
-
-- **Local auth** — username/password register + login, delegated to `user-kitex`.
-- **OAuth2/OIDC login** — start/callback flow against third-party providers, brokered through `user-kitex`.
-- **One-time code → JWT exchange** — the OAuth callback redirects the browser with a short-lived opaque code instead of the JWT itself; the frontend then calls `POST /auth/oauth/exchange` server-to-server (or from a script, never left sitting in browser history/referrer headers/logs) to redeem it for the real token.
-- **Account binding** — an already-authenticated user can bind/unbind additional third-party identities to their account.
-
-**Architecture:**
-```
-Client → user-bff-hertz (BFF) → user-kitex (Authority)
-         - CORS                  - Local register/login
-         - JWT validation        - OAuth start/callback/bind (state carries uid+purpose)
-         - Idempotency           - RuleService (rate limit rules, via rule-center)
-         - Rate limit
-```
-
-### Why a one-time code, not a direct JWT redirect?
-
-After a successful OAuth callback, `user-bff-hertz` cannot safely hand the JWT back to the browser via a `302` redirect query parameter — URLs land in browser history, server access logs, and `Referer` headers. Instead:
-
-1. `GET /auth/oauth/:provider/callback` exchanges the provider's code with `user-kitex`, receives a JWT, stores it in `oauthcode.Store` (Redis-backed, short TTL) under a freshly generated one-time code, and redirects the browser to `oauth_redirect.success_url?code=<one-time-code>`.
-2. The frontend immediately calls `POST /auth/oauth/exchange` with that code. The store consumes (deletes) it on first read and returns the JWT. A second exchange attempt with the same code fails.
+Clients send their configured `X-Client-ID` on requests. Public JSON requests may supply `client_id` instead; if both are present they must match. Protected requests require both the header and `Authorization: Bearer <access_token>`. Every protected request verifies the persistent session through `AccountVerify`; local JWT settings cannot bypass this check. Request-body user IDs, access tokens, IP addresses and user agents never establish the acting identity.
 
 ## Quick Start
 
@@ -62,82 +39,43 @@ go build ./...
 > package is published there) works the same way — Steps 2-4 are unaffected by how the
 > template package itself was obtained.
 
-## Required Upstream Configuration
+## Configuration
 
-`conf/dev/conf.yaml` (and any other environment config) must point at real running instances of `user-kitex` and `rule-center`, and must share `user-kitex`'s JWT signing key:
+Point `rpc.user_service` at `user-kitex` and `rpc.rule_center` at the rule service. The account environment, enabled client methods, provider instances and encrypted credentials are controlled by `user-kitex` and the administrator configuration page. Changes apply without restarting the BFF.
 
-```yaml
-rpc:
-  user_service:
-    service_name: "userservice"
-    host_ports:
-      - "127.0.0.1:8888"   # user-kitex
-  rule_center:
-    service_name: "rulecenterservice"
-    host_ports:
-      - "127.0.0.1:8889"   # rule-center
+OAuth exchange grants expire after 60 seconds and are stored only as hashes in the account service PostgreSQL database. The BFF does not use Redis for account OAuth exchange and never stores token or proof material. Configure `oauth_redirect.success_url` to a frontend URL exactly allowlisted on each OAuth instance. Callback destinations come from the server's consumed OAuth state; a caller-supplied redirect URL is ignored. Configure CORS origins for your clients and include `X-Client-ID` in any custom `allow_headers` list.
 
-# auth.token.signing_key MUST match user-kitex's own signing key exactly —
-# user-bff-hertz only verifies JWTs, it never issues them. user-kitex signs
-# with HS256 using this same secret (see user-kitex's own conf_dev.yaml).
-auth:
-  token:
-    enabled: true
-    header: "Authorization"
-    signing_key: "dev-secret-change-me"
+## API routes
 
-oauth_code:
-  ttl_seconds: "60s"
+All responses use the usual response envelope.
 
-# Where the browser is redirected to after each OAuth flow completes.
-# Replace with real frontend URLs in every non-dev environment.
-oauth_redirect:
-  success_url: "http://localhost:3000/auth/callback"
-  bind_success_url: "http://localhost:3000/settings/connections"
-  error_url: "http://localhost:3000/auth/error"
-```
+| Method | Path | Authentication / behavior |
+|---|---|---|
+| GET | `/auth/methods` | Client header; discover available methods |
+| POST | `/auth/code` | `kind`, `identifier`, `purpose`; bearer session required for reauth/bind/replace |
+| POST | `/auth/login` | `kind: phone/email`, `mode: code/password`, `identifier`, `credential`; returns access/refresh tokens |
+| POST | `/auth/refresh` | `refresh_token`; rotates opaque refresh credentials |
+| POST | `/auth/logout` | Bearer session; revokes the current session |
+| GET / PATCH | `/auth/me` | Bearer session; read profile or update `nickname` and `avatar` |
+| POST | `/auth/reauth` | Bearer session; `mode`, `kind`, `identifier`, `credential`; returns a short-lived proof |
+| POST | `/auth/contact` | Bearer session; `operation: bind/replace/unbind`, `kind`, `identifier`, target `code`, existing-identity `proof` |
+| POST | `/auth/password` | Bearer session; `new_password` plus `old_password` for changes, or contact-code reauth `proof` for initial setup |
+| POST | `/auth/password-reset/request` | `kind`, `identifier`; same public response for known/unknown accounts |
+| POST | `/auth/password-reset/confirm` | `kind`, `identifier`, `code`, `new_password`; resets an existing account |
+| GET / POST | `/auth/oauth/:config/start` | Returns `redirect_url`, `state`, `flow`, `app_id`, and provider-specific `auth_info`; `purpose` defaults to login, bind/reauth/replace require bearer session and bind/replace require an existing-identity proof |
+| GET / POST | `/auth/oauth/:config/callback` | `state`, provider `code` (Alipay also accepts `auth_code`); login/reauth GET redirects with an opaque exchange code, POST returns that code; bind/replace return completion status |
+| POST | `/auth/oauth/exchange` | Client-bound `code`; authority consumes once, creates credentials only at exchange, and rechecks policy; login returns session tokens, reauth returns `{proof,purpose}` |
 
-`rate_limit` and `idempotency` are configured the same way as other ncgo Hertz templates; see `conf/dev/conf.yaml` in the rendered project for the full set of keys.
+Supported code purposes are `login`, `reset`, `reauth`, `bind`, and `replace`. To establish the first password, send a `reauth` code to an already bound phone/email, exchange it through `/auth/reauth`, and pass the returned proof to `/auth/password`. Changing an existing password requires the old password.
 
-## API Routes
+OAuth browser callbacks recover the client and acting user from single-use server state, so they need no bearer header. Native POST callbacks may send `X-Client-ID`; a mismatch with state is rejected. When `code` and `auth_code` are both supplied, they must be identical; conflicting aliases are rejected before the RPC consumes OAuth state. The callback URL contains only the opaque exchange code. Sessions and reauthentication proofs are created only when the grant is redeemed. Callback and exchange responses send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Alipay app clients use the signed `auth_info` start field to launch the SDK authorization flow, then POST its authorization code with the original state.
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/ping` | none | Basic connectivity check (generated from `idl/app/*.proto`) |
-| POST | `/auth/register` | none | Local register — delegates to `user-kitex` |
-| POST | `/auth/login` | none | Local login — returns `{uid, token}` |
-| GET | `/auth/oauth/:provider/start` | none | Begin login-flow OAuth redirect |
-| GET | `/auth/oauth/:provider/callback` | none | Complete login-flow OAuth redirect; redirects browser with a one-time code |
-| POST | `/auth/oauth/exchange` | none | Redeem the one-time code from the callback redirect for the JWT |
-| GET | `/auth/oauth/:provider/bind-start` | JWT | Begin bind-flow OAuth redirect for the authenticated user |
-| GET | `/auth/oauth/:provider/bind-callback` | none* | Complete bind-flow OAuth redirect |
-| DELETE | `/auth/oauth/:provider/bind` | JWT | Unbind a third-party identity from the authenticated user |
-| POST | `/auth/change-password` | JWT | Self-service password change — verifies the old password, then revokes existing tokens |
-| POST | `/auth/password-reset/request` | none | Public endpoint, no JWT required, rate-limited — requests a password reset; always returns success whether or not the identifier matched an account (anti-enumeration) |
-| POST | `/auth/password-reset/confirm` | none | Public endpoint, no JWT required, rate-limited — consumes a one-time reset token to set a new password |
+The HTTP login/reset routes also apply configured coarse rate limits. `user-kitex` enforces shared PostgreSQL subject/IP limits, five-attempt OTP consumption, client policy, identity uniqueness, session rotation and revocation. Disabling login channels stops new logins/binds while existing sessions retain refresh access until revoked or expired.
 
-\* `bind-callback` itself carries no `Authorization` header (it's a browser redirect from the OAuth provider) — the identity being bound is recovered from the OAuth `state` value that `bind-start` minted from the caller's JWT `uid`, not from anything supplied in the callback request itself.
+## Related templates
 
-`POST /auth/register` also runs through the `Idempotency` middleware when `idempotency.enabled: true`; both `/auth/register` and `/auth/login` run through `RateLimit` (`pre_auth` / `post_auth` phases respectively), `/auth/change-password` runs through `RateLimit`'s `password_change` phase (it verifies the caller's old password, so it must be throttled like a login), and `/auth/password-reset/request` / `/auth/password-reset/confirm` run through `RateLimit`'s `password_reset_request` / `password_reset_confirm` phases respectively.
-
-The password reset endpoints also apply identifier-scoped checks after parsing
-the request body. The confirm check uses the phone number alongside the IP
-check; this depends on the identifier dimension added in Issue #78. Failed
-SMS-code attempts count toward the limit. With `rate_limit.backend: redis`,
-both checks share Redis across replicas.
-
-> **Client contract:** while `idempotency.enabled: true` (the shipped `conf/dev/conf.yaml` default), every `POST /auth/register` request **must** carry an `X-Idempotency-Key` header — the middleware rejects a request without one with `400 {"code":10203,"msg":"idempotency_key_missing"}` before the handler runs. Set `idempotency.enabled: false`, or add `/auth/register` to `idempotency.skip_paths`, if you do not want that requirement.
-
-## Seams
-
-- **Issue #66 — JWT `Claims` field mismatch (resolved).** `base-hertz`/`admin-bff-hertz`/`ratelimit-hertz` previously defined `Claims{UserID, UUID, AK, Roles}`, decoding an empty identity from every real `user-kitex`/`rbac-kitex`-issued token (which only ever signs `{uid, roles}`). All three packages have since been fixed to use `Claims{Uid, AK, Roles}`, matching the issuer schema. This package's own `internal/pkg/middleware/token.go` still defines its **own** `Claims{Uid, Roles}` shape rather than reusing `admin-bff-hertz`'s `Claims` type — that remains a package-local choice (no `AK`/API-key path here), not a bug workaround.
-- **`admin-bff-hertz` terminal-user-management integration is out of scope here.** Giving admin operators the ability to manage end-user accounts (the ones this package's `user-kitex` backend owns) through `admin-bff-hertz` is a separate, not-yet-started body of work (Plan 3). `user-bff-hertz` and `admin-bff-hertz` do not currently share code or wiring beyond both being ncgo Hertz templates.
-
-## Related Templates
-
-- **user-kitex** — the authority RPC service this template is a gateway for (local auth, OAuth brokering, account binding, state-carries-uid OAuth state store).
-- **admin-bff-hertz** — the separate admin-facing BFF (JWT + RBAC), not integrated with `user-kitex` end-user accounts (see Seams above).
-- **base-hertz** — the basic HTTP service template this one is built on.
+- `user-kitex`: application-account authority and provider adapters.
+- `admin-bff-hertz`: administrator JWT/RBAC, application-user management and authentication configuration APIs.
 
 ## License
 

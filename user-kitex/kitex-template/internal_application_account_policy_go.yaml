@@ -1,0 +1,47 @@
+# ncgo exported template — internal/application/account/policy.go
+path: internal/application/account/policy.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "fmt"
+        "os"
+        "strconv"
+        "time"
+    )
+
+    // Policy is controlled only by the service deployment, never by public clients.
+    type Policy struct {{ "{" }}
+        AccessTTL, SessionTTL                                                          time.Duration
+        SendIPHourly, SendSubjectHourly, VerifyIPQuarterHour, VerifySubjectQuarterHour int
+    {{ "}" }}
+
+    func deploymentPolicy() (Policy, error) {{ "{" }}
+        p := Policy{{ "{" }}AccessTTL: AccessTTL, SessionTTL: SessionTTL, SendIPHourly: 20, SendSubjectHourly: 10, VerifyIPQuarterHour: 100, VerifySubjectQuarterHour: 25{{ "}" }}
+        limits := []struct {{ "{" }}
+            name     string
+            min, max int
+            set      func(int)
+        {{ "}" }}{{ "{" }}
+            {{ "{" }}"ACCOUNT_ACCESS_TTL_SECONDS", 1, 3600, func(v int) {{ "{" }} p.AccessTTL = time.Duration(v) * time.Second {{ "}" }}{{ "}" }},
+            {{ "{" }}"ACCOUNT_SESSION_IDLE_DAYS", 1, 365, func(v int) {{ "{" }} p.SessionTTL = time.Duration(v) * 24 * time.Hour {{ "}" }}{{ "}" }},
+            {{ "{" }}"ACCOUNT_SEND_IP_HOURLY_LIMIT", 1, 10000, func(v int) {{ "{" }} p.SendIPHourly = v {{ "}" }}{{ "}" }},
+            {{ "{" }}"ACCOUNT_SEND_SUBJECT_HOURLY_LIMIT", 1, 1000, func(v int) {{ "{" }} p.SendSubjectHourly = v {{ "}" }}{{ "}" }},
+            {{ "{" }}"ACCOUNT_VERIFY_IP_QUARTER_HOUR_LIMIT", 1, 10000, func(v int) {{ "{" }} p.VerifyIPQuarterHour = v {{ "}" }}{{ "}" }},
+            {{ "{" }}"ACCOUNT_VERIFY_SUBJECT_QUARTER_HOUR_LIMIT", 1, 1000, func(v int) {{ "{" }} p.VerifySubjectQuarterHour = v {{ "}" }}{{ "}" }},
+        {{ "}" }}
+        for _, limit := range limits {{ "{" }}
+            raw := os.Getenv(limit.name)
+            if raw == "" {{ "{" }}
+                continue
+            {{ "}" }}
+            n, e := strconv.Atoi(raw)
+            if e != nil || n < limit.min || n > limit.max {{ "{" }}
+                return p, fmt.Errorf("invalid deployment policy %s", limit.name)
+            {{ "}" }}
+            limit.set(n)
+        {{ "}" }}
+        return p, nil
+    {{ "}" }}

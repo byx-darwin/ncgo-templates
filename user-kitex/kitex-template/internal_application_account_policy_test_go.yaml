@@ -1,0 +1,30 @@
+# ncgo exported template — internal/application/account/policy_test.go
+path: internal/application/account/policy_test.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "testing"
+        "time"
+    )
+
+    func TestDeploymentPolicyDefaultsAndValidation(t *testing.T) {{ "{" }}
+        t.Setenv("ACCOUNT_ACCESS_TTL_SECONDS", "")
+        t.Setenv("ACCOUNT_SESSION_IDLE_DAYS", "")
+        p, e := deploymentPolicy()
+        if e != nil || p.AccessTTL != 15*time.Minute || p.SessionTTL != 30*24*time.Hour {{ "{" }}
+            t.Fatal(p, e)
+        {{ "}" }}
+        t.Setenv("ACCOUNT_ACCESS_TTL_SECONDS", "120")
+        t.Setenv("ACCOUNT_SESSION_IDLE_DAYS", "7")
+        p, e = deploymentPolicy()
+        if e != nil || p.AccessTTL != 2*time.Minute || p.SessionTTL != 7*24*time.Hour {{ "{" }}
+            t.Fatal(p, e)
+        {{ "}" }}
+        t.Setenv("ACCOUNT_ACCESS_TTL_SECONDS", "0")
+        if _, e = deploymentPolicy(); e == nil {{ "{" }}
+            t.Fatal("invalid policy accepted")
+        {{ "}" }}
+    {{ "}" }}

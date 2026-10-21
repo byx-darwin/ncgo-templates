@@ -1,0 +1,160 @@
+# ncgo exported template — internal/application/accountconfig/network.go
+path: internal/application/accountconfig/network.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "context"
+        "crypto/tls"
+        "errors"
+        "io"
+        "net"
+        "net/http"
+        "net/netip"
+        "net/url"
+        "strings"
+        "time"
+    )
+
+    // All resolution happens again at dial time and connects to the vetted literal IP,
+    // closing the DNS-rebinding gap between validation and connection establishment.
+    func publicIP(ip net.IP) bool {{ "{" }}
+        a, ok := netip.AddrFromSlice(ip)
+        if !ok {{ "{" }}
+            return false
+        {{ "}" }}
+        a = a.Unmap()
+        if !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() {{ "{" }}
+            return false
+        {{ "}" }}
+        for _, s := range []string{{ "{" }}"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "168.63.129.16/32", "64:ff9b::/96", "64:ff9b:1::/48", "::/96", "fec0::/10", "2001::/23", "2001:db8::/32", "2001::/32", "2002::/16"{{ "}" }} {{ "{" }}
+            if netip.MustParsePrefix(s).Contains(a) {{ "{" }}
+                return false
+            {{ "}" }}
+        {{ "}" }}
+        return true
+    {{ "}" }}
+    func (m *Manager) endpoint(_ context.Context, raw string) (*url.URL, error) {{ "{" }}
+        if !m.publicURL(raw) {{ "{" }}
+            return nil, errors.New("provider endpoint is not an allowed HTTPS URL")
+        {{ "}" }}
+        u, err := url.Parse(raw)
+        if err != nil {{ "{" }}
+            return nil, errors.New("invalid provider endpoint")
+        {{ "}" }}
+        return u, nil
+    {{ "}" }}
+    func (m *Manager) dial(ctx context.Context, network, address string) (net.Conn, error) {{ "{" }}
+        host, port, err := net.SplitHostPort(address)
+        if err != nil {{ "{" }}
+            return nil, errors.New("invalid provider address")
+        {{ "}" }}
+        ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+        if err != nil || len(ips) == 0 {{ "{" }}
+            return nil, errors.New("provider hostname resolution failed")
+        {{ "}" }}
+        for _, ip := range ips {{ "{" }}
+            if !m.allowPrivate && !publicIP(ip.IP) {{ "{" }}
+                return nil, errors.New("provider address resolves to a prohibited network")
+            {{ "}" }}
+        {{ "}" }}
+        dialer := net.Dialer{{ "{" }}Timeout: 8 * time.Second, KeepAlive: 15 * time.Second{{ "}" }}
+        for _, ip := range ips {{ "{" }}
+            conn, e := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+            if e == nil {{ "{" }}
+                return conn, nil
+            {{ "}" }}
+        {{ "}" }}
+        return nil, errors.New("provider connection failed")
+    {{ "}" }}
+    func (m *Manager) newHTTPClient() *http.Client {{ "{" }}
+        return &http.Client{{ "{" }}Timeout: 15 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error {{ "{" }} return errors.New("provider redirects are prohibited") {{ "}" }}, Transport: guardedTransport{{ "{" }}manager: m, base: &http.Transport{{ "{" }}DialContext: m.dial, Proxy: nil, TLSClientConfig: &tls.Config{{ "{" }}MinVersion: tls.VersionTLS12, RootCAs: m.roots{{ "}" }}, TLSHandshakeTimeout: 8 * time.Second, ResponseHeaderTimeout: 10 * time.Second, MaxResponseHeaderBytes: 32768, MaxIdleConns: 20, IdleConnTimeout: 30 * time.Second{{ "}" }}{{ "}" }}{{ "}" }}
+    {{ "}" }}
+    func (m *Manager) request(ctx context.Context, method, raw string, body io.Reader, headers map[string]string) ([]byte, error) {{ "{" }}
+        if _, err := m.endpoint(ctx, raw); err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        req, err := http.NewRequestWithContext(ctx, method, raw, body)
+        if err != nil {{ "{" }}
+            return nil, errors.New("cannot build provider request")
+        {{ "}" }}
+        for k, v := range headers {{ "{" }}
+            req.Header.Set(k, v)
+        {{ "}" }}
+        resp, err := m.http.Do(req)
+        if err != nil {{ "{" }}
+            return nil, errors.New("provider request failed")
+        {{ "}" }}
+        defer resp.Body.Close()
+        if resp.StatusCode < 200 || resp.StatusCode >= 300 {{ "{" }}
+            return nil, errors.New("provider returned an unsuccessful HTTP status")
+        {{ "}" }}
+        rawBody, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
+        if err != nil || len(rawBody) > 1024*1024 {{ "{" }}
+            return nil, errors.New("invalid provider response")
+        {{ "}" }}
+        return rawBody, nil
+    {{ "}" }}
+    func jsonHeaders() map[string]string {{ "{" }}
+        return map[string]string{{ "{" }}"Accept": "application/json", "Content-Type": "application/json"{{ "}" }}
+    {{ "}" }}
+    func formHeaders() map[string]string {{ "{" }}
+        return map[string]string{{ "{" }}"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"{{ "}" }}
+    {{ "}" }}
+    func valueOr(value, fallback string) string {{ "{" }}
+        if strings.TrimSpace(value) == "" {{ "{" }}
+            return fallback
+        {{ "}" }}
+        return value
+    {{ "}" }}
+
+    // Third-party OAuth/OIDC libraries use this same transport, so discovery and JWKS
+    // requests receive the same endpoint, redirect and response-size restrictions.
+    type guardedTransport struct {{ "{" }}
+        manager *Manager
+        base    http.RoundTripper
+    {{ "}" }}
+
+    func (t guardedTransport) RoundTrip(req *http.Request) (*http.Response, error) {{ "{" }}
+        if _, err := t.manager.endpoint(req.Context(), req.URL.String()); err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        resp, err := t.base.RoundTrip(req)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        if resp.ContentLength > 1024*1024 {{ "{" }}
+            resp.Body.Close()
+            return nil, errors.New("provider response exceeds size limit")
+        {{ "}" }}
+        resp.Body = &boundedBody{{ "{" }}body: resp.Body, remaining: 1024 * 1024{{ "}" }}
+        return resp, nil
+    {{ "}" }}
+
+    type boundedBody struct {{ "{" }}
+        body      io.ReadCloser
+        remaining int64
+    {{ "}" }}
+
+    func (b *boundedBody) Read(p []byte) (int, error) {{ "{" }}
+        if len(p) == 0 {{ "{" }}
+            return 0, nil
+        {{ "}" }}
+        if b.remaining == 0 {{ "{" }}
+            var extra [1]byte
+            n, err := b.body.Read(extra[:])
+            if n > 0 {{ "{" }}
+                return 0, errors.New("provider response exceeds size limit")
+            {{ "}" }}
+            return 0, err
+        {{ "}" }}
+        if int64(len(p)) > b.remaining {{ "{" }}
+            p = p[:int(b.remaining)]
+        {{ "}" }}
+        n, err := b.body.Read(p)
+        b.remaining -= int64(n)
+        return n, err
+    {{ "}" }}
+    func (b *boundedBody) Close() error {{ "{" }} return b.body.Close() {{ "}" }}

@@ -7,205 +7,99 @@ body: |
     package handler
 
     import (
-    	"context"
-    	"errors"
-    	"testing"
-    	"time"
-
-    	"github.com/cloudwego/hertz/pkg/app"
-    	"github.com/cloudwego/hertz/pkg/protocol"
-    	"github.com/cloudwego/kitex/client/callopt"
-
-    	config "github.com/byx-darwin/go-tools/go-framework/config"
-
-    	"{{.Module}}/internal/base/conf"
-    	"{{.Module}}/internal/pkg/ratelimit"
-    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "context"
+        "errors"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/kitex/client/callopt"
+        "strings"
+        "testing"
     )
 
-    type fakeUserClient struct {{ "{" }}
-    	userservice.Client
-    	registerFn             func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error)
-    	loginFn                func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error)
-    	requestPasswordResetFn func(ctx context.Context, req *userv1.RequestPasswordResetReq) (*userv1.RequestPasswordResetResp, error)
-    	confirmPasswordResetFn func(ctx context.Context, req *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error)
+    type fakeAccountClient struct {{ "{" }}
+        userservice.Client
+        login        *userv1.AccountLoginReq
+        code         *userv1.AccountCodeReq
+        contact      *userv1.AccountContactReq
+        token        *userv1.AccountTokenReq
+        verifyErr    error
+        profileCalls int
+        verifies     int
     {{ "}" }}
 
-    func (f *fakeUserClient) Register(ctx context.Context, req *userv1.RegisterReq, callOptions ...callopt.Option) (*userv1.RegisterResp, error) {{ "{" }}
-    	return f.registerFn(ctx, req)
+    func (f *fakeAccountClient) AccountLogin(ctx context.Context, r *userv1.AccountLoginReq, _ ...callopt.Option) (*userv1.AccountTokens, error) {{ "{" }}
+        f.login = r
+        return &userv1.AccountTokens{{ "{" }}Uid: "u", AccessToken: "token"{{ "}" }}, nil
     {{ "}" }}
-    func (f *fakeUserClient) Login(ctx context.Context, req *userv1.LoginReq, callOptions ...callopt.Option) (*userv1.LoginResp, error) {{ "{" }}
-    	return f.loginFn(ctx, req)
+    func (f *fakeAccountClient) AccountVerify(ctx context.Context, r *userv1.AccountTokenReq, _ ...callopt.Option) (*userv1.AccountSessionResp, error) {{ "{" }}
+        f.verifies++
+        f.token = r
+        return &userv1.AccountSessionResp{{ "{" }}Uid: "verified-user", ClientId: r.ClientId{{ "}" }}, f.verifyErr
     {{ "}" }}
-    func (f *fakeUserClient) RequestPasswordReset(ctx context.Context, req *userv1.RequestPasswordResetReq, callOptions ...callopt.Option) (*userv1.RequestPasswordResetResp, error) {{ "{" }}
-    	if f.requestPasswordResetFn == nil {{ "{" }}
-    		return &userv1.RequestPasswordResetResp{{ "{" }}{{ "}" }}, nil
-    	{{ "}" }}
-    	return f.requestPasswordResetFn(ctx, req)
+    func (f *fakeAccountClient) AccountProfile(ctx context.Context, r *userv1.AccountTokenReq, _ ...callopt.Option) (*userv1.AccountProfileResp, error) {{ "{" }}
+        f.profileCalls++
+        return &userv1.AccountProfileResp{{ "{" }}Uid: "verified-user"{{ "}" }}, nil
     {{ "}" }}
-    func (f *fakeUserClient) ConfirmPasswordReset(ctx context.Context, req *userv1.ConfirmPasswordResetReq, callOptions ...callopt.Option) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
-    	if f.confirmPasswordResetFn == nil {{ "{" }}
-    		return &userv1.ConfirmPasswordResetResp{{ "{" }}{{ "}" }}, nil
-    	{{ "}" }}
-    	return f.confirmPasswordResetFn(ctx, req)
+    func (f *fakeAccountClient) AccountContact(ctx context.Context, r *userv1.AccountContactReq, _ ...callopt.Option) (*userv1.AccountEmptyResp, error) {{ "{" }}
+        f.contact = r
+        return &userv1.AccountEmptyResp{{ "{" }}{{ "}" }}, nil
     {{ "}" }}
-
-    func newTestContext(method, path, body string) *app.RequestContext {{ "{" }}
-    	c := app.NewContext(0)
-    	req := protocol.NewRequest(method, path, nil)
-    	req.SetBody([]byte(body))
-    	req.CopyTo(&c.Request)
-    	return c
+    func accountEngine(f *fakeAccountClient) *server.Hertz {{ "{" }}
+        h := server.New()
+        a := NewAccountHandler(f)
+        h.POST("/login", a.Login)
+        p := h.Group("", a.SessionAuth())
+        p.GET("/me", a.Me)
+        p.POST("/contact", a.Contact)
+        return h
     {{ "}" }}
-
-    // newTestContextFromIP behaves like newTestContext but also sets
-    // X-Forwarded-For, which Hertz's default ClientIP() reads without any
-    // extra ClientIPOptions configuration — this is how these tests control
-    // c.ClientIP() to prove the identifier-scoped check below does NOT vary
-    // with it (that's the whole point of the fix).
-    func newTestContextFromIP(method, path, body, ip string) *app.RequestContext {{ "{" }}
-    	c := app.NewContext(0)
-    	req := protocol.NewRequest(method, path, nil)
-    	req.SetBody([]byte(body))
-    	req.Header.Set("X-Forwarded-For", ip)
-    	req.CopyTo(&c.Request)
-    	return c
+    func TestLoginUsesActualRequestMetadataAndClientBinding(t *testing.T) {{ "{" }}
+        f := &fakeAccountClient{{ "{" }}{{ "}" }}
+        h := accountEngine(f)
+        body := `{{ "{" }}"client_id":"app","kind":"email","mode":"code","identifier":"a@example.com","credential":"123456","client_ip":"spoof","user_agent":"spoof","uid":"victim"{{ "}" }}`
+        w := ut.PerformRequest(h.Engine, "POST", "/login", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "app"{{ "}" }}, ut.Header{{ "{" }}Key: "User-Agent", Value: "actual-agent"{{ "}" }})
+        if w.Result().StatusCode() != 200 || f.login == nil || f.login.UserAgent != "actual-agent" || f.login.ClientIp == "spoof" || f.login.ClientId != "app" {{ "{" }}
+            t.Fatalf("request extraction: %s %+v", w.Body.String(), f.login)
+        {{ "}" }}
+        f.login = nil
+        ut.PerformRequest(h.Engine, "POST", "/login", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "other"{{ "}" }})
+        if f.login != nil {{ "{" }}
+            t.Fatal("mismatched client reached RPC")
+        {{ "}" }}
     {{ "}" }}
-
-    // identifierRateLimitTestDeps builds a resolver/store/cfg triple wired for
-    // a single phase ("password_reset_request" or "password_reset_confirm")
-    // with an "identifier"-keyed rule allowing maxRequests before throttling.
-    // Deliberately keyed by "identifier" alone (not "ip_identifier"): the
-    // whole point of this check is that rotating the IP must not open a
-    // fresh counter — see TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs.
-    func identifierRateLimitTestDeps(phase string, maxRequests int) (*ratelimit.Resolver, ratelimit.Store, conf.RateLimitConfig) {{ "{" }}
-    	phaseCfg := conf.RateLimitPhaseConfig{{ "{" }}
-    		Enabled: true,
-    		DefaultRule: conf.RateLimitRuleConfig{{ "{" }}
-    			Enabled:       true,
-    			KeyBy:         []string{{ "{" }}"identifier"{{ "}" }},
-    			Strategy:      "fixed_window",
-    			WindowSeconds: config.Duration{{ "{" }}Duration: time.Hour{{ "}" }},
-    			MaxRequests:   maxRequests,
-    		{{ "}" }},
-    	{{ "}" }}
-    	rlCfg := conf.RateLimitConfig{{ "{" }}KeyPrefix: "test"{{ "}" }}
-    	switch phase {{ "{" }}
-    	case "password_reset_request":
-    		rlCfg.PasswordResetRequestIdentifier = phaseCfg
-    	case "password_reset_confirm":
-    		rlCfg.PasswordResetConfirmIdentifier = phaseCfg
-    	{{ "}" }}
-    	resolver := ratelimit.NewResolver(rlCfg, ratelimit.Options{{ "{" }}{{ "}" }})
-    	store := ratelimit.NewStore(conf.RateLimitConfig{{ "{" }}Backend: "memory", KeyPrefix: "test"{{ "}" }}, nil)
-    	return resolver, store, rlCfg
+    func TestProtectedRoutesFailClosedOnRevokedSessionAndNeverTrustBodyToken(t *testing.T) {{ "{" }}
+        f := &fakeAccountClient{{ "{" }}verifyErr: errors.New("revoked"){{ "}" }}
+        h := accountEngine(f)
+        w := ut.PerformRequest(h.Engine, "GET", "/me", nil, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "app"{{ "}" }}, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer header-token"{{ "}" }}, ut.Header{{ "{" }}Key: "X-Forwarded-For", Value: "192.0.2.42"{{ "}" }})
+        if w.Result().StatusCode() == 200 || f.profileCalls != 0 || f.verifies != 1 {{ "{" }}
+            t.Fatalf("revoked session passed: %s", w.Body.String())
+        {{ "}" }}
+        f.verifyErr = nil
+        body := `{{ "{" }}"client_id":"app","uid":"victim","access_token":"body-token","client_ip":"body-spoof","operation":"bind","kind":"phone","identifier":"+8613800000000","code":"123456","proof":"p"{{ "}" }}`
+        ut.PerformRequest(h.Engine, "POST", "/contact", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "app"{{ "}" }}, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer header-token"{{ "}" }}, ut.Header{{ "{" }}Key: "X-Forwarded-For", Value: "192.0.2.42"{{ "}" }})
+        if f.contact == nil || f.contact.AccessToken != "header-token" || f.contact.ClientIp != "192.0.2.42" || f.token.AccessToken != "header-token" || f.verifies != 2 {{ "{" }}
+            t.Fatalf("body spoof accepted: %+v", f.contact)
+        {{ "}" }}
+        f.contact = nil
+        ut.PerformRequest(h.Engine, "POST", "/contact", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "app"{{ "}" }})
+        if f.contact != nil {{ "{" }}
+            t.Fatal("missing bearer accepted body token")
+        {{ "}" }}
     {{ "}" }}
 
-    func TestAuthHandler_Register_Success(t *testing.T) {{ "{" }}
-    	cli := &fakeUserClient{{ "{" }}registerFn: func(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {{ "{" }}
-    		if req.Username != "alice" || req.Password != "hunter22" {{ "{" }}
-    			t.Fatalf("unexpected request: %+v", req)
-    		{{ "}" }}
-    		return &userv1.RegisterResp{{ "{" }}Uid: "uid-1"{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewAuthHandler(cli, nil, nil, conf.RateLimitConfig{{ "{" }}{{ "}" }})
-    	c := newTestContext("POST", "/auth/register", `{{ "{" }}"username":"alice","password":"hunter22"{{ "}" }}`)
-    	h.Register(context.Background(), c)
-    	if c.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
-    	{{ "}" }}
+    func (f *fakeAccountClient) AccountSendCode(ctx context.Context, r *userv1.AccountCodeReq, _ ...callopt.Option) (*userv1.AccountEmptyResp, error) {{ "{" }}
+        f.code = r
+        return &userv1.AccountEmptyResp{{ "{" }}{{ "}" }}, nil
     {{ "}" }}
-
-    func TestAuthHandler_Login_Success(t *testing.T) {{ "{" }}
-    	cli := &fakeUserClient{{ "{" }}loginFn: func(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {{ "{" }}
-    		return &userv1.LoginResp{{ "{" }}Uid: "uid-1", Token: "jwt-token"{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewAuthHandler(cli, nil, nil, conf.RateLimitConfig{{ "{" }}{{ "}" }})
-    	c := newTestContext("POST", "/auth/login", `{{ "{" }}"username":"alice","password":"hunter22"{{ "}" }}`)
-    	h.Login(context.Background(), c)
-    	if c.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestAuthHandler_Register_InvalidJSON(t *testing.T) {{ "{" }}
-    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, nil, nil, conf.RateLimitConfig{{ "{" }}{{ "}" }})
-    	c := newTestContext("POST", "/auth/register", `not-json`)
-    	h.Register(context.Background(), c)
-    	if c.Response.StatusCode() == 200 {{ "{" }}
-    		t.Fatal("expected non-200 for invalid JSON body")
-    	{{ "}" }}
-    {{ "}" }}
-
-    // TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs is the Issue
-    // #78 regression: rotating the client IP must NOT bypass per-account
-    // throttling once the identifier dimension is in play.
-    func TestRequestPasswordResetThrottlesSameIdentifierAcrossIPs(t *testing.T) {{ "{" }}
-    	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_request", 1)
-    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, resolver, store, cfg)
-
-    	body := `{{ "{" }}"identifier":"alice@example.com","channel":"email"{{ "}" }}`
-
-    	c1 := newTestContextFromIP("POST", "/auth/password-reset/request", body, "10.0.0.1")
-    	h.RequestPasswordReset(context.Background(), c1)
-    	if c1.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("first request: expected 200, got %d: %s", c1.Response.StatusCode(), c1.Response.Body())
-    	{{ "}" }}
-
-    	// Same identifier, DIFFERENT IP: must still be throttled.
-    	c2 := newTestContextFromIP("POST", "/auth/password-reset/request", body, "10.0.0.2")
-    	h.RequestPasswordReset(context.Background(), c2)
-    	if c2.Response.StatusCode() == 200 {{ "{" }}
-    		t.Fatalf("second request from a different IP but the same identifier: expected throttling, got 200: %s", c2.Response.Body())
-    	{{ "}" }}
-    {{ "}" }}
-
-    // TestRequestPasswordResetDoesNotCrossThrottleDifferentIdentifiers ensures
-    // the new dimension doesn't over-throttle: two different accounts hitting
-    // the same IP must not share a counter.
-    func TestRequestPasswordResetDoesNotCrossThrottleDifferentIdentifiers(t *testing.T) {{ "{" }}
-    	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_request", 1)
-    	h := NewAuthHandler(&fakeUserClient{{ "{" }}{{ "}" }}, resolver, store, cfg)
-
-    	c1 := newTestContextFromIP("POST", "/auth/password-reset/request", `{{ "{" }}"identifier":"alice@example.com","channel":"email"{{ "}" }}`, "10.0.0.1")
-    	h.RequestPasswordReset(context.Background(), c1)
-    	if c1.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("alice: expected 200, got %d: %s", c1.Response.StatusCode(), c1.Response.Body())
-    	{{ "}" }}
-
-    	// Same IP, DIFFERENT identifier: must NOT be throttled by alice's count.
-    	c2 := newTestContextFromIP("POST", "/auth/password-reset/request", `{{ "{" }}"identifier":"bob@example.com","channel":"email"{{ "}" }}`, "10.0.0.1")
-    	h.RequestPasswordReset(context.Background(), c2)
-    	if c2.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("bob: expected 200 (independent identifier), got %d: %s", c2.Response.StatusCode(), c2.Response.Body())
-    	{{ "}" }}
-    {{ "}" }}
-
-    // The IP and phone dimensions were added by #78. Failed SMS-code
-    // attempts must count, even when the attacker rotates IP addresses.
-    func TestConfirmPasswordResetThrottlesSameIdentifierAcrossIPs(t *testing.T) {{ "{" }}
-    	resolver, store, cfg := identifierRateLimitTestDeps("password_reset_confirm", 1)
-    	calls := 0
-    	h := NewAuthHandler(&fakeUserClient{{ "{" }}confirmPasswordResetFn: func(context.Context, *userv1.ConfirmPasswordResetReq) (*userv1.ConfirmPasswordResetResp, error) {{ "{" }}
-    		calls++
-    		return nil, errors.New("invalid SMS code")
-    	{{ "}" }}{{ "}" }}, resolver, store, cfg)
-
-    	body := `{{ "{" }}"credential":"123456","new_password":"hunter22","phone":"+15550001111"{{ "}" }}`
-
-    	c1 := newTestContextFromIP("POST", "/auth/password-reset/confirm", body, "10.0.0.1")
-    	h.ConfirmPasswordReset(context.Background(), c1)
-    	if calls != 1 {{ "{" }}
-    		t.Fatalf("first wrong-code attempt calls = %d, want 1", calls)
-    	{{ "}" }}
-
-    	c2 := newTestContextFromIP("POST", "/auth/password-reset/confirm", body, "10.0.0.2")
-    	h.ConfirmPasswordReset(context.Background(), c2)
-    	if calls != 1 {{ "{" }}
-    		t.Fatalf("second wrong-code attempt reached the backend; calls = %d", calls)
-    	{{ "}" }}
-    	if c2.Response.StatusCode() != 429 {{ "{" }}
-    		t.Fatalf("second request from a different IP: status = %d, want 429", c2.Response.StatusCode())
-    	{{ "}" }}
+    func TestProtectedCodePurposeRequiresHeaderClientIdentity(t *testing.T) {{ "{" }}
+        f := &fakeAccountClient{{ "{" }}{{ "}" }}
+        h := server.New()
+        h.POST("/code", NewAccountHandler(f).Code)
+        body := `{{ "{" }}"client_id":"app","purpose":"reauth","kind":"email","identifier":"bound@example.com"{{ "}" }}`
+        w := ut.PerformRequest(h.Engine, "POST", "/code", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer session"{{ "}" }})
+        if w.Result().StatusCode() == 200 || f.code != nil || f.verifies != 0 {{ "{" }}
+            t.Fatalf("protected purpose accepted body-only client: %s", w.Body.String())
+        {{ "}" }}
     {{ "}" }}

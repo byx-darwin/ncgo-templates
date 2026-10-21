@@ -1,0 +1,340 @@
+# ncgo exported template — internal/application/accountconfig/storage_test.go
+path: internal/application/accountconfig/storage_test.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "bytes"
+        "context"
+        "crypto/hmac"
+        "crypto/sha1"
+        "encoding/base64"
+        "encoding/json"
+        "io"
+        "net/http"
+        "net/http/httptest"
+        "net/url"
+        "os"
+        "strings"
+        "sync"
+        "sync/atomic"
+        "testing"
+
+        "github.com/jackc/pgx/v5"
+        "github.com/jackc/pgx/v5/pgxpool"
+    )
+
+    func configDatabase(t *testing.T) *pgxpool.Pool {{ "{" }}
+        t.Helper()
+        dsn := os.Getenv("ACCOUNT_TEST_DSN")
+        if dsn == "" {{ "{" }}
+            dsn = os.Getenv("ACCOUNT_TEST_DATABASE_URL")
+        {{ "}" }}
+        if dsn == "" {{ "{" }}
+            t.Skip("set ACCOUNT_TEST_DSN for PostgreSQL integration tests")
+        {{ "}" }}
+        ctx := context.Background()
+        admin, e := pgxpool.New(ctx, dsn)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        schema := "config_" + randomID()
+        quoted := pgx.Identifier{{ "{" }}schema{{ "}" }}.Sanitize()
+        if _, e = admin.Exec(ctx, "CREATE SCHEMA "+quoted); e != nil {{ "{" }}
+            admin.Close()
+            t.Fatal(e)
+        {{ "}" }}
+        cfg, e := pgxpool.ParseConfig(dsn)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        cfg.ConnConfig.RuntimeParams["search_path"] = schema
+        pool, e := pgxpool.NewWithConfig(ctx, cfg)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        t.Cleanup(func() {{ "{" }}
+            pool.Close()
+            admin.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE")
+            admin.Close()
+        {{ "}" }})
+        _, e = pool.Exec(ctx, `CREATE TABLE account_login_configs(id TEXT PRIMARY KEY,environment TEXT NOT NULL,kind TEXT NOT NULL,provider TEXT NOT NULL,name TEXT NOT NULL,clients JSONB NOT NULL,enabled BOOLEAN NOT NULL,sort INTEGER NOT NULL,settings JSONB NOT NULL,secret BYTEA,updated_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE account_config_audit(actor TEXT,action TEXT,config_id TEXT,created_at TIMESTAMPTZ DEFAULT now())`)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        return pool
+    {{ "}" }}
+    func smtpConfig(id string) Config {{ "{" }}
+        return Config{{ "{" }}ID: id, Kind: "smtp", Provider: "smtp", Name: "Mail", Enabled: true, Settings: map[string]string{{ "{" }}"host": "smtp.example.com", "port": "465", "tls_mode": "tls", "from": "auth@example.com"{{ "}" }}, Secret: map[string]string{{ "{" }}"username": "service-user", "password": "private-password"{{ "}" }}{{ "}" }}
+    {{ "}" }}
+    func TestPostgresConfigurationEncryptionRedactionAndSecretPreservation(t *testing.T) {{ "{" }}
+        ctx := context.Background()
+        pool := configDatabase(t)
+        m := New(pool, "production", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        saved, e := m.Save(ctx, smtpConfig("mail"), "admin")
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if saved.Secret != nil || !saved.HasSecret || saved.Environment != "production" {{ "{" }}
+            t.Fatal("save returned secrets or incorrect environment")
+        {{ "}" }}
+        var blob []byte
+        pool.QueryRow(ctx, "SELECT secret FROM account_login_configs WHERE id='mail'").Scan(&blob)
+        if len(blob) == 0 || bytes.Contains(blob, []byte("private-password")) {{ "{" }}
+            t.Fatal("plaintext credential persistence")
+        {{ "}" }}
+        saved.Name = "Updated"
+        saved.Secret = map[string]string{{ "{" }}"password": ""{{ "}" }}
+        if _, e = m.Save(ctx, saved, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        configs, e := m.load(ctx, true)
+        if e != nil || configs[0].Secret["password"] != "private-password" {{ "{" }}
+            t.Fatalf("omitted secret lost: %v", e)
+        {{ "}" }}
+        list, e := m.List(ctx)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        encoded, _ := json.Marshal(list)
+        if strings.Contains(string(encoded), "private-password") || strings.Contains(string(encoded), "service-user") || list[0].Secret != nil {{ "{" }}
+            t.Fatal("list leaked credentials")
+        {{ "}" }}
+        other := New(pool, "staging", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        if rows, e := other.List(ctx); e != nil || len(rows) != 0 {{ "{" }}
+            t.Fatal("cross environment list")
+        {{ "}" }}
+        saved.Environment = "staging"
+        if _, e = m.Save(ctx, saved, "admin"); e == nil {{ "{" }}
+            t.Fatal("accepted explicit cross environment")
+        {{ "}" }}
+        if _, e = other.Save(ctx, smtpConfig("mail"), "admin"); e == nil {{ "{" }}
+            t.Fatal("overwrote another environment ID")
+        {{ "}" }}
+        var audits int
+        pool.QueryRow(ctx, "SELECT count(*) FROM account_config_audit WHERE actor='admin' AND action='save'").Scan(&audits)
+        if audits != 2 {{ "{" }}
+            t.Fatalf("missing successful save audits: %d", audits)
+        {{ "}" }}
+        pool.Exec(ctx, "DROP TABLE account_config_audit")
+        saved.Environment = "production"
+        saved.Name = "Unaudited"
+        if _, e = m.Save(ctx, saved, "admin"); e == nil {{ "{" }}
+            t.Fatal("save succeeded without audit")
+        {{ "}" }}
+        var name string
+        pool.QueryRow(ctx, "SELECT name FROM account_login_configs WHERE id='mail'").Scan(&name)
+        if name != "Updated" {{ "{" }}
+            t.Fatal("unaudited save did not roll back")
+        {{ "}" }}
+    {{ "}" }}
+    func TestPostgresConcurrentTransportSelectionAndDynamicClientPolicy(t *testing.T) {{ "{" }}
+        ctx := context.Background()
+        pool := configDatabase(t)
+        m := New(pool, "production", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        var wg sync.WaitGroup
+        var success atomic.Int32
+        for _, id := range []string{{ "{" }}"mail1", "mail2"{{ "}" }} {{ "{" }}
+            wg.Add(1)
+            go func(id string) {{ "{" }}
+                defer wg.Done()
+                if _, e := m.Save(ctx, smtpConfig(id), "admin"); e == nil {{ "{" }}
+                    success.Add(1)
+                {{ "}" }}
+            {{ "}" }}(id)
+        {{ "}" }}
+        wg.Wait()
+        if success.Load() != 1 {{ "{" }}
+            t.Fatalf("ambiguous enabled transports: %d", success.Load())
+        {{ "}" }}
+        method := Config{{ "{" }}ID: "email", Kind: "method", Provider: "email_code", Name: "Email code", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true{{ "}" }}
+        if _, e := m.Save(ctx, method, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if e := m.Allowed(ctx, "web", "email_code"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if e := m.Allowed(ctx, "other", "email_code"); e == nil {{ "{" }}
+            t.Fatal("client gate bypass")
+        {{ "}" }}
+        all, _ := m.List(ctx)
+        for _, c := range all {{ "{" }}
+            if c.Kind == "smtp" {{ "{" }}
+                c.Enabled = false
+                if _, e := m.Save(ctx, c, "admin"); e != nil {{ "{" }}
+                    t.Fatal(e)
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+        if methods, e := m.Methods(ctx, "web"); e != nil || len(methods) != 0 {{ "{" }}
+            t.Fatalf("disabled transport still discoverable: %v", e)
+        {{ "}" }}
+        if e := m.Allowed(ctx, "web", "email_code"); e == nil {{ "{" }}
+            t.Fatal("disabled transport still authorized")
+        {{ "}" }}
+    {{ "}" }}
+    func TestPostgresEnabledOAuthScopeAndNoTransportSecretPublicly(t *testing.T) {{ "{" }}
+        ctx := context.Background()
+        pool := configDatabase(t)
+        m := New(pool, "production", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        c := Config{{ "{" }}ID: "github-app", Kind: "oauth", Provider: "github", Name: "GitHub", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true, Settings: map[string]string{{ "{" }}"client_id": "client", "redirect_url": "https://example.com/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "private-secret"{{ "}" }}{{ "}" }}
+        if _, e := m.Save(ctx, c, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        internal, e := m.Enabled(ctx, "github-app", "web")
+        if e != nil || internal.Secret["client_secret"] != "private-secret" {{ "{" }}
+            t.Fatalf("internal credential unavailable: %v", e)
+        {{ "}" }}
+        if _, e = m.Enabled(ctx, "github-app", "other"); e == nil {{ "{" }}
+            t.Fatal("OAuth client gate bypass")
+        {{ "}" }}
+        if _, e = New(pool, "staging", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32)).Enabled(ctx, "github-app", "web"); e == nil {{ "{" }}
+            t.Fatal("OAuth environment gate bypass")
+        {{ "}" }}
+        methods, e := m.Methods(ctx, "web")
+        if e != nil || len(methods) != 1 || methods[0].ID != "github-app" || methods[0].Kind != "oauth" {{ "{" }}
+            t.Fatalf("OAuth discovery contract: %v", e)
+        {{ "}" }}
+        c.Enabled = false
+        if _, e = m.Save(ctx, c, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e = m.Enabled(ctx, "github-app", "web"); e == nil {{ "{" }}
+            t.Fatal("disabled OAuth still authorized")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPostgresOAuthIdentityNamespaceCannotChange(t *testing.T) {{ "{" }}
+        ctx := context.Background()
+        pool := configDatabase(t)
+        m := New(pool, "production", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        c := Config{{ "{" }}ID: "oidc-stable", Kind: "oauth", Provider: "oidc", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true, Settings: map[string]string{{ "{" }}"client_id": "client", "mode": "web", "issuer_url": "https://issuer.example.com", "redirect_url": "https://example.com/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "original-secret"{{ "}" }}{{ "}" }}
+        saved, e := m.Save(ctx, c, "admin")
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        for key, value := range map[string]string{{ "{" }}"client_id": "attacker-client", "issuer_url": "https://attacker.example.com"{{ "}" }} {{ "{" }}
+            modified := saved
+            modified.Settings = map[string]string{{ "{" }}{{ "}" }}
+            for k, v := range saved.Settings {{ "{" }}
+                modified.Settings[k] = v
+            {{ "}" }}
+            modified.Settings[key] = value
+            if _, e = m.Save(ctx, modified, "admin"); e == nil {{ "{" }}
+                t.Errorf("accepted OAuth identity namespace change: %s", key)
+            {{ "}" }}
+        {{ "}" }}
+        wechat := Config{{ "{" }}ID: "wechat-stable", Kind: "oauth", Provider: "wechat", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true, Settings: map[string]string{{ "{" }}"client_id": "wechat-client", "mode": "web", "redirect_url": "https://example.com/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "secret"{{ "}" }}{{ "}" }}
+        if _, e = m.Save(ctx, wechat, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        wechat.Settings["mode"] = "app"
+        if _, e = m.Save(ctx, wechat, "admin"); e == nil {{ "{" }}
+            t.Fatal("accepted OAuth application mode namespace change")
+        {{ "}" }}
+        saved.Secret = map[string]string{{ "{" }}"client_secret": "rotated-secret"{{ "}" }}
+        saved.Name = "New label"
+        saved.Clients = []string{{ "{" }}"mobile"{{ "}" }}
+        if _, e = m.Save(ctx, saved, "admin"); e != nil {{ "{" }}
+            t.Fatalf("secret/label/client rotation should remain possible: %v", e)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPostgresExplicitProviderTestAuditsWithoutCredentials(t *testing.T) {{ "{" }}
+        ctx := context.Background()
+        pool := configDatabase(t)
+        m := New(pool, "production", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        var deliveries atomic.Int32
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            r.ParseForm()
+            signature := r.PostForm.Get("Signature")
+            r.PostForm.Del("Signature")
+            escape := func(v string) string {{ "{" }} return strings.ReplaceAll(url.QueryEscape(v), "+", "%20") {{ "}" }}
+            mac := hmac.New(sha1.New, []byte("private-key&"))
+            mac.Write([]byte("POST&%2F&" + escape(strings.ReplaceAll(r.PostForm.Encode(), "+", "%20"))))
+            if signature != base64.StdEncoding.EncodeToString(mac.Sum(nil)) {{ "{" }}
+                t.Error("admin test SMS signature invalid")
+            {{ "}" }}
+            if r.Form.Get("PhoneNumbers") != "13800138000" {{ "{" }}
+                t.Error("admin domestic test phone was not normalized in signed provider payload")
+            {{ "}" }}
+            var params map[string]string
+            json.Unmarshal([]byte(r.Form.Get("TemplateParam")), &params)
+            if !validCode(params["code"]) {{ "{" }}
+                t.Error("test delivery did not generate a six-digit code")
+            {{ "}" }}
+            deliveries.Add(1)
+            io.WriteString(w, `{{ "{" }}"Code":"OK"{{ "}" }}`)
+        {{ "}" }}))
+        defer server.Close()
+        m.http = fixtureManager(t, server).http
+        c := Config{{ "{" }}ID: "test-sms", Kind: "sms", Provider: "aliyun", Name: "SMS draft", Settings: map[string]string{{ "{" }}"sign_name": "test", "template_id": "template"{{ "}" }}, Secret: map[string]string{{ "{" }}"access_key_id": "private-id", "access_key_secret": "private-key"{{ "}" }}{{ "}" }}
+        if _, err := m.Save(ctx, c, "operator"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if err := m.Test(ctx, c.ID, "", "operator"); err == nil {{ "{" }}
+            t.Fatal("test send accepted implicit target")
+        {{ "}" }}
+        if deliveries.Load() != 0 {{ "{" }}
+            t.Fatal("sent test without explicit target")
+        {{ "}" }}
+        if err := m.Test(ctx, c.ID, " 13800138000 ", "operator"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if deliveries.Load() != 1 {{ "{" }}
+            t.Fatal("explicit provider test did not send")
+        {{ "}" }}
+        for _, foreign := range []string{{ "{" }}"+12025550123", "+441234567890", "8613800138000"{{ "}" }} {{ "{" }}
+            if err := m.Test(ctx, c.ID, foreign, "operator"); err == nil {{ "{" }}
+                t.Errorf("non-mainland target %s accepted", foreign)
+            {{ "}" }}
+        {{ "}" }}
+        if deliveries.Load() != 1 {{ "{" }}
+            t.Fatal("non-mainland admin test reached provider")
+        {{ "}" }}
+        var actor, action, id string
+        err := pool.QueryRow(ctx, "SELECT actor,action,config_id FROM account_config_audit WHERE action='test'").Scan(&actor, &action, &id)
+        if err != nil || actor != "operator" || action != "test" || id != c.ID {{ "{" }}
+            t.Fatalf("provider test audit absent: %v", err)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPostgresPasswordMethodsRemainAvailableWithoutDeliveryTransport(t *testing.T) {{ "{" }}
+        ctx := context.Background()
+        pool := configDatabase(t)
+        m := New(pool, "production", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        for _, provider := range []string{{ "{" }}"phone_password", "email_password"{{ "}" }} {{ "{" }}
+            if _, err := m.Save(ctx, Config{{ "{" }}ID: provider, Kind: "method", Provider: provider, Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true{{ "}" }}, "admin"); err != nil {{ "{" }}
+                t.Fatalf("password method %s must enable without delivery: %v", provider, err)
+            {{ "}" }}
+        {{ "}" }}
+        methods, err := m.Methods(ctx, "web")
+        if err != nil || len(methods) != 2 {{ "{" }}
+            t.Fatalf("password methods missing without delivery transport: %v", err)
+        {{ "}" }}
+        transport, err := m.Save(ctx, smtpConfig("mail"), "admin")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if _, err = m.Save(ctx, Config{{ "{" }}ID: "email-code", Kind: "method", Provider: "email_code", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true{{ "}" }}, "admin"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        transport.Enabled = false
+        if _, err = m.Save(ctx, transport, "admin"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        for _, provider := range []string{{ "{" }}"phone_password", "email_password"{{ "}" }} {{ "{" }}
+            if err = m.Allowed(ctx, "web", provider); err != nil {{ "{" }}
+                t.Fatalf("disabled delivery blocked existing password login %s: %v", provider, err)
+            {{ "}" }}
+        {{ "}" }}
+        if err = m.Allowed(ctx, "web", "email_code"); err == nil {{ "{" }}
+            t.Fatal("verification-code login should require delivery")
+        {{ "}" }}
+        methods, err = m.Methods(ctx, "web")
+        if err != nil || len(methods) != 2 {{ "{" }}
+            t.Fatalf("disabled transport must hide only verification-code method: %v", err)
+        {{ "}" }}
+    {{ "}" }}

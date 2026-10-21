@@ -143,6 +143,15 @@ body: |
     	return roles, int32(total), nil
     {{ "}" }}
 
+    // GetPermissionCodes reads the persisted grants used by the role editor.
+    func (s *Service) GetPermissionCodes(ctx context.Context, roleID string) ([]string, error) {{ "{" }}
+    	rid, err := strconv.ParseInt(roleID, 10, 64)
+    	if err != nil {{ "{" }}
+    		return nil, role.ValidationError{{ "{" }}Field: "role_id", Msg: "must be a valid integer id"{{ "}" }}
+    	{{ "}" }}
+    	return s.roles.ListPermissionCodes(ctx, rid)
+    {{ "}" }}
+
     // GrantPermissions assigns permissions to a role using permission codes (not IDs).
     // roleID is the decimal-string form of the internal int64 primary key.
     // Unknown codes produce a domain error.

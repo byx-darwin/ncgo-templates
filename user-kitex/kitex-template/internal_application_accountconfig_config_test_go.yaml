@@ -1,0 +1,155 @@
+# ncgo exported template — internal/application/accountconfig/config_test.go
+path: internal/application/accountconfig/config_test.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "bytes"
+        "context"
+        "encoding/json"
+        "strings"
+        "testing"
+    )
+
+    // Rejecting ciphertext substitution is essential: another row/environment must not decrypt.
+    func TestEncryptionBindsEnvironmentAndIDAndRedacts(t *testing.T) {{ "{" }}
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}7{{ "}" }}, 32))
+        c := Config{{ "{" }}ID: "smtp-main", Environment: "test", Secret: map[string]string{{ "{" }}"password": "extremely-private"{{ "}" }}{{ "}" }}
+        encrypted, err := m.encrypt(c)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if bytes.Contains(encrypted, []byte("extremely-private")) {{ "{" }}
+            t.Fatal("plaintext stored")
+        {{ "}" }}
+        original := append([]byte(nil), encrypted...)
+        got, err := m.decrypt(c, encrypted)
+        if err != nil || got["password"] != "extremely-private" {{ "{" }}
+            t.Fatalf("decrypt: %v", err)
+        {{ "}" }}
+        other := c
+        other.ID = "other"
+        if _, err = m.decrypt(other, encrypted); err == nil {{ "{" }}
+            t.Fatal("accepted swapped row")
+        {{ "}" }}
+        other = c
+        other.Environment = "production"
+        if _, err = m.decrypt(other, encrypted); err == nil {{ "{" }}
+            t.Fatal("accepted swapped environment")
+        {{ "}" }}
+        encrypted[len(encrypted)-1] ^= 1
+        if _, err = m.decrypt(c, encrypted); err == nil {{ "{" }}
+            t.Fatal("accepted tampering")
+        {{ "}" }}
+        if bytes.Equal(original, encrypted) {{ "{" }}
+            t.Fatal("fixture did not mutate")
+        {{ "}" }}
+        public := redact(c)
+        b, _ := json.Marshal(public)
+        if strings.Contains(string(b), "extremely-private") || !public.HasSecret {{ "{" }}
+            t.Fatal("redaction failed")
+        {{ "}" }}
+        if _, err = New(nil, "test", nil).encrypt(c); err == nil {{ "{" }}
+            t.Fatal("accepted missing deployment key")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSecretUpdatesPreserveOmittedAndEmptyFields(t *testing.T) {{ "{" }}
+        got := mergeSecret(map[string]string{{ "{" }}"password": "old", "username": "alice"{{ "}" }}, map[string]string{{ "{" }}"password": "", "username": "bob"{{ "}" }})
+        if got["password"] != "old" || got["username"] != "bob" {{ "{" }}
+            t.Fatalf("wrong merged secret: keys %d", len(got))
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPolicyRequiresReadyUniqueTransportAndClient(t *testing.T) {{ "{" }}
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        configs := []Config{{ "{" }}{{ "{" }}ID: "phone", Kind: "method", Provider: "phone_code", Environment: "test", Enabled: true, Clients: []string{{ "{" }}"app"{{ "}" }}{{ "}" }}{{ "}" }}
+        if len(m.methods(configs, "app")) != 0 {{ "{" }}
+            t.Fatal("discovered method without transport")
+        {{ "}" }}
+        sms := Config{{ "{" }}ID: "sms", Kind: "sms", Provider: "aliyun", Environment: "test", Enabled: true, Settings: map[string]string{{ "{" }}"sign_name": "myapp", "template_id": "SMS_1"{{ "}" }}, Secret: map[string]string{{ "{" }}"access_key_id": "id", "access_key_secret": "secret"{{ "}" }}{{ "}" }}
+        configs = append(configs, sms)
+        if methods := m.methods(configs, "app"); len(methods) != 1 || methods[0].Kind != "phone_code" {{ "{" }}
+            t.Fatalf("ready method missing: %v", methods)
+        {{ "}" }}
+        if len(m.methods(configs, "other")) != 0 {{ "{" }}
+            t.Fatal("client policy bypass")
+        {{ "}" }}
+        configs = append(configs, sms)
+        if len(m.methods(configs, "app")) != 0 {{ "{" }}
+            t.Fatal("ambiguous transport accepted")
+        {{ "}" }}
+        bad := sms
+        bad.Environment = "production"
+        if err := m.validate(bad); err == nil {{ "{" }}
+            t.Fatal("cross environment accepted")
+        {{ "}" }}
+        bad = sms
+        bad.Settings = map[string]string{{ "{" }}"access_key_secret": "leak"{{ "}" }}
+        if err := m.validate(bad); err == nil {{ "{" }}
+            t.Fatal("secret in settings accepted")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSSRFRejectsPrivateMetadataAndUnsafeSchemes(t *testing.T) {{ "{" }}
+        m := New(nil, "production", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        for _, u := range []string{{ "{" }}"http://example.com", "https://127.0.0.1", "https://[::1]", "https://169.254.169.254", "https://10.1.2.3", "https://user:password@example.com", "file:///etc/passwd"{{ "}" }} {{ "{" }}
+            if _, err := m.endpoint(context.Background(), u); err == nil {{ "{" }}
+                t.Errorf("accepted unsafe endpoint %s", u)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSMTPReadinessRejectsPrivateEndpointInProduction(t *testing.T) {{ "{" }}
+        m := New(nil, "production", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        c := smtpConfig("mail")
+        c.Environment = "production"
+        c.Settings["host"] = "127.0.0.1"
+        if m.configReady(c) {{ "{" }}
+            t.Fatal("advertised SMTP transport that can never pass production SSRF policy")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPurposeTemplatesReadinessAndSMTPSettingsValidation(t *testing.T) {{ "{" }}
+        m := New(nil, "production", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        c := Config{{ "{" }}ID: "sms", Kind: "sms", Provider: "aliyun", Environment: "production", Enabled: true, Settings: map[string]string{{ "{" }}"sign_name": "app", "template_login": "login", "template_bind": "bind", "template_replace": "replace", "template_reauth": "reauth", "template_reset": "reset"{{ "}" }}, Secret: map[string]string{{ "{" }}"access_key_id": "id", "access_key_secret": "secret"{{ "}" }}{{ "}" }}
+        if !m.configReady(c) {{ "{" }}
+            t.Fatal("complete purpose-specific SMS configuration should be ready without a default template")
+        {{ "}" }}
+        delete(c.Settings, "template_reset")
+        if m.configReady(c) {{ "{" }}
+            t.Fatal("incomplete purpose coverage without fallback should not be ready")
+        {{ "}" }}
+        c.Settings["template_id"] = "fallback"
+        if !m.configReady(c) {{ "{" }}
+            t.Fatal("explicit default must provide missing-purpose fallback")
+        {{ "}" }}
+        smtp := smtpConfig("mail")
+        smtp.Environment = "production"
+        smtp.Settings["body_template"] = "Purpose {{ "{" }}purpose{{ "}" }}: {{ "{" }}code{{ "}" }}. Valid {{ "{" }}minutes{{ "}" }} minutes."
+        smtp.Settings["subject_reset"] = "Recover your account"
+        if err := m.validate(smtp); err != nil {{ "{" }}
+            t.Fatalf("valid SMTP template settings rejected: %v", err)
+        {{ "}" }}
+        smtp.Settings["subject_reset"] = "Recover\r\nBcc:other@example.com"
+        if err := m.validate(smtp); err == nil {{ "{" }}
+            t.Fatal("purpose subject header injection accepted")
+        {{ "}" }}
+        delete(smtp.Settings, "subject_reset")
+        smtp.Settings["body_template"] = "Missing mandatory verification placeholder"
+        if err := m.validate(smtp); err == nil {{ "{" }}
+            t.Fatal("SMTP body without code placeholder accepted")
+        {{ "}" }}
+        for _, purpose := range []string{{ "{" }}"login", "bind", "replace", "reauth", "reset"{{ "}" }} {{ "{" }}
+            if !validPurpose(purpose) {{ "{" }}
+                t.Errorf("approved purpose %s rejected", purpose)
+            {{ "}" }}
+        {{ "}" }}
+        for _, purpose := range []string{{ "{" }}"set_password", "test", "unknown"{{ "}" }} {{ "{" }}
+            if validPurpose(purpose) {{ "{" }}
+                t.Errorf("unsupported purpose %s accepted", purpose)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}

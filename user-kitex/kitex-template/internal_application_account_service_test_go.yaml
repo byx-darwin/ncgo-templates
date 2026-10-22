@@ -1,0 +1,735 @@
+# ncgo exported template — internal/application/account/service_test.go
+path: internal/application/account/service_test.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "os"
+        "path/filepath"
+        "strings"
+        "testing"
+        "time"
+
+        "{{.Module}}/internal/application/accountconfig"
+        "github.com/google/uuid"
+        "github.com/jackc/pgx/v5/pgxpool"
+    )
+
+    type fakeConfig struct {{ "{" }}
+        code    string
+        configs map[string]accountconfig.Config
+        denied  map[string]bool
+    {{ "}" }}
+
+    func (f *fakeConfig) Methods(_ context.Context, client string) ([]accountconfig.Method, error) {{ "{" }}
+        out := []accountconfig.Method{{ "{" }}{{ "}" }}
+        for _, kind := range []string{{ "{" }}"phone_code", "phone_password", "email_code", "email_password"{{ "}" }} {{ "{" }}
+            if !f.denied[client+":"+kind] {{ "{" }}
+                out = append(out, accountconfig.Method{{ "{" }}ID: kind, Kind: kind{{ "}" }})
+            {{ "}" }}
+        {{ "}" }}
+        for _, c := range f.configs {{ "{" }}
+            out = append(out, accountconfig.Method{{ "{" }}ID: c.ID, Kind: "oauth"{{ "}" }})
+        {{ "}" }}
+        return out, nil
+    {{ "}" }}
+    func (f *fakeConfig) Allowed(_ context.Context, client, method string) error {{ "{" }}
+        if f.denied[client+":"+method] {{ "{" }}
+            return ErrInvalid
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func (f *fakeConfig) Enabled(_ context.Context, id, client string) (accountconfig.Config, error) {{ "{" }}
+        if c, ok := f.configs[id]; ok {{ "{" }}
+            return c, nil
+        {{ "}" }}
+        return accountconfig.Config{{ "{" }}{{ "}" }}, ErrInvalid
+    {{ "}" }}
+    func (f *fakeConfig) SendCode(_ context.Context, kind, to, purpose, code string) error {{ "{" }}
+        f.code = code
+        return nil
+    {{ "}" }}
+    func (f *fakeConfig) OAuthStart(context.Context, accountconfig.Config, string, string, string) (string, error) {{ "{" }}
+        return "https://provider.example/authorize", nil
+    {{ "}" }}
+    func (f *fakeConfig) OAuthExchange(_ context.Context, _ accountconfig.Config, code, verifier, nonce string) (accountconfig.ExternalIdentity, error) {{ "{" }}
+        return accountconfig.ExternalIdentity{{ "{" }}Subject: code, Nickname: "External"{{ "}" }}, nil
+    {{ "}" }}
+
+    func fixture(t *testing.T) (*Service, *fakeConfig) {{ "{" }}
+        t.Helper()
+        dsn := os.Getenv("ACCOUNT_TEST_DSN")
+        if dsn == "" {{ "{" }}
+            t.Skip("ACCOUNT_TEST_DSN unavailable: PostgreSQL integration test")
+        {{ "}" }}
+        ctx := context.Background()
+        base, err := pgxpool.New(ctx, dsn)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        schema := "t_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+        if _, err = base.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        cfg, err := pgxpool.ParseConfig(dsn)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        cfg.ConnConfig.RuntimeParams["search_path"] = schema
+        pool, err := pgxpool.NewWithConfig(ctx, cfg)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        t.Cleanup(func() {{ "{" }} pool.Close(); base.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE"); base.Close() {{ "}" }})
+        files, err := filepath.Glob("../../db/migrations/*.sql")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        for _, file := range files {{ "{" }}
+            b, err := os.ReadFile(file)
+            if err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            if _, err = pool.Exec(ctx, strings.SplitN(string(b), "-- +goose Down", 2)[0]); err != nil {{ "{" }}
+                t.Fatalf("schema %s: %v", file, err)
+            {{ "}" }}
+        {{ "}" }}
+        delivery := &fakeConfig{{ "{" }}{{ "}" }}
+        svc := New(pool, delivery, "test-signing-key-with-32-characters", "test")
+        return svc, delivery
+    {{ "}" }}
+
+    func loginCode(t *testing.T, s *Service, f *fakeConfig, id string) Tokens {{ "{" }}
+        t.Helper()
+        ctx := context.Background()
+        if err := s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: id, Purpose: "login", IP: "127.0.0.1"{{ "}" }}); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        token, err := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "phone", Mode: "code", Identifier: id, Credential: f.code, IP: "127.0.0.1"{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        return token
+    {{ "}" }}
+    func TestCodeRegistersOnceAndRejectsReplay(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        tok := loginCode(t, s, f, "13800138000")
+        if !tok.IsNewUser || tok.UID == "" {{ "{" }}
+            t.Fatalf("not registered: %+v", tok)
+        {{ "}" }}
+        if _, err := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "phone", Mode: "code", Identifier: "+8613800138000", Credential: f.code{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("replayed code accepted")
+        {{ "}" }}
+        var n int
+        s.pool.QueryRow(ctx, "SELECT count(*) FROM users").Scan(&n)
+        if n != 1 {{ "{" }}
+            t.Fatal(n)
+        {{ "}" }}
+    {{ "}" }}
+    func TestPasswordLoginNeverRegisters(t *testing.T) {{ "{" }}
+        s, _ := fixture(t)
+        ctx := context.Background()
+        if _, err := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "email", Mode: "password", Identifier: "missing@example.com", Credential: "password123"{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("unknown account accepted")
+        {{ "}" }}
+        var n int
+        s.pool.QueryRow(ctx, "SELECT count(*) FROM users").Scan(&n)
+        if n != 0 {{ "{" }}
+            t.Fatal("password registered user")
+        {{ "}" }}
+    {{ "}" }}
+    func TestOTPAttemptLimitAndPurposeIsolation(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Purpose: "login"{{ "}" }})
+        code := f.code
+        for i := 0; i < 5; i++ {{ "{" }}
+            if _, err := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "phone", Mode: "code", Identifier: "13800138000", Credential: "wrong"{{ "}" }}); err == nil {{ "{" }}
+                t.Fatal("bad code accepted")
+            {{ "}" }}
+        {{ "}" }}
+        if _, err := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "phone", Mode: "code", Identifier: "13800138000", Credential: code{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("exhausted code accepted")
+        {{ "}" }}
+        if err := s.ResetPassword(ctx, ResetInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Code: code, NewPassword: "newPassword123"{{ "}" }}); err == nil {{ "{" }}
+            t.Fatal("login code reset password")
+        {{ "}" }}
+    {{ "}" }}
+    func TestLogoutRevokesOnlyCurrentSession(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        a := loginCode(t, s, f, "13800138000")
+        s.pool.Exec(ctx, "UPDATE account_codes SET sent_at=now()-interval '61 seconds'")
+        b := loginCode(t, s, f, "13800138000")
+        if b.UID != a.UID || b.IsNewUser {{ "{" }}
+            t.Fatal("duplicate user")
+        {{ "}" }}
+        if err := s.Logout(ctx, a.AccessToken, "web"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if _, err := s.Verify(ctx, a.AccessToken, "web"); err == nil {{ "{" }}
+            t.Fatal("logged out token still valid")
+        {{ "}" }}
+        if _, err := s.Verify(ctx, b.AccessToken, "web"); err != nil {{ "{" }}
+            t.Fatal("other device logged out", err)
+        {{ "}" }}
+    {{ "}" }}
+    func TestSessionRotationInactivityAndClientBinding(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        a := loginCode(t, s, f, "13800138000")
+        if _, err := s.Verify(ctx, a.AccessToken, "mobile"); err == nil {{ "{" }}
+            t.Fatal("wrong client accepted")
+        {{ "}" }}
+        b, err := s.Refresh(ctx, a.RefreshToken, "web")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if _, err = s.Refresh(ctx, a.RefreshToken, "web"); err == nil {{ "{" }}
+            t.Fatal("refresh replay")
+        {{ "}" }}
+        if b.RefreshToken == a.RefreshToken {{ "{" }}
+            t.Fatal("refresh not rotated")
+        {{ "}" }}
+        s.pool.Exec(ctx, "UPDATE account_sessions SET expires_at=now()-interval '1 second'")
+        if _, err = s.Verify(ctx, b.AccessToken, "web"); err == nil {{ "{" }}
+            t.Fatal("idle session accepted")
+        {{ "}" }}
+        if _, err = s.Refresh(ctx, b.RefreshToken, "web"); err == nil {{ "{" }}
+            t.Fatal("idle session refreshed")
+        {{ "}" }}
+    {{ "}" }}
+    func TestBanThenUnbanDoesNotReviveSession(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        a := loginCode(t, s, f, "13800138000")
+        if err := s.Revoke(ctx, a.UID); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        s.pool.Exec(ctx, "UPDATE users SET status=0 WHERE id=$1", a.UID)
+        s.pool.Exec(ctx, "UPDATE users SET status=1 WHERE id=$1", a.UID)
+        if _, err := s.Verify(ctx, a.AccessToken, "web"); err == nil {{ "{" }}
+            t.Fatal("old session revived")
+        {{ "}" }}
+    {{ "}" }}
+    func TestPhoneAndEmailNormalization(t *testing.T) {{ "{" }}
+        for _, v := range []string{{ "{" }}"13800138000", "+8613800138000"{{ "}" }} {{ "{" }}
+            got, err := Normalize("phone", v)
+            if err != nil || got != "+8613800138000" {{ "{" }}
+                t.Fatalf("%q %v", got, err)
+            {{ "}" }}
+        {{ "}" }}
+        for _, v := range []string{{ "{" }}"+14155552671", "123", "+8613800138000x"{{ "}" }} {{ "{" }}
+            if _, err := Normalize("phone", v); err == nil {{ "{" }}
+                t.Fatal(v)
+            {{ "}" }}
+        {{ "}" }}
+        if got, err := Normalize("email", " User@Example.COM "); err != nil || got != "user@example.com" {{ "{" }}
+            t.Fatal(got, err)
+        {{ "}" }}
+        _ = time.Minute
+    {{ "}" }}
+
+    func phoneProof(t *testing.T, s *Service, f *fakeConfig, tok Tokens, id string) string {{ "{" }}
+        t.Helper()
+        ctx := context.Background()
+        if e := s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: id, Purpose: "reauth", AccessToken: tok.AccessToken{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        proof, e := s.Reauthenticate(ctx, ProofInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Mode: "code", Kind: "phone", Identifier: id, Credential: f.code{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        return proof
+    {{ "}" }}
+    func enableOAuth(f *fakeConfig) {{ "{" }}
+        f.configs = map[string]accountconfig.Config{{ "{" }}"wx": {{ "{" }}ID: "wx", Kind: "oauth", Provider: "wechat", Settings: map[string]string{{ "{" }}"return_urls": `["https://app.example/callback"]`{{ "}" }}{{ "}" }}{{ "}" }}
+    {{ "}" }}
+    func oauthLogin(t *testing.T, s *Service, subject string) Tokens {{ "{" }}
+        t.Helper()
+        ctx := context.Background()
+        start, e := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx", Purpose: "login"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        out, e := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}ConfigID: "wx", State: start.State, Code: subject{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        result, e := s.Exchange(ctx, out.ExchangeCode, "web")
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if result.Tokens == nil {{ "{" }}
+            t.Fatal("OAuth exchange did not return tokens")
+        {{ "}" }}
+        return *result.Tokens
+    {{ "}" }}
+    func oauthProof(t *testing.T, s *Service, tok Tokens, subject string) string {{ "{" }}
+        t.Helper()
+        ctx := context.Background()
+        start, e := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx", Purpose: "reauth", AccessToken: tok.AccessToken{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        out, e := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: subject{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        result, e := s.Exchange(ctx, out.ExchangeCode, "web")
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        return result.Proof
+    {{ "}" }}
+    func TestBindingPreservesSessionAndRejectsOtherOwner(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        a := loginCode(t, s, f, "13800138000")
+        b := loginCode(t, s, f, "13900139000")
+        proof := phoneProof(t, s, f, a, "13800138000")
+        if e := s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "email", Identifier: "u@example.com", Purpose: "bind", AccessToken: a.AccessToken{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        code := f.code
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: a.AccessToken, ClientID: "web", Operation: "bind", Kind: "email", Identifier: "u@example.com", Code: code, Proof: proof{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e := s.Verify(ctx, a.AccessToken, "web"); e != nil {{ "{" }}
+            t.Fatal("binding revoked session", e)
+        {{ "}" }}
+        proof = phoneProof(t, s, f, b, "13900139000")
+        s.pool.Exec(ctx, "UPDATE account_codes SET sent_at=now()-interval '61 seconds'")
+        s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "email", Identifier: "u@example.com", Purpose: "bind", AccessToken: b.AccessToken{{ "}" }})
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: b.AccessToken, ClientID: "web", Operation: "bind", Kind: "email", Identifier: "u@example.com", Code: f.code, Proof: proof{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("identity stolen from other owner")
+        {{ "}" }}
+        var owner string
+        s.pool.QueryRow(ctx, "SELECT id::text FROM users WHERE email='u@example.com'").Scan(&owner)
+        if owner != a.UID {{ "{" }}
+            t.Fatal("owner changed")
+        {{ "}" }}
+    {{ "}" }}
+    func TestCannotUnbindLastIdentityAndReplacementRevokes(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        tok := loginCode(t, s, f, "13800138000")
+        proof := phoneProof(t, s, f, tok, "13800138000")
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Kind: "phone", Operation: "unbind", Proof: proof{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("last identity removed")
+        {{ "}" }}
+        if _, e := s.Verify(ctx, tok.AccessToken, "web"); e != nil {{ "{" }}
+            t.Fatal("failed removal revoked session")
+        {{ "}" }}
+        s.pool.Exec(ctx, "UPDATE account_codes SET sent_at=now()-interval '61 seconds'")
+        proof = phoneProof(t, s, f, tok, "13800138000")
+        s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13900139000", Purpose: "replace", AccessToken: tok.AccessToken{{ "}" }})
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Kind: "phone", Operation: "replace", Identifier: "13900139000", Code: f.code, Proof: proof{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e := s.Verify(ctx, tok.AccessToken, "web"); e == nil {{ "{" }}
+            t.Fatal("replaced identity kept session")
+        {{ "}" }}
+        var phone string
+        s.pool.QueryRow(ctx, "SELECT phone FROM users WHERE id=$1", tok.UID).Scan(&phone)
+        if phone != "+8613900139000" {{ "{" }}
+            t.Fatal(phone)
+        {{ "}" }}
+    {{ "}" }}
+    func TestInitialPasswordRequiresContactProofAndResetRevokes(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        enableOAuth(f)
+        tok := oauthLogin(t, s, "external-a")
+        proof := oauthProof(t, s, tok, "external-a")
+        s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Purpose: "bind", AccessToken: tok.AccessToken{{ "}" }})
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Kind: "phone", Operation: "bind", Identifier: "13800138000", Code: f.code, Proof: proof{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        proof = oauthProof(t, s, tok, "external-a")
+        if e := s.Password(ctx, PasswordInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", NewPassword: "password123", Proof: proof{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("initial password accepted third-party proof without contact verification")
+        {{ "}" }}
+        proof = phoneProof(t, s, f, tok, "13800138000")
+        if e := s.Password(ctx, PasswordInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", NewPassword: "password123", Proof: proof{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        passwordSession, e := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "phone", Mode: "password", Identifier: "13800138000", Credential: "password123"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if e = s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Purpose: "reset"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if e = s.ResetPassword(ctx, ResetInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Code: f.code, NewPassword: "newpassword123"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        for _, v := range []Tokens{{ "{" }}tok, passwordSession{{ "}" }} {{ "{" }}
+            if _, e = s.Verify(ctx, v.AccessToken, "web"); e == nil {{ "{" }}
+                t.Fatal("password reset kept old session")
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+    func TestPasswordlessContactCannotJustifyRemovingOnlyOAuth(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        enableOAuth(f)
+        tok := oauthLogin(t, s, "external-a")
+        proof := oauthProof(t, s, tok, "external-a")
+        s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Purpose: "bind", AccessToken: tok.AccessToken{{ "}" }})
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Kind: "phone", Operation: "bind", Identifier: "13800138000", Code: f.code, Proof: proof{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        f.denied = map[string]bool{{ "{" }}"web:phone_code": true{{ "}" }}
+        proof = oauthProof(t, s, tok, "external-a")
+        if e := s.Contact(ctx, ContactInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Kind: "oauth", Operation: "unbind", Identifier: "wx", Proof: proof{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("passwordless contact counted as a usable password login")
+        {{ "}" }}
+    {{ "}" }}
+    func TestOAuthStateIsSingleUseAndCannotCrossConfiguration(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        enableOAuth(f)
+        start, e := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e = s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, ConfigID: "other", Code: "x"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("wrong config callback accepted")
+        {{ "}" }}
+        if _, e = s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "x"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("state replay accepted")
+        {{ "}" }}
+        start, e = s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        out, e := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "x"{{ "}" }})
+        if e != nil || out.ClientID != "web" || out.ReturnURL != "https://app.example/callback" {{ "{" }}
+            t.Fatal(out, e)
+        {{ "}" }}
+        if _, e = s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "x"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("successful state replay accepted")
+        {{ "}" }}
+        if _, e = s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx", ReturnURL: "https://evil.example"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("open redirect accepted")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestConcurrentCodeRedemptionCreatesOneUser(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        if e := s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "phone", Identifier: "13800138000", Purpose: "login"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        code := f.code
+        results := make(chan error, 2)
+        start := make(chan struct{{ "{" }}{{ "}" }})
+        for i := 0; i < 2; i++ {{ "{" }}
+            go func() {{ "{" }}
+                <-start
+                _, e := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "phone", Mode: "code", Identifier: "13800138000", Credential: code{{ "}" }})
+                results <- e
+            {{ "}" }}()
+        {{ "}" }}
+        close(start)
+        wins := 0
+        for i := 0; i < 2; i++ {{ "{" }}
+            if <-results == nil {{ "{" }}
+                wins++
+            {{ "}" }}
+        {{ "}" }}
+        if wins != 1 {{ "{" }}
+            t.Fatalf("redemption winners=%d", wins)
+        {{ "}" }}
+        var count int
+        if e := s.pool.QueryRow(ctx, "SELECT count(*) FROM users").Scan(&count); e != nil || count != 1 {{ "{" }}
+            t.Fatal(count, e)
+        {{ "}" }}
+    {{ "}" }}
+    func TestConcurrentRefreshAndRevocationCannotReviveSession(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        tok := loginCode(t, s, f, "13800138000")
+        type result struct {{ "{" }}
+            tokens Tokens
+            err    error
+        {{ "}" }}
+        out := make(chan result, 2)
+        start := make(chan struct{{ "{" }}{{ "}" }})
+        for i := 0; i < 2; i++ {{ "{" }}
+            go func() {{ "{" }} <-start; v, e := s.Refresh(ctx, tok.RefreshToken, "web"); out <- result{{ "{" }}v, e{{ "}" }} {{ "}" }}()
+        {{ "}" }}
+        close(start)
+        wins := 0
+        var current Tokens
+        for i := 0; i < 2; i++ {{ "{" }}
+            r := <-out
+            if r.err == nil {{ "{" }}
+                wins++
+                current = r.tokens
+            {{ "}" }}
+        {{ "}" }}
+        if wins != 1 {{ "{" }}
+            t.Fatalf("refresh winners=%d", wins)
+        {{ "}" }}
+        refreshed := make(chan result, 1)
+        revoked := make(chan error, 1)
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e = lockUser(ctx, tx, tok.UID); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        go func() {{ "{" }} v, e := s.Refresh(ctx, current.RefreshToken, "web"); refreshed <- result{{ "{" }}v, e{{ "}" }} {{ "}" }}()
+        go func() {{ "{" }} revoked <- s.Revoke(ctx, tok.UID) {{ "}" }}()
+        if e = tx.Commit(ctx); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        r := <-refreshed
+        if e = <-revoked; e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        for _, v := range []Tokens{{ "{" }}tok, current, r.tokens{{ "}" }} {{ "{" }}
+            if v.AccessToken != "" {{ "{" }}
+                if _, e = s.Verify(ctx, v.AccessToken, "web"); e == nil {{ "{" }}
+                    t.Fatal("revoked session revived by concurrent refresh")
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+    func TestUnknownRecoveryDoesNotCreateAccountOrSend(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        if e := s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "email", Identifier: "missing@example.com", Purpose: "reset"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if f.code != "" {{ "{" }}
+            t.Fatal("unknown recovery sent code")
+        {{ "}" }}
+        if e := s.ResetPassword(ctx, ResetInput{{ "{" }}ClientID: "web", Kind: "email", Identifier: "missing@example.com", Code: "123456", NewPassword: "password123"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("unknown recovery succeeded")
+        {{ "}" }}
+        var n int
+        s.pool.QueryRow(ctx, "SELECT count(*) FROM users").Scan(&n)
+        if n != 0 {{ "{" }}
+            t.Fatal("recovery registered account")
+        {{ "}" }}
+    {{ "}" }}
+    func TestClientPolicyEnforcedOnSendLoginAndBinding(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        tok := loginCode(t, s, f, "13800138000")
+        f.denied = map[string]bool{{ "{" }}"web:email_code": true, "web:email_password": true{{ "}" }}
+        if e := s.SendCode(ctx, CodeInput{{ "{" }}ClientID: "web", Kind: "email", Identifier: "u@example.com", Purpose: "bind", AccessToken: tok.AccessToken{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("disabled contact method sent bind code")
+        {{ "}" }}
+        if _, e := s.Login(ctx, LoginInput{{ "{" }}ClientID: "web", Kind: "email", Mode: "password", Identifier: "u@example.com", Credential: "password123"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("disabled login policy bypassed")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthCallbackDoesNotPersistOrIssueSessionCredentials(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        enableOAuth(f)
+        start, e := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        out, e := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "x"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if out.Tokens != nil {{ "{" }}
+            t.Fatal("OAuth callback issued long-lived refresh credentials before one-time redemption")
+        {{ "}" }}
+        var n int
+        s.pool.QueryRow(ctx, "SELECT count(*) FROM account_sessions").Scan(&n)
+        if n != 0 {{ "{" }}
+            t.Fatal("session created before exchange")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthGrantHashedAtRestAndOneUseClientBound(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        enableOAuth(f)
+        start, e := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        out, e := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "x"{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if out.ExchangeCode == "" || out.Tokens != nil || out.Proof != "" {{ "{" }}
+            t.Fatal("callback leaked credential or no grant")
+        {{ "}" }}
+        var stored string
+        s.pool.QueryRow(ctx, "SELECT hash FROM account_grants").Scan(&stored)
+        if stored == out.ExchangeCode || stored != hash(out.ExchangeCode) {{ "{" }}
+            t.Fatal("grant not hashed")
+        {{ "}" }}
+        if _, e = s.Exchange(ctx, out.ExchangeCode, "mobile"); e == nil {{ "{" }}
+            t.Fatal("cross-client grant redeemed")
+        {{ "}" }}
+        result, e := s.Exchange(ctx, out.ExchangeCode, "web")
+        if e != nil || result.Tokens == nil {{ "{" }}
+            t.Fatal(result, e)
+        {{ "}" }}
+        if _, e = s.Exchange(ctx, out.ExchangeCode, "web"); e == nil {{ "{" }}
+            t.Fatal("grant replayed")
+        {{ "}" }}
+        var refresh string
+        s.pool.QueryRow(ctx, "SELECT refresh_hash FROM account_sessions").Scan(&refresh)
+        if refresh == result.Tokens.RefreshToken || refresh != hash(result.Tokens.RefreshToken) {{ "{" }}
+            t.Fatal("refresh credential persisted plaintext")
+        {{ "}" }}
+    {{ "}" }}
+    func TestOAuthReplacementAtomicAndRevokesAllSessions(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx := context.Background()
+        enableOAuth(f)
+        tok := oauthLogin(t, s, "old-subject")
+        proof := oauthProof(t, s, tok, "old-subject")
+        start, e := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx", Purpose: "replace", AccessToken: tok.AccessToken, Proof: proof{{ "}" }})
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        out, e := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "new-subject"{{ "}" }})
+        if e != nil || out.Purpose != "replace" {{ "{" }}
+            t.Fatal(out, e)
+        {{ "}" }}
+        if _, e = s.Verify(ctx, tok.AccessToken, "web"); e == nil {{ "{" }}
+            t.Fatal("replace did not revoke")
+        {{ "}" }}
+        newSession := oauthLogin(t, s, "new-subject")
+        if newSession.UID != tok.UID {{ "{" }}
+            t.Fatal("replacement created another account")
+        {{ "}" }}
+        var n int
+        s.pool.QueryRow(ctx, "SELECT count(*) FROM account_identities WHERE subject='old-subject'").Scan(&n)
+        if n != 0 {{ "{" }}
+            t.Fatal("old identity still bound")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestIdentityMutationWithSingleConnectionPool(t *testing.T) {{ "{" }}
+        s, f := fixture(t)
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+        defer cancel()
+        tok := loginCode(t, s, f, "13800138000")
+        proof := phoneProof(t, s, f, tok, "13800138000")
+        if _, e := s.pool.Exec(ctx, "UPDATE users SET email='u@example.com' WHERE id=$1", tok.UID); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        cfg := s.pool.Config().Copy()
+        cfg.MaxConns = 1
+        s.pool.Close()
+        pool, e := pgxpool.NewWithConfig(ctx, cfg)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        s.pool = pool
+        t.Cleanup(pool.Close)
+        manager := accountconfig.New(pool, "test", []byte("0123456789abcdef0123456789abcdef"))
+        if _, e = manager.Save(ctx, accountconfig.Config{{ "{" }}ID: "phone-code", Kind: "method", Provider: "phone_password", Name: "Phone", Environment: "test", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true{{ "}" }}, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }} // A real manager acquires its own connection when loading policy.
+        // Password is needed for this method to be usable. The already-issued contact proof is independent.
+        if _, e = pool.Exec(ctx, "UPDATE users SET password_hash=$1 WHERE id=$2", dummyHash(), tok.UID); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        s.config = manager
+        if e = s.Contact(ctx, ContactInput{{ "{" }}AccessToken: tok.AccessToken, ClientID: "web", Kind: "email", Operation: "unbind", Proof: proof{{ "}" }}); e != nil {{ "{" }}
+            t.Fatalf("single-connection identity operation failed: %v", e)
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestOAuthLoginCannotAuthorizeIdentityRemovedWhileWaitingForUserLock(t *testing.T) {{ "{" }}
+        for _, operation := range []string{{ "{" }}"unbind", "replace"{{ "}" }} {{ "{" }}
+            t.Run(operation, func(t *testing.T) {{ "{" }}
+                s, f := fixture(t)
+                ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                defer cancel()
+                enableOAuth(f)
+                tok := oauthLogin(t, s, "old-subject")
+                start, err := s.OAuthStart(ctx, OAuthStartInput{{ "{" }}ClientID: "web", ConfigID: "wx", Purpose: "login"{{ "}" }})
+                if err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                tx, err := s.pool.Begin(ctx)
+                if err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                defer tx.Rollback(context.Background())
+                if _, err = lockUser(ctx, tx, tok.UID); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                var blocker int
+                if err = tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&blocker); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                type completion struct {{ "{" }}
+                    out OAuthResult
+                    err error
+                {{ "}" }}
+                done := make(chan completion, 1)
+                go func() {{ "{" }}
+                    out, err := s.OAuthComplete(ctx, OAuthCompleteInput{{ "{" }}State: start.State, Code: "old-subject"{{ "}" }})
+                    done <- completion{{ "{" }}out, err{{ "}" }}
+                {{ "}" }}()
+                // Observe the real row-lock wait, rather than relying on scheduling sleeps.
+                for {{ "{" }}
+                    var waiting bool
+                    if err = s.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))", blocker).Scan(&waiting); err != nil {{ "{" }}
+                        t.Fatal(err)
+                    {{ "}" }}
+                    if waiting {{ "{" }}
+                        break
+                    {{ "}" }}
+                    select {{ "{" }}
+                    case result := <-done:
+                        t.Fatalf("callback did not wait for user mutation: %+v", result)
+                    case <-ctx.Done():
+                        t.Fatal(ctx.Err())
+                    case <-time.After(5 * time.Millisecond):
+                    {{ "}" }}
+                {{ "}" }}
+                if operation == "unbind" {{ "{" }}
+                    _, err = tx.Exec(ctx, "DELETE FROM account_identities WHERE user_id=$1 AND config_id='wx'", tok.UID)
+                {{ "}" }} else {{ "{" }}
+                    _, err = tx.Exec(ctx, "UPDATE account_identities SET subject='new-subject' WHERE user_id=$1 AND config_id='wx'", tok.UID)
+                {{ "}" }}
+                if err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if _, err = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", tok.UID); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if _, err = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", tok.UID); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if err = tx.Commit(ctx); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                result := <-done
+                if result.err == nil || result.out.ExchangeCode != "" {{ "{" }}
+                    t.Fatalf("removed identity authorized a fresh grant: %+v", result)
+                {{ "}" }}
+                var grants int
+                if err = s.pool.QueryRow(ctx, "SELECT count(*) FROM account_grants WHERE user_id=$1", tok.UID).Scan(&grants); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if grants != 0 {{ "{" }}
+                    t.Fatal("removed identity left a redeemable login grant")
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}

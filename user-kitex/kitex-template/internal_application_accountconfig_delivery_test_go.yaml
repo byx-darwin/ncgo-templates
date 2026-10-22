@@ -1,0 +1,483 @@
+# ncgo exported template — internal/application/accountconfig/delivery_test.go
+path: internal/application/accountconfig/delivery_test.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "bytes"
+        "context"
+        "crypto/hmac"
+        "crypto/sha1"
+        "crypto/sha256"
+        "crypto/tls"
+        "crypto/x509"
+        "encoding/base64"
+        "encoding/hex"
+        "encoding/json"
+        "fmt"
+        "io"
+        "net"
+        "net/http"
+        "net/http/httptest"
+        "net/textproto"
+        "net/url"
+        "sort"
+        "strings"
+        "testing"
+        "time"
+    )
+
+    type routeTransport struct {{ "{" }}
+        base   http.RoundTripper
+        target string
+    {{ "}" }}
+
+    func (r routeTransport) RoundTrip(req *http.Request) (*http.Response, error) {{ "{" }}
+        copy := req.Clone(req.Context())
+        u, _ := url.Parse(r.target)
+        copy.URL.Scheme = u.Scheme
+        copy.URL.Host = u.Host
+        return r.base.RoundTrip(copy)
+    {{ "}" }}
+    func fixtureManager(t *testing.T, server *httptest.Server) *Manager {{ "{" }}
+        t.Helper()
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}4{{ "}" }}, 32))
+        m.http = &http.Client{{ "{" }}Transport: routeTransport{{ "{" }}base: server.Client().Transport, target: server.URL{{ "}" }}, Timeout: time.Second{{ "}" }}
+        return m
+    {{ "}" }}
+    func TestAliyunSignedDeliveryAndSanitizedProviderFailure(t *testing.T) {{ "{" }}
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            if r.Method != "POST" {{ "{" }}
+                t.Error("SMS must POST")
+            {{ "}" }}
+            r.ParseForm()
+            q := r.PostForm
+            sig := q.Get("Signature")
+            q.Del("Signature")
+            keys := make([]string, 0, len(q))
+            for k := range q {{ "{" }}
+                keys = append(keys, k)
+            {{ "}" }}
+            sort.Strings(keys)
+            esc := func(s string) string {{ "{" }} return strings.ReplaceAll(url.QueryEscape(s), "+", "%20") {{ "}" }}
+            parts := []string{{ "{" }}{{ "}" }}
+            for _, k := range keys {{ "{" }}
+                parts = append(parts, esc(k)+"="+esc(q.Get(k)))
+            {{ "}" }}
+            mac := hmac.New(sha1.New, []byte("private-key&"))
+            mac.Write([]byte("POST&%2F&" + esc(strings.Join(parts, "&"))))
+            if sig != base64.StdEncoding.EncodeToString(mac.Sum(nil)) {{ "{" }}
+                t.Error("invalid Aliyun signature")
+            {{ "}" }}
+            if q.Get("PhoneNumbers") != "13800138000" || q.Get("TemplateParam") != `{{ "{" }}"code":"123456"{{ "}" }}` || q.Get("SignatureNonce") == "" {{ "{" }}
+                t.Error("incorrect SMS parameters")
+            {{ "}" }}
+            if q.Get("TemplateCode") == "reject" {{ "{" }}
+                io.WriteString(w, `{{ "{" }}"Code":"error","Message":"private-key 123456"{{ "}" }}`)
+            {{ "}" }} else {{ "{" }}
+                io.WriteString(w, `{{ "{" }}"Code":"OK"{{ "}" }}`)
+            {{ "}" }}
+        {{ "}" }}))
+        defer server.Close()
+        m := fixtureManager(t, server)
+        c := Config{{ "{" }}Provider: "aliyun", Settings: map[string]string{{ "{" }}"sign_name": "test", "template_id": "SMS_1"{{ "}" }}, Secret: map[string]string{{ "{" }}"access_key_id": "key-id", "access_key_secret": "private-key"{{ "}" }}{{ "}" }}
+        if err := m.sendSMS(context.Background(), c, "+8613800138000", "login", "123456"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        c.Settings["template_id"] = "reject"
+        err := m.sendSMS(context.Background(), c, "+8613800138000", "login", "123456")
+        if err == nil || strings.Contains(err.Error(), "123456") || strings.Contains(err.Error(), "private-key") {{ "{" }}
+            t.Fatal("provider error leaked secret or was accepted")
+        {{ "}" }}
+    {{ "}" }}
+    func TestTencentTC3SignedHTTPDelivery(t *testing.T) {{ "{" }}
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            body, _ := io.ReadAll(r.Body)
+            var payload map[string]any
+            json.Unmarshal(body, &payload)
+            if payload["PhoneNumberSet"].([]any)[0] != "+8613800138000" || r.Header.Get("X-TC-Action") != "SendSms" || r.Header.Get("X-TC-Version") != "2021-01-11" {{ "{" }}
+                t.Error("wrong Tencent request")
+            {{ "}" }}
+            hash := func(b []byte) string {{ "{" }} x := sha256.Sum256(b); return hex.EncodeToString(x[:]) {{ "}" }}
+            h := func(key []byte, s string) []byte {{ "{" }}
+                m := hmac.New(sha256.New, key)
+                m.Write([]byte(s))
+                return m.Sum(nil)
+            {{ "}" }}
+            timestamp := r.Header.Get("X-TC-Timestamp")
+            ts, _ := time.Parse(time.RFC3339, r.Header.Get("X-Test-Time"))
+            _ = ts
+            date := time.Now().UTC().Format("2006-01-02")
+            scope := date + "/sms/tc3_request"
+            canonical := "POST\n/\n\ncontent-type:application/json; charset=utf-8\nhost:sms.tencentcloudapi.com\n\ncontent-type;host\n" + hash(body)
+            signing := h(h(h([]byte("TC3private-key"), date), "sms"), "tc3_request")
+            expected := "TC3-HMAC-SHA256 Credential=key-id/" + scope + ", SignedHeaders=content-type;host, Signature=" + hex.EncodeToString(h(signing, "TC3-HMAC-SHA256\n"+timestamp+"\n"+scope+"\n"+hash([]byte(canonical))))
+            if r.Header.Get("Authorization") != expected {{ "{" }}
+                t.Error("invalid Tencent signature")
+            {{ "}" }}
+            io.WriteString(w, `{{ "{" }}"Response":{{ "{" }}"SendStatusSet":[{{ "{" }}"Code":"Ok"{{ "}" }}]{{ "}" }}{{ "}" }}`)
+        {{ "}" }}))
+        defer server.Close()
+        m := fixtureManager(t, server)
+        c := Config{{ "{" }}Provider: "tencent", Settings: map[string]string{{ "{" }}"sign_name": "test", "template_id": "1", "sdk_app_id": "app"{{ "}" }}, Secret: map[string]string{{ "{" }}"secret_id": "key-id", "secret_key": "private-key"{{ "}" }}{{ "}" }}
+        if err := m.sendSMS(context.Background(), c, "+8613800138000", "login", "123456"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+    {{ "}" }}
+    func TestSMTPImplicitTLSDeliversAndRejectsHeaderInjection(t *testing.T) {{ "{" }}
+        certServer := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {{ "{" }}{{ "}" }}))
+        cert := certServer.TLS.Certificates[0]
+        certServer.Close()
+        ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{{ "{" }}Certificates: []tls.Certificate{{ "{" }}cert{{ "}" }}, MinVersion: tls.VersionTLS12{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        defer ln.Close()
+        messages := make(chan string, 1)
+        fail := make(chan error, 1)
+        go func() {{ "{" }}
+            conn, e := ln.Accept()
+            if e != nil {{ "{" }}
+                fail <- e
+                return
+            {{ "}" }}
+            defer conn.Close()
+            conn.SetDeadline(time.Now().Add(5 * time.Second))
+            tp := textproto.NewConn(conn)
+            tp.PrintfLine("220 localhost test SMTP")
+            var message string
+            for {{ "{" }}
+                line, e := tp.ReadLine()
+                if e != nil {{ "{" }}
+                    fail <- e
+                    return
+                {{ "}" }}
+                switch {{ "{" }}
+                case strings.HasPrefix(line, "EHLO"):
+                    tp.PrintfLine("250-localhost")
+                    tp.PrintfLine("250 AUTH PLAIN")
+                case strings.HasPrefix(line, "AUTH PLAIN"):
+                    tp.PrintfLine("235 authenticated")
+                case strings.HasPrefix(line, "MAIL FROM:"), strings.HasPrefix(line, "RCPT TO:"):
+                    tp.PrintfLine("250 OK")
+                case line == "DATA":
+                    tp.PrintfLine("354 send data")
+                    b, e := io.ReadAll(tp.DotReader())
+                    if e != nil {{ "{" }}
+                        fail <- e
+                        return
+                    {{ "}" }}
+                    message = string(b)
+                    tp.PrintfLine("250 accepted")
+                case line == "QUIT":
+                    tp.PrintfLine("221 bye")
+                    messages <- message
+                    return
+                default:
+                    fail <- fmt.Errorf("unexpected SMTP command %s", strings.Split(line, " ")[0])
+                    return
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}()
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        m.allowPrivate = true
+        m.roots = x509.NewCertPool()
+        m.roots.AddCert(cert.Leaf)
+        host, port, _ := net.SplitHostPort(ln.Addr().String())
+        c := Config{{ "{" }}Provider: "smtp", Settings: map[string]string{{ "{" }}"host": host, "port": port, "tls_mode": "tls", "from": "auth@example.com"{{ "}" }}, Secret: map[string]string{{ "{" }}"username": "user", "password": "private"{{ "}" }}{{ "}" }}
+        c.Settings["subject"] = "Default subject"
+        c.Settings["subject_login"] = "Sign in to Example"
+        c.Settings["body_template"] = "Action {{ "{" }}purpose{{ "}" }}\nUse {{ "{" }}code{{ "}" }}; expires in {{ "{" }}minutes{{ "}" }} minutes."
+        if err = m.sendEmail(context.Background(), c, "alice@example.com", "login", "123456"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        select {{ "{" }}
+        case msg := <-messages:
+            if !strings.Contains(msg, "Subject: Sign in to Example") || !strings.Contains(msg, "Action login\nUse 123456; expires in 5 minutes.") || !strings.Contains(msg, "To: <alice@example.com>") {{ "{" }}
+                t.Fatal("missing message code/recipient")
+            {{ "}" }}
+        case err := <-fail:
+            t.Fatal(err)
+        case <-time.After(5 * time.Second):
+            t.Fatal("SMTP fixture timed out")
+        {{ "}" }}
+        if err = m.sendEmail(context.Background(), c, "alice@example.com\r\nBcc:other@example.com", "login", "123456"); err == nil {{ "{" }}
+            t.Fatal("accepted header injection")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSMTPRequiresSTARTTLSBeforeAuthentication(t *testing.T) {{ "{" }}
+        ln, err := net.Listen("tcp", "127.0.0.1:0")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        defer ln.Close()
+        commands := make(chan string, 8)
+        go func() {{ "{" }}
+            conn, e := ln.Accept()
+            if e != nil {{ "{" }}
+                return
+            {{ "}" }}
+            defer conn.Close()
+            conn.SetDeadline(time.Now().Add(3 * time.Second))
+            tp := textproto.NewConn(conn)
+            tp.PrintfLine("220 localhost SMTP")
+            for {{ "{" }}
+                line, e := tp.ReadLine()
+                if e != nil {{ "{" }}
+                    return
+                {{ "}" }}
+                commands <- line
+                if strings.HasPrefix(line, "EHLO") {{ "{" }}
+                    tp.PrintfLine("250-localhost")
+                    tp.PrintfLine("250 AUTH PLAIN")
+                {{ "}" }} else if line == "QUIT" {{ "{" }}
+                    tp.PrintfLine("221 bye")
+                    return
+                {{ "}" }} else {{ "{" }}
+                    tp.PrintfLine("500 refused")
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}()
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        m.allowPrivate = true
+        host, port, _ := net.SplitHostPort(ln.Addr().String())
+        c := Config{{ "{" }}Provider: "smtp", Settings: map[string]string{{ "{" }}"host": host, "port": port, "tls_mode": "starttls", "from": "auth@example.com"{{ "}" }}, Secret: map[string]string{{ "{" }}"username": "private-user", "password": "private-pass"{{ "}" }}{{ "}" }}
+        if err = m.sendEmail(context.Background(), c, "alice@example.com", "login", "123456"); err == nil {{ "{" }}
+            t.Fatal("accepted STARTTLS downgrade")
+        {{ "}" }}
+        close(commands)
+        for line := range commands {{ "{" }}
+            if strings.HasPrefix(line, "AUTH") {{ "{" }}
+                t.Fatal("sent credentials before TLS")
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSMTPSTARTTLSUpgradeDeliversEncryptedMessage(t *testing.T) {{ "{" }}
+        certServer := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {{ "{" }}{{ "}" }}))
+        cert := certServer.TLS.Certificates[0]
+        certServer.Close()
+        ln, err := net.Listen("tcp", "127.0.0.1:0")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        defer ln.Close()
+        result := make(chan string, 1)
+        failure := make(chan error, 1)
+        go func() {{ "{" }}
+            conn, e := ln.Accept()
+            if e != nil {{ "{" }}
+                failure <- e
+                return
+            {{ "}" }}
+            defer conn.Close()
+            conn.SetDeadline(time.Now().Add(5 * time.Second))
+            tp := textproto.NewConn(conn)
+            tp.PrintfLine("220 localhost SMTP")
+            encrypted := false
+            var message string
+            for {{ "{" }}
+                line, e := tp.ReadLine()
+                if e != nil {{ "{" }}
+                    failure <- e
+                    return
+                {{ "}" }}
+                switch {{ "{" }}
+                case strings.HasPrefix(line, "EHLO"):
+                    tp.PrintfLine("250-localhost")
+                    if !encrypted {{ "{" }}
+                        tp.PrintfLine("250 STARTTLS")
+                    {{ "}" }} else {{ "{" }}
+                        tp.PrintfLine("250 AUTH PLAIN")
+                    {{ "}" }}
+                case line == "STARTTLS":
+                    tp.PrintfLine("220 begin TLS")
+                    secure := tls.Server(conn, &tls.Config{{ "{" }}Certificates: []tls.Certificate{{ "{" }}cert{{ "}" }}, MinVersion: tls.VersionTLS12{{ "}" }})
+                    if e = secure.Handshake(); e != nil {{ "{" }}
+                        failure <- e
+                        return
+                    {{ "}" }}
+                    conn = secure
+                    tp = textproto.NewConn(conn)
+                    encrypted = true
+                case strings.HasPrefix(line, "AUTH PLAIN"):
+                    if !encrypted {{ "{" }}
+                        failure <- fmt.Errorf("authentication before TLS")
+                        return
+                    {{ "}" }}
+                    tp.PrintfLine("235 authenticated")
+                case strings.HasPrefix(line, "MAIL FROM:"), strings.HasPrefix(line, "RCPT TO:"):
+                    tp.PrintfLine("250 accepted")
+                case line == "DATA":
+                    tp.PrintfLine("354 send data")
+                    raw, e := io.ReadAll(tp.DotReader())
+                    if e != nil {{ "{" }}
+                        failure <- e
+                        return
+                    {{ "}" }}
+                    message = string(raw)
+                    tp.PrintfLine("250 accepted")
+                case line == "QUIT":
+                    tp.PrintfLine("221 bye")
+                    result <- message
+                    return
+                default:
+                    failure <- fmt.Errorf("unexpected SMTP command")
+                    return
+                {{ "}" }}
+            {{ "}" }}
+        {{ "}" }}()
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        m.allowPrivate = true
+        m.roots = x509.NewCertPool()
+        m.roots.AddCert(cert.Leaf)
+        host, port, _ := net.SplitHostPort(ln.Addr().String())
+        c := Config{{ "{" }}Provider: "smtp", Settings: map[string]string{{ "{" }}"host": host, "port": port, "tls_mode": "starttls", "from": "auth@example.com"{{ "}" }}, Secret: map[string]string{{ "{" }}"username": "private-user", "password": "private-pass"{{ "}" }}{{ "}" }}
+        if err = m.sendEmail(context.Background(), c, "alice@example.com", "login", "123456"); err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        select {{ "{" }}
+        case message := <-result:
+            if !strings.Contains(message, "123456") {{ "{" }}
+                t.Fatal("verification code absent from TLS message")
+            {{ "}" }}
+        case err := <-failure:
+            t.Fatal(err)
+        case <-time.After(5 * time.Second):
+            t.Fatal("SMTP fixture timeout")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSMSDeliverySelectsPurposeSpecificTemplatesWithDefaultFallback(t *testing.T) {{ "{" }}
+        for _, provider := range []string{{ "{" }}"aliyun", "tencent"{{ "}" }} {{ "{" }}
+            t.Run(provider, func(t *testing.T) {{ "{" }}
+                observed := make(chan string, 8)
+                server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+                    if provider == "aliyun" {{ "{" }}
+                        r.ParseForm()
+                        observed <- r.Form.Get("TemplateCode")
+                        io.WriteString(w, `{{ "{" }}"Code":"OK"{{ "}" }}`)
+                    {{ "}" }} else {{ "{" }}
+                        var body struct {{ "{" }}
+                            TemplateID string `json:"TemplateId"`
+                        {{ "}" }}
+                        json.NewDecoder(r.Body).Decode(&body)
+                        observed <- body.TemplateID
+                        io.WriteString(w, `{{ "{" }}"Response":{{ "{" }}"SendStatusSet":[{{ "{" }}"Code":"Ok"{{ "}" }}]{{ "}" }}{{ "}" }}`)
+                    {{ "}" }}
+                {{ "}" }}))
+                defer server.Close()
+                m := fixtureManager(t, server)
+                c := Config{{ "{" }}Kind: "sms", Provider: provider, Settings: map[string]string{{ "{" }}"sign_name": "test", "sdk_app_id": "app", "template_id": "default-template", "template_login": "login-template", "template_bind": "bind-template", "template_replace": "replace-template", "template_reauth": "reauth-template", "template_reset": "recovery-template"{{ "}" }}, Secret: map[string]string{{ "{" }}"access_key_id": "id", "access_key_secret": "secret", "secret_id": "id", "secret_key": "secret"{{ "}" }}{{ "}" }}
+                for _, tc := range []struct{{ "{" }} purpose, want string {{ "}" }}{{ "{" }}{{ "{" }}"login", "login-template"{{ "}" }}, {{ "{" }}"bind", "bind-template"{{ "}" }}, {{ "{" }}"replace", "replace-template"{{ "}" }}, {{ "{" }}"reauth", "reauth-template"{{ "}" }}, {{ "{" }}"reset", "recovery-template"{{ "}" }}{{ "}" }} {{ "{" }}
+                    if err := m.deliver(context.Background(), c, "+8613800138000", tc.purpose, "123456"); err != nil {{ "{" }}
+                        t.Fatal(err)
+                    {{ "}" }}
+                    if got := <-observed; got != tc.want {{ "{" }}
+                        t.Errorf("purpose %s selected %s, want %s", tc.purpose, got, tc.want)
+                    {{ "}" }}
+                {{ "}" }}
+                delete(c.Settings, "template_reset")
+                if err := m.deliver(context.Background(), c, "+8613800138000", "reset", "123456"); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                if got := <-observed; got != "default-template" {{ "{" }}
+                    t.Errorf("missing explicit purpose should use configured default, got %s", got)
+                {{ "}" }}
+                delete(c.Settings, "template_id")
+                if err := m.deliver(context.Background(), c, "+8613800138000", "reset", "123456"); err == nil {{ "{" }}
+                    t.Fatal("sent SMS without an approved purpose template")
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestSMTPDeliverySelectsPurposeSubjectsAndFallback(t *testing.T) {{ "{" }}
+        certServer := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {{ "{" }}{{ "}" }}))
+        cert := certServer.TLS.Certificates[0]
+        certServer.Close()
+        ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{{ "{" }}Certificates: []tls.Certificate{{ "{" }}cert{{ "}" }}, MinVersion: tls.VersionTLS12{{ "}" }})
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        defer ln.Close()
+        messages := make(chan string, 6)
+        failures := make(chan error, 1)
+        go func() {{ "{" }}
+            for i := 0; i < 6; i++ {{ "{" }}
+                conn, e := ln.Accept()
+                if e != nil {{ "{" }}
+                    failures <- e
+                    return
+                {{ "}" }}
+                conn.SetDeadline(time.Now().Add(5 * time.Second))
+                tp := textproto.NewConn(conn)
+                tp.PrintfLine("220 localhost SMTP")
+                var message string
+                for {{ "{" }}
+                    line, e := tp.ReadLine()
+                    if e != nil {{ "{" }}
+                        conn.Close()
+                        failures <- e
+                        return
+                    {{ "}" }}
+                    switch {{ "{" }}
+                    case strings.HasPrefix(line, "EHLO"):
+                        tp.PrintfLine("250-localhost")
+                        tp.PrintfLine("250 AUTH PLAIN")
+                    case strings.HasPrefix(line, "AUTH PLAIN"):
+                        tp.PrintfLine("235 authenticated")
+                    case strings.HasPrefix(line, "MAIL FROM:"), strings.HasPrefix(line, "RCPT TO:"):
+                        tp.PrintfLine("250 OK")
+                    case line == "DATA":
+                        tp.PrintfLine("354 data")
+                        raw, e := io.ReadAll(tp.DotReader())
+                        if e != nil {{ "{" }}
+                            conn.Close()
+                            failures <- e
+                            return
+                        {{ "}" }}
+                        message = string(raw)
+                        tp.PrintfLine("250 accepted")
+                    case line == "QUIT":
+                        tp.PrintfLine("221 bye")
+                        messages <- message
+                        conn.Close()
+                        goto next
+                    default:
+                        conn.Close()
+                        failures <- fmt.Errorf("unexpected SMTP command")
+                        return
+                    {{ "}" }}
+                {{ "}" }}
+            next:
+            {{ "}" }}
+        {{ "}" }}()
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        m.allowPrivate = true
+        m.roots = x509.NewCertPool()
+        m.roots.AddCert(cert.Leaf)
+        host, port, _ := net.SplitHostPort(ln.Addr().String())
+        c := Config{{ "{" }}Kind: "smtp", Provider: "smtp", Settings: map[string]string{{ "{" }}"host": host, "port": port, "tls_mode": "tls", "from": "auth@example.com", "subject": "Default verification", "subject_login": "Login verification", "subject_bind": "Bind verification", "subject_replace": "Replace verification", "subject_reauth": "Reauth verification", "subject_reset": "Recovery verification"{{ "}" }}, Secret: map[string]string{{ "{" }}"username": "user", "password": "private"{{ "}" }}{{ "}" }}
+        for _, tc := range []struct{{ "{" }} purpose, subject string {{ "}" }}{{ "{" }}{{ "{" }}"login", "Login verification"{{ "}" }}, {{ "{" }}"bind", "Bind verification"{{ "}" }}, {{ "{" }}"replace", "Replace verification"{{ "}" }}, {{ "{" }}"reauth", "Reauth verification"{{ "}" }}, {{ "{" }}"reset", "Recovery verification"{{ "}" }}, {{ "{" }}"reset", "Default verification"{{ "}" }}{{ "}" }} {{ "{" }}
+            if tc.subject == "Default verification" {{ "{" }}
+                delete(c.Settings, "subject_reset")
+            {{ "}" }}
+            if err := m.deliver(context.Background(), c, "alice@example.com", tc.purpose, "123456"); err != nil {{ "{" }}
+                t.Fatal(err)
+            {{ "}" }}
+            select {{ "{" }}
+            case message := <-messages:
+                if !strings.Contains(message, "Subject: "+tc.subject+"\n") || !strings.Contains(message, "Your verification code is 123456. It expires in 5 minutes.") {{ "{" }}
+                    t.Fatalf("purpose %s selected wrong SMTP subject/body", tc.purpose)
+                {{ "}" }}
+            case e := <-failures:
+                t.Fatal(e)
+            case <-time.After(5 * time.Second):
+                t.Fatal("SMTP subject fixture timeout")
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}

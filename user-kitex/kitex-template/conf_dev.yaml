@@ -34,7 +34,7 @@ body: |-
   # 鉴权配置
   auth:
     # JWT 签名密钥；生产环境必须通过环境变量/密钥管理覆盖，不能使用此默认值
-    jwt_secret: "dev-secret-change-me"
+    jwt_secret: "development-signing-secret-replace-before-deploy"
     # access token 有效期，单位秒
     access_ttl_seconds: 3600
   # 日志配置（由 go-common/log 读取）

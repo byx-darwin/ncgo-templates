@@ -1,0 +1,55 @@
+# ncgo exported template — internal/application/accountconfig/network_test.go
+path: internal/application/accountconfig/network_test.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "bytes"
+        "context"
+        "io"
+        "net/http"
+        "net/http/httptest"
+        "strings"
+        "testing"
+    )
+
+    func TestProviderHTTPTransportRejectsPlaintextAndRedirects(t *testing.T) {{ "{" }}
+        m := New(nil, "production", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        req, _ := http.NewRequest("GET", "http://example.com/token?secret=private", nil)
+        if _, err := m.http.Do(req); err == nil {{ "{" }}
+            t.Fatal("library HTTP client bypassed HTTPS validation")
+        {{ "}" }}
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            http.Redirect(w, r, "https://example.com/stolen", http.StatusFound)
+        {{ "}" }}))
+        defer server.Close()
+        m = New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        m.allowPrivate = true
+        m.roots = server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+        m.http = m.newHTTPClient()
+        if _, err := m.request(context.Background(), "GET", server.URL, nil, nil); err == nil {{ "{" }}
+            t.Fatal("followed provider redirect")
+        {{ "}" }}
+    {{ "}" }}
+    func TestProviderHTTPTransportBoundsUntrustedResponseBody(t *testing.T) {{ "{" }}
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }} io.WriteString(w, strings.Repeat("x", 2*1024*1024)) {{ "}" }}))
+        defer server.Close()
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        m.allowPrivate = true
+        m.roots = server.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+        m.http = m.newHTTPClient()
+        resp, err := m.http.Get(server.URL)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        defer resp.Body.Close()
+        body, err := io.ReadAll(resp.Body)
+        if len(body) > 1024*1024+1 {{ "{" }}
+            t.Fatal("OIDC/library client can read an unbounded provider body")
+        {{ "}" }}
+        if err == nil {{ "{" }}
+            t.Fatal("oversized provider response should fail")
+        {{ "}" }}
+    {{ "}" }}

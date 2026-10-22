@@ -1,0 +1,263 @@
+# ncgo exported template — internal/application/accountconfig/oauth.go
+path: internal/application/accountconfig/oauth.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "context"
+        "crypto/subtle"
+        "encoding/json"
+        "errors"
+        "net/url"
+        "regexp"
+        "strconv"
+        "strings"
+        "time"
+
+        "github.com/coreos/go-oidc/v3/oidc"
+        "golang.org/x/oauth2"
+    )
+
+    var pkceVerifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{{ "{" }}43,128{{ "}" }}$`)
+    var pkceChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{{ "{" }}43{{ "}" }}$`)
+
+    func (m *Manager) oauthReady(c Config) error {{ "{" }}
+        if m.initErr != nil {{ "{" }}
+            return m.initErr
+        {{ "}" }}
+        if c.Kind != "oauth" || !c.Enabled || !m.configReady(c) {{ "{" }}
+            return errors.New("OAuth configuration is unavailable or incomplete")
+        {{ "}" }}
+        return nil
+    {{ "}" }}
+    func scopes(raw, fallback string) []string {{ "{" }} return strings.Fields(valueOr(raw, fallback)) {{ "}" }}
+    func (m *Manager) oidcProvider(ctx context.Context, c Config) (*oidc.Provider, error) {{ "{" }}
+        issuer := c.Settings["issuer_url"]
+        if c.Provider == "google" {{ "{" }}
+            issuer = "https://accounts.google.com"
+        {{ "}" }}
+        if _, err := m.endpoint(ctx, issuer); err != nil {{ "{" }}
+            return nil, errors.New("OIDC issuer is not an allowed endpoint")
+        {{ "}" }}
+        provider, err := oidc.NewProvider(oidc.ClientContext(ctx, m.http), issuer)
+        if err != nil {{ "{" }}
+            return nil, errors.New("OIDC discovery failed")
+        {{ "}" }}
+        for _, endpoint := range []string{{ "{" }}provider.Endpoint().AuthURL, provider.Endpoint().TokenURL{{ "}" }} {{ "{" }}
+            if _, err = m.endpoint(ctx, endpoint); err != nil {{ "{" }}
+                return nil, errors.New("OIDC discovery returned a prohibited endpoint")
+            {{ "}" }}
+        {{ "}" }}
+        return provider, nil
+    {{ "}" }}
+    func (m *Manager) oidcConfig(c Config, provider *oidc.Provider) oauth2.Config {{ "{" }}
+        configured := scopes(c.Settings["scopes"], "openid profile email")
+        found := false
+        for _, v := range configured {{ "{" }}
+            if v == "openid" {{ "{" }}
+                found = true
+            {{ "}" }}
+        {{ "}" }}
+        if !found {{ "{" }}
+            configured = append([]string{{ "{" }}"openid"{{ "}" }}, configured...)
+        {{ "}" }}
+        return oauth2.Config{{ "{" }}ClientID: c.Settings["client_id"], ClientSecret: c.Secret["client_secret"], RedirectURL: c.Settings["redirect_url"], Endpoint: provider.Endpoint(), Scopes: configured{{ "}" }}
+    {{ "}" }}
+    func (m *Manager) OAuthStart(ctx context.Context, cfg Config, state, nonce, challenge string) (string, error) {{ "{" }}
+        if err := m.oauthReady(cfg); err != nil {{ "{" }}
+            return "", err
+        {{ "}" }}
+        if state == "" || nonce == "" || len(state) > 1024 || len(nonce) > 1024 {{ "{" }}
+            return "", errors.New("OAuth requires server-generated state and nonce")
+        {{ "}" }}
+        ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+        defer cancel()
+        switch cfg.Provider {{ "{" }}
+        case "google", "oidc":
+            if !pkceChallengePattern.MatchString(challenge) {{ "{" }}
+                return "", errors.New("OAuth requires an S256 PKCE challenge")
+            {{ "}" }}
+            provider, err := m.oidcProvider(ctx, cfg)
+            if err != nil {{ "{" }}
+                return "", err
+            {{ "}" }}
+            config := m.oidcConfig(cfg, provider)
+            return config.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.SetAuthURLParam("code_challenge", challenge), oauth2.SetAuthURLParam("code_challenge_method", "S256")), nil
+        case "github":
+            if !pkceChallengePattern.MatchString(challenge) {{ "{" }}
+                return "", errors.New("OAuth requires an S256 PKCE challenge")
+            {{ "}" }}
+            config := githubConfig(cfg)
+            return config.AuthCodeURL(state, oauth2.SetAuthURLParam("code_challenge", challenge), oauth2.SetAuthURLParam("code_challenge_method", "S256")), nil
+        case "wechat":
+            mode := valueOr(cfg.Settings["mode"], "web")
+            if mode == "app" || mode == "miniprogram" {{ "{" }}
+                return "", nil
+            {{ "}" }}
+            q := url.Values{{ "{" }}"appid": {{ "{" }}cfg.Settings["client_id"]{{ "}" }}, "redirect_uri": {{ "{" }}cfg.Settings["redirect_url"]{{ "}" }}, "response_type": {{ "{" }}"code"{{ "}" }}, "scope": {{ "{" }}"snsapi_login"{{ "}" }}, "state": {{ "{" }}state{{ "}" }}{{ "}" }}
+            return "https://open.weixin.qq.com/connect/qrconnect?" + q.Encode() + "#wechat_redirect", nil
+        case "alipay":
+            if cfg.Settings["mode"] == "app" {{ "{" }}
+                return alipayAuthInfo(cfg, state)
+            {{ "}" }}
+            q := url.Values{{ "{" }}"app_id": {{ "{" }}cfg.Settings["client_id"]{{ "}" }}, "scope": {{ "{" }}valueOr(cfg.Settings["scopes"], "auth_user"){{ "}" }}, "redirect_uri": {{ "{" }}cfg.Settings["redirect_url"]{{ "}" }}, "state": {{ "{" }}state{{ "}" }}{{ "}" }}
+            return "https://openauth.alipay.com/oauth2/publicAppAuthorize.htm?" + q.Encode(), nil
+        {{ "}" }}
+        return "", errors.New("unsupported OAuth provider")
+    {{ "}" }}
+    func (m *Manager) OAuthExchange(ctx context.Context, cfg Config, code, verifier, nonce string) (ExternalIdentity, error) {{ "{" }}
+        if err := m.oauthReady(cfg); err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        if code == "" || len(code) > 4096 || nonce == "" {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OAuth callback proof is required")
+        {{ "}" }}
+        ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+        defer cancel()
+        ctx = context.WithValue(ctx, oauth2.HTTPClient, m.http)
+        switch cfg.Provider {{ "{" }}
+        case "oidc", "google":
+            return m.exchangeOIDC(ctx, cfg, code, verifier, nonce)
+        case "github":
+            return m.exchangeGitHub(ctx, cfg, code, verifier)
+        case "wechat":
+            return m.exchangeWeChat(ctx, cfg, code)
+        case "alipay":
+            return m.exchangeAlipay(ctx, cfg, code)
+        default:
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("unsupported OAuth provider")
+        {{ "}" }}
+    {{ "}" }}
+    func (m *Manager) exchangeOIDC(ctx context.Context, c Config, code, verifier, nonce string) (ExternalIdentity, error) {{ "{" }}
+        if !pkceVerifierPattern.MatchString(verifier) {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OAuth PKCE verifier is invalid")
+        {{ "}" }}
+        provider, err := m.oidcProvider(ctx, c)
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        config := m.oidcConfig(c, provider)
+        token, err := config.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", verifier))
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OIDC authorization code exchange failed")
+        {{ "}" }}
+        raw, ok := token.Extra("id_token").(string)
+        if !ok || raw == "" {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OIDC did not return an ID token")
+        {{ "}" }}
+        id, err := provider.Verifier(&oidc.Config{{ "{" }}ClientID: c.Settings["client_id"], SupportedSigningAlgs: []string{{ "{" }}"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "EdDSA"{{ "}" }}{{ "}" }}).Verify(oidc.ClientContext(ctx, m.http), raw)
+        if err != nil || id.Subject == "" || len(id.Subject) > 512 || subtle.ConstantTimeCompare([]byte(id.Nonce), []byte(nonce)) != 1 {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OIDC ID token verification failed")
+        {{ "}" }}
+        var claims struct {{ "{" }}
+            Name            string `json:"name"`
+            Picture         string `json:"picture"`
+            AuthorizedParty string `json:"azp"`
+        {{ "}" }}
+        if id.Claims(&claims) != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OIDC identity claims are invalid")
+        {{ "}" }}
+        if (claims.AuthorizedParty != "" && claims.AuthorizedParty != c.Settings["client_id"]) || (len(id.Audience) > 1 && claims.AuthorizedParty != c.Settings["client_id"]) || id.IssuedAt.IsZero() || id.IssuedAt.After(time.Now().Add(time.Minute)) {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OIDC token presenter or issuance time is invalid")
+        {{ "}" }}
+        if id.AccessTokenHash != "" && id.VerifyAccessToken(token.AccessToken) != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OIDC access token binding is invalid")
+        {{ "}" }}
+        return ExternalIdentity{{ "{" }}Subject: id.Subject, Nickname: profileText(claims.Name), Avatar: profileAvatar(claims.Picture){{ "}" }}, nil
+    {{ "}" }}
+    func githubConfig(c Config) oauth2.Config {{ "{" }}
+        return oauth2.Config{{ "{" }}ClientID: c.Settings["client_id"], ClientSecret: c.Secret["client_secret"], RedirectURL: c.Settings["redirect_url"], Scopes: scopes(c.Settings["scopes"], "read:user"), Endpoint: oauth2.Endpoint{{ "{" }}AuthURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", AuthStyle: oauth2.AuthStyleInParams{{ "}" }}{{ "}" }}
+    {{ "}" }}
+    func (m *Manager) exchangeGitHub(ctx context.Context, c Config, code, verifier string) (ExternalIdentity, error) {{ "{" }}
+        if !pkceVerifierPattern.MatchString(verifier) {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("OAuth PKCE verifier is invalid")
+        {{ "}" }}
+        config := githubConfig(c)
+        token, err := config.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", verifier))
+        if err != nil || token.AccessToken == "" {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("GitHub authorization code exchange failed")
+        {{ "}" }}
+        raw, err := m.request(ctx, "GET", "https://api.github.com/user", nil, map[string]string{{ "{" }}"Authorization": "Bearer " + token.AccessToken, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "account-provider"{{ "}" }})
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("GitHub identity request failed")
+        {{ "}" }}
+        var user struct {{ "{" }}
+            ID     int64  `json:"id"`
+            Name   string `json:"name"`
+            Login  string `json:"login"`
+            Avatar string `json:"avatar_url"`
+        {{ "}" }}
+        if json.Unmarshal(raw, &user) != nil || user.ID <= 0 {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("GitHub identity response is invalid")
+        {{ "}" }}
+        return ExternalIdentity{{ "{" }}Subject: strconv.FormatInt(user.ID, 10), Nickname: profileText(valueOr(user.Name, user.Login)), Avatar: profileAvatar(user.Avatar){{ "}" }}, nil
+    {{ "}" }}
+    func (m *Manager) exchangeWeChat(ctx context.Context, c Config, code string) (ExternalIdentity, error) {{ "{" }}
+        q := url.Values{{ "{" }}"appid": {{ "{" }}c.Settings["client_id"]{{ "}" }}, "secret": {{ "{" }}c.Secret["client_secret"]{{ "}" }}, "grant_type": {{ "{" }}"authorization_code"{{ "}" }}{{ "}" }}
+        path := "/sns/oauth2/access_token"
+        if c.Settings["mode"] == "miniprogram" {{ "{" }}
+            path = "/sns/jscode2session"
+            q.Set("js_code", code)
+        {{ "}" }} else {{ "{" }}
+            q.Set("code", code)
+        {{ "}" }}
+        raw, err := m.request(ctx, "GET", "https://api.weixin.qq.com"+path+"?"+q.Encode(), nil, jsonHeaders())
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("WeChat authorization code exchange failed")
+        {{ "}" }}
+        var token struct {{ "{" }}
+            OpenID      string `json:"openid"`
+            AccessToken string `json:"access_token"`
+            SessionKey  string `json:"session_key"`
+            ErrorCode   int    `json:"errcode"`
+        {{ "}" }}
+        if json.Unmarshal(raw, &token) != nil || token.ErrorCode != 0 || token.OpenID == "" || len(token.OpenID) > 512 {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("WeChat authorization response is invalid")
+        {{ "}" }}
+        if c.Settings["mode"] == "miniprogram" {{ "{" }}
+            if token.SessionKey == "" {{ "{" }}
+                return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("WeChat mini-program session verification failed")
+            {{ "}" }}
+            return ExternalIdentity{{ "{" }}Subject: token.OpenID{{ "}" }}, nil
+        {{ "}" }}
+        if token.AccessToken == "" {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("WeChat did not return an access token")
+        {{ "}" }}
+        q = url.Values{{ "{" }}"access_token": {{ "{" }}token.AccessToken{{ "}" }}, "openid": {{ "{" }}token.OpenID{{ "}" }}, "lang": {{ "{" }}"zh_CN"{{ "}" }}{{ "}" }}
+        raw, err = m.request(ctx, "GET", "https://api.weixin.qq.com/sns/userinfo?"+q.Encode(), nil, jsonHeaders())
+        if err != nil {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("WeChat identity request failed")
+        {{ "}" }}
+        var user struct {{ "{" }}
+            OpenID    string `json:"openid"`
+            Nickname  string `json:"nickname"`
+            Avatar    string `json:"headimgurl"`
+            ErrorCode int    `json:"errcode"`
+        {{ "}" }}
+        if json.Unmarshal(raw, &user) != nil || user.ErrorCode != 0 || user.OpenID != token.OpenID {{ "{" }}
+            return ExternalIdentity{{ "{" }}{{ "}" }}, errors.New("WeChat identity verification failed")
+        {{ "}" }}
+        return ExternalIdentity{{ "{" }}Subject: token.OpenID, Nickname: profileText(user.Nickname), Avatar: profileAvatar(user.Avatar){{ "}" }}, nil
+    {{ "}" }}
+    func profileText(s string) string {{ "{" }}
+        s = strings.Map(func(r rune) rune {{ "{" }}
+            if r < 32 || r == 127 {{ "{" }}
+                return -1
+            {{ "}" }}
+            return r
+        {{ "}" }}, strings.TrimSpace(s))
+        r := []rune(s)
+        if len(r) > 100 {{ "{" }}
+            s = string(r[:100])
+        {{ "}" }}
+        return s
+    {{ "}" }}
+    func profileAvatar(s string) string {{ "{" }}
+        u, err := url.Parse(s)
+        if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || len(s) > 2048 {{ "{" }}
+            return ""
+        {{ "}" }}
+        return s
+    {{ "}" }}

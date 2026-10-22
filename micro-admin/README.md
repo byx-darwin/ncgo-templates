@@ -459,3 +459,13 @@ without Docker. Database E2E requires Docker through the workspace's `make test`
 
 The templates keep their existing UUID/string ID and RPC package contracts;
 iproost business resources such as edge devices and billing remain project-owned.
+
+## Application login configuration (v3)
+
+The updated seed adds the `/system/auth` menu and `auth-config:read/update/test`
+actions for the standalone management frontend. Apply the regenerated seed and
+assign these permissions to the relevant operators. This composition does not
+start the application user service: connect the admin BFF's `grpc.terminal_user`
+to a separately generated user-kitex v2 service, apply its migrations and set its
+deployment secrets. See [user-kitex setup](../user-kitex/README.md) for phone/email,
+OAuth, SMS and SMTP configuration. Administrator authentication remains separate.

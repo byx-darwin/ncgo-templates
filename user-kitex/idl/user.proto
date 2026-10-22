@@ -88,6 +88,9 @@ message UserItem {
   string username = 2;
   string nickname = 3;
   int32 status = 4;
+  string phone = 5;
+  string email = 6;
+  string avatar = 7;
 }
 message ListUsersResp {
   repeated UserItem users = 1;
@@ -137,6 +140,8 @@ message ListUserIdentitiesReq {
   string uid = 1;
 }
 message IdentityItem {
+  string name = 3;
+  string provider_type = 4;
   string provider = 1;
   string provider_user_id = 2;
 }
@@ -152,6 +157,7 @@ message GetUserResp {
 }
 
 message AdminUnbindProviderReq {
+  string operator_uid = 3;
   // uid is the target end-user, specified by an admin operator via
   // admin-bff-hertz. Trust boundary: admin-bff-hertz's own RBAC
   // authorization (the "terminal_user:unbind-identity" permission) gates
@@ -242,7 +248,60 @@ message ConfirmPasswordResetReq {
 }
 message ConfirmPasswordResetResp {}
 
+
+// Application account v2. The environment is server-controlled; client_id is
+// an application client policy key, not an identity or authorization proof.
+message AccountClientReq { string client_id = 1; }
+message AccountCodeReq { string client_id = 1; string kind = 2; string identifier = 3; string purpose = 4; string access_token = 5; string client_ip = 6; }
+message AccountLoginReq { string client_id = 1; string kind = 2; string mode = 3; string identifier = 4; string credential = 5; string client_ip = 6; string user_agent = 7; }
+message AccountTokenReq { string access_token = 1; string client_id = 2; }
+message AccountExchangeResp { AccountTokens tokens = 1; string proof = 2; string purpose = 3; }
+message AccountExchangeReq { string client_id = 1; string code = 2; }
+message AccountRefreshReq { string refresh_token = 1; string client_id = 2; }
+message AccountProfileReq { string access_token = 1; string client_id = 2; string nickname = 3; string avatar = 4; }
+message AccountProofReq { string access_token = 1; string client_id = 2; string mode = 3; string kind = 4; string identifier = 5; string credential = 6; string client_ip = 7; }
+message AccountContactReq { string access_token = 1; string client_id = 2; string operation = 3; string kind = 4; string identifier = 5; string code = 6; string proof = 7; string client_ip = 8; }
+message AccountPasswordReq { string access_token = 1; string client_id = 2; string new_password = 3; string old_password = 4; string proof = 5; }
+message AccountResetReq { string client_id = 1; string kind = 2; string identifier = 3; string code = 4; string new_password = 5; string client_ip = 6; }
+message AccountOAuthStartReq { string client_id = 1; string config_id = 2; string purpose = 3; string access_token = 4; string proof = 5; string return_url = 6; }
+message AccountOAuthCompleteReq { string client_id = 1; string config_id = 2; string state = 3; string code = 4; string client_ip = 5; string user_agent = 6; }
+message AccountEmptyReq { string operator_uid = 1; }
+message AccountLoginConfig { string id = 1; string kind = 2; string provider = 3; string name = 4; string environment = 5; repeated string clients = 6; bool enabled = 7; int32 sort = 8; map<string,string> settings = 9; map<string,string> secret = 10; bool has_secret = 11; }
+message AccountSaveConfigReq { AccountLoginConfig config = 1; string operator_uid = 2; }
+message AccountTestConfigReq { string config_id = 1; string target = 2; string operator_uid = 3; }
+message AccountEmptyResp {}
+message AccountTokens { string uid = 1; string access_token = 2; string refresh_token = 3; int64 expires_in = 4; bool is_new_user = 5; }
+message AccountSessionResp { string uid = 1; string session_id = 2; string client_id = 3; }
+message AccountIdentity { string config_id = 1; string provider = 2; string name = 3; }
+message AccountProfileResp { string uid = 1; string nickname = 2; string avatar = 3; string phone = 4; string email = 5; bool has_password = 6; repeated AccountIdentity identities = 7; }
+message AccountProofResp { string proof = 1; }
+message AccountLoginMethod { string id = 1; string kind = 2; string provider = 3; string name = 4; string icon = 5; int32 sort = 6; }
+message AccountMethodsResp { repeated AccountLoginMethod methods = 1; }
+message AccountOAuthStartResp { string redirect_url = 1; string state = 2; string flow = 3; string app_id = 4; string auth_info = 5; }
+message AccountOAuthCompleteResp { AccountTokens tokens = 1; string return_url = 2; string purpose = 3; string proof = 4; string client_id = 5; string exchange_code = 6; }
+message AccountConfigListResp { string environment = 1; repeated AccountLoginConfig configs = 2; }
+
 service UserService {
+  rpc AccountMethods(AccountClientReq) returns (AccountMethodsResp);
+  rpc AccountSendCode(AccountCodeReq) returns (AccountEmptyResp);
+  rpc AccountLogin(AccountLoginReq) returns (AccountTokens);
+  rpc AccountExchange(AccountExchangeReq) returns (AccountExchangeResp);
+  rpc AccountRefresh(AccountRefreshReq) returns (AccountTokens);
+  rpc AccountVerify(AccountTokenReq) returns (AccountSessionResp);
+  rpc AccountLogout(AccountTokenReq) returns (AccountEmptyResp);
+  rpc AccountProfile(AccountTokenReq) returns (AccountProfileResp);
+  rpc AccountUpdateProfile(AccountProfileReq) returns (AccountProfileResp);
+  rpc AccountReauthenticate(AccountProofReq) returns (AccountProofResp);
+  rpc AccountContact(AccountContactReq) returns (AccountEmptyResp);
+  rpc AccountPassword(AccountPasswordReq) returns (AccountEmptyResp);
+  rpc AccountResetPassword(AccountResetReq) returns (AccountEmptyResp);
+  rpc AccountOAuthStart(AccountOAuthStartReq) returns (AccountOAuthStartResp);
+  rpc AccountOAuthComplete(AccountOAuthCompleteReq) returns (AccountOAuthCompleteResp);
+  // Trusted admin BFF only: operator_uid is populated from its verified admin JWT.
+  rpc AccountListConfigs(AccountEmptyReq) returns (AccountConfigListResp);
+  rpc AccountSaveConfig(AccountSaveConfigReq) returns (AccountLoginConfig);
+  rpc AccountTestConfig(AccountTestConfigReq) returns (AccountEmptyResp);
+
   rpc Register(RegisterReq) returns (RegisterResp);
   rpc Login(LoginReq) returns (LoginResp);
   rpc OAuthStart(OAuthStartReq) returns (OAuthStartResp);

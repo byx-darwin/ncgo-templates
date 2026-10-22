@@ -151,7 +151,7 @@ body: |-
             },
             RPC: RPCConfig{RequestTimeoutSeconds: config.Duration{Duration: 3 * time.Second}},
             Auth: AuthConfig{
-                JWTSecret:        "dev-secret-change-me",
+                JWTSecret:        "development-signing-secret-replace-before-deploy",
                 AccessTTLSeconds: 3600,
             },
             Database: DatabaseConfig{

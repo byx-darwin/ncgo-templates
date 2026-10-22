@@ -487,3 +487,25 @@ Pair this version with admin-services-kitex v2 and its migrations. Existing
 handler files marked `skip` need explicit application updates. See
 [micro-admin's permission contract](../micro-admin/README.md#permission-contract-v2)
 for upgrade and verification steps.
+
+## Application login configuration (v3)
+
+The `/system/auth` page in `ncgo-admin-web-template` manages end-user login
+channels through this BFF; administrator login is unchanged. Configure
+`grpc.terminal_user` to point to user-kitex v2, apply its
+`000005_application_accounts` migration, and supply that service's
+`ACCOUNT_ENVIRONMENT`, `ACCOUNT_CONFIG_KEY` and private signing secret as described
+in [user-kitex](../user-kitex/README.md).
+
+`GET /api/v1/auth-configs`, `POST /api/v1/auth-configs` and
+`POST /api/v1/auth-configs/:id/test` require `auth-config:read`,
+`auth-config:update` and `auth-config:test`, respectively. The verified operator
+UID is forwarded server-side. Reads return redacted configurations and a
+server-controlled environment; blank credential updates preserve stored secrets.
+Test delivery requires an explicit recipient and is audited. Regenerate/apply
+`cmd/permgen` permissions before assigning these actions and the new menu.
+
+Terminal user management now returns display nickname, masked phone/email and
+avatar; new application users do not have a username. Identity entries include
+configuration ID, display name and provider type. Bans, password resets, force
+logout and administrative unbinding revoke persistent application sessions.

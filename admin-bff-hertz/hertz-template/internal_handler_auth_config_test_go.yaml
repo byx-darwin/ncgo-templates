@@ -1,0 +1,59 @@
+path: internal/handler/auth_config_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+        "context"
+        "{{.Module}}/internal/pkg/middleware"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/protocol"
+        "github.com/cloudwego/kitex/client/callopt"
+        "strings"
+        "testing"
+    )
+
+    type configClient struct {{ "{" }}
+        userservice.Client
+        save *userv1.AccountSaveConfigReq
+        test *userv1.AccountTestConfigReq
+    {{ "}" }}
+
+    func (f *configClient) AccountSaveConfig(ctx context.Context, r *userv1.AccountSaveConfigReq, _ ...callopt.Option) (*userv1.AccountLoginConfig, error) {{ "{" }}
+        f.save = r
+        return &userv1.AccountLoginConfig{{ "{" }}Id: r.Config.Id, Secret: map[string]string{{ "{" }}"password": "should-redact"{{ "}" }}, HasSecret: true{{ "}" }}, nil
+    {{ "}" }}
+    func (f *configClient) AccountTestConfig(ctx context.Context, r *userv1.AccountTestConfigReq, _ ...callopt.Option) (*userv1.AccountEmptyResp, error) {{ "{" }}
+        f.test = r
+        return &userv1.AccountEmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+    func configContext(body string) *app.RequestContext {{ "{" }}
+        c := app.NewContext(0)
+        r := protocol.NewRequest("POST", "/api/v1/auth-configs", nil)
+        r.SetBodyString(body)
+        r.CopyTo(&c.Request)
+        return c
+    {{ "}" }}
+    func TestConfigOperatorFromVerifiedClaimsAndSecretRedaction(t *testing.T) {{ "{" }}
+        f := &configClient{{ "{" }}{{ "}" }}
+        h := NewAuthConfigHandler(f)
+        c := configContext(`{{ "{" }}"id":"cfg","kind":"smtp","operator_uid":"victim","secret":{{ "{" }}"password":"new-secret"{{ "}" }}{{ "}" }}`)
+        h.Save(context.Background(), c)
+        if f.save != nil {{ "{" }}
+            t.Fatal("unauthenticated save reached service")
+        {{ "}" }}
+        c = configContext(`{{ "{" }}"id":"cfg","kind":"smtp","operator_uid":"victim","secret":{{ "{" }}"password":"new-secret"{{ "}" }}{{ "}" }}`)
+        c.Set(middleware.ContextKeyTokenClaims, &middleware.Claims{{ "{" }}Uid: "admin"{{ "}" }})
+        h.Save(context.Background(), c)
+        if f.save == nil || f.save.OperatorUid != "admin" || f.save.Config.Secret["password"] != "new-secret" {{ "{" }}
+            t.Fatalf("request extraction: %+v", f.save)
+        {{ "}" }}
+        if string(c.Response.Body()) == "" || containsSecret(string(c.Response.Body())) {{ "{" }}
+            t.Fatalf("secret response: %s", c.Response.Body())
+        {{ "}" }}
+    {{ "}" }}
+    func containsSecret(s string) bool {{ "{" }} return strings.Contains(s, "should-redact") {{ "}" }}

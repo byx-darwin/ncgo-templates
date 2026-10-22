@@ -1,0 +1,133 @@
+# ncgo exported template — internal/handler/account_test.go
+path: internal/handler/account_test.go
+update_behavior:
+    type: cover
+body: |
+    package handler_test
+
+    import (
+        "context"
+        "os"
+        "path/filepath"
+        "strings"
+        "testing"
+        "time"
+
+        "{{.Module}}/internal/application/account"
+        "{{.Module}}/internal/application/accountconfig"
+        usersvc "{{.Module}}/internal/application/user"
+        useradmin "{{.Module}}/internal/application/useradmin"
+        "{{.Module}}/internal/db/gen"
+        "{{.Module}}/internal/handler"
+        "{{.Module}}/internal/infrastructure/audit"
+        auth "{{.Module}}/internal/infrastructure/auth"
+        userrepo "{{.Module}}/internal/repository/user"
+        api "{{.Module}}/kitex_gen/api/user/v1"
+        "github.com/google/uuid"
+        "github.com/jackc/pgx/v5/pgxpool"
+    )
+
+    func accountFixture(t *testing.T) (*handler.UserServiceHandlerImpl, string) {{ "{" }}
+        t.Helper()
+        dsn := os.Getenv("ACCOUNT_TEST_DSN")
+        if dsn == "" {{ "{" }}
+            t.Skip("ACCOUNT_TEST_DSN unavailable")
+        {{ "}" }}
+        ctx := context.Background()
+        base, e := pgxpool.New(ctx, dsn)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        schema := "rpc_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+        if _, e = base.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        cfg, e := pgxpool.ParseConfig(dsn)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        cfg.ConnConfig.RuntimeParams["search_path"] = schema
+        pool, e := pgxpool.NewWithConfig(ctx, cfg)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        t.Cleanup(func() {{ "{" }} pool.Close(); base.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE"); base.Close() {{ "}" }})
+        files, _ := filepath.Glob("../db/migrations/*.sql")
+        for _, f := range files {{ "{" }}
+            b, e := os.ReadFile(f)
+            if e != nil {{ "{" }}
+                t.Fatal(e)
+            {{ "}" }}
+            if _, e = pool.Exec(ctx, strings.SplitN(string(b), "-- +goose Down", 2)[0]); e != nil {{ "{" }}
+                t.Fatal(e)
+            {{ "}" }}
+        {{ "}" }}
+        cm := accountconfig.New(pool, "test", []byte("0123456789abcdef0123456789abcdef"))
+        if _, e = cm.Save(ctx, accountconfig.Config{{ "{" }}ID: "phone_password", Kind: "method", Provider: "phone_password", Environment: "test", Name: "Password", Clients: []string{{ "{" }}"web"{{ "}" }}, Enabled: true{{ "}" }}, "admin"); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        accounts := account.New(pool, cm, "test-signing-key-with-32-characters", "test")
+        q := gen.New(pool)
+        repo := userrepo.New(q, pool)
+        writer := audit.NewSQLWriter(q)
+        self := usersvc.New(repo, auth.NewJWTManager("test-signing-key-with-32-characters"), nil, nil, 15*time.Minute, writer, accounts, nil, nil, nil)
+        admin := useradmin.New(repo, accounts, writer, self)
+        h := handler.NewUserServiceHandlerImpl(self, admin, audit.NewSQLReader(q)).UseAccounts(accounts, cm, "test")
+        uid := uuid.NewString()
+        password, e := auth.HashPassword("initialPassword123")
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e = pool.Exec(ctx, "INSERT INTO users(id,phone,nickname,password_hash) VALUES($1,'+8613800138000','User',$2)", uid, password); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        return h, uid
+    {{ "}" }}
+    func TestAdministratorSecurityOperationsRevokeActualSessions(t *testing.T) {{ "{" }}
+        h, uid := accountFixture(t)
+        ctx := context.Background()
+        login := func(password string) *api.AccountTokens {{ "{" }}
+            v, e := h.AccountLogin(ctx, &api.AccountLoginReq{{ "{" }}ClientId: "web", Kind: "phone", Mode: "password", Identifier: "13800138000", Credential: password{{ "}" }})
+            if e != nil {{ "{" }}
+                t.Fatal(e)
+            {{ "}" }}
+            return v
+        {{ "}" }}
+        before := login("initialPassword123")
+        if _, e := h.BanUser(ctx, &api.BanUserReq{{ "{" }}Uid: uid, OperatorUid: "admin"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e := h.UnbanUser(ctx, &api.UnbanUserReq{{ "{" }}Uid: uid, OperatorUid: "admin"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e := h.AccountVerify(ctx, &api.AccountTokenReq{{ "{" }}AccessToken: before.AccessToken, ClientId: "web"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("unban revived session")
+        {{ "}" }}
+        after := login("initialPassword123")
+        if _, e := h.ResetPassword(ctx, &api.ResetPasswordReq{{ "{" }}Uid: uid, OperatorUid: "admin", NewPassword: "changedPassword123"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e := h.AccountRefresh(ctx, &api.AccountRefreshReq{{ "{" }}RefreshToken: after.RefreshToken, ClientId: "web"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("admin password reset kept refresh session")
+        {{ "}" }}
+        after = login("changedPassword123")
+        if _, e := h.ForceLogout(ctx, &api.ForceLogoutReq{{ "{" }}Uid: uid, OperatorUid: "admin"{{ "}" }}); e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        if _, e := h.AccountVerify(ctx, &api.AccountTokenReq{{ "{" }}AccessToken: after.AccessToken, ClientId: "web"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("force logout did not revoke")
+        {{ "}" }}
+    {{ "}" }}
+    func TestLegacyUsernameAndUidOnlyRPCsAreDisabled(t *testing.T) {{ "{" }}
+        h := handler.NewUserServiceHandlerImpl(nil, nil, nil)
+        ctx := context.Background()
+        if _, e := h.Register(ctx, &api.RegisterReq{{ "{" }}Username: "user", Password: "password123"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("username registration reachable")
+        {{ "}" }}
+        if _, e := h.Login(ctx, &api.LoginReq{{ "{" }}Username: "user", Password: "password123"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("username login reachable")
+        {{ "}" }}
+        if _, e := h.ChangePassword(ctx, &api.ChangePasswordReq{{ "{" }}Uid: uuid.NewString(), OldPassword: "old", NewPassword: "new"{{ "}" }}); e == nil {{ "{" }}
+            t.Fatal("uid-only password mutation reachable")
+        {{ "}" }}
+    {{ "}" }}

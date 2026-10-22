@@ -1,0 +1,93 @@
+# ncgo exported template — internal/application/account/exchange.go
+path: internal/application/account/exchange.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "errors"
+        "time"
+
+        "github.com/jackc/pgx/v5"
+    )
+
+    func (s *Service) createGrant(ctx context.Context, tx pgx.Tx, uid, client, configID, purpose, sid string, isNew bool) (string, error) {{ "{" }}
+        raw, e := randomToken()
+        if e != nil {{ "{" }}
+            return "", e
+        {{ "}" }}
+        _, e = tx.Exec(ctx, "INSERT INTO account_grants(hash,user_id,client_id,environment,config_id,purpose,session_id,is_new,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)", hash(raw), uid, client, s.environment, configID, purpose, sid, isNew, s.now().Add(time.Minute))
+        return raw, e
+    {{ "}" }}
+
+    // Exchange consumes a hashed, one-minute grant and only then issues credentials.
+    // Neither the callback, PostgreSQL nor Redis stores a plaintext refresh credential.
+    func (s *Service) Exchange(ctx context.Context, code, client string) (ExchangeResult, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if !validClient(client) || len(code) > 200 || code == "" {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        var uid, configID string
+        e := s.pool.QueryRow(ctx, "SELECT user_id::text,config_id FROM account_grants WHERE hash=$1 AND client_id=$2 AND environment=$3 AND expires_at>$4", hash(code), client, s.environment, s.now()).Scan(&uid, &configID)
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        if e != nil {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if _, e = s.config.Enabled(ctx, configID, client); e != nil {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        u, e := lockUser(ctx, tx, uid)
+        if e != nil {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if u.Status != 1 {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        var purpose, sid string
+        var isNew bool
+        e = tx.QueryRow(ctx, "DELETE FROM account_grants WHERE hash=$1 AND client_id=$2 AND user_id=$3 AND environment=$4 AND expires_at>$5 RETURNING purpose,session_id,is_new", hash(code), client, uid, s.environment, s.now()).Scan(&purpose, &sid, &isNew)
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        if e != nil {{ "{" }}
+            return ExchangeResult{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        out := ExchangeResult{{ "{" }}Purpose: purpose{{ "}" }}
+        switch purpose {{ "{" }}
+        case "login":
+            tokens, err := s.newSession(ctx, tx, uid, client, isNew)
+            if err != nil {{ "{" }}
+                return out, err
+            {{ "}" }}
+            out.Tokens = &tokens
+        case "reauth":
+            if _, e = s.lockSession(ctx, tx, Session{{ "{" }}UID: uid, ID: sid, ClientID: client{{ "}" }}); e != nil {{ "{" }}
+                return out, e
+            {{ "}" }}
+            proof, err := randomToken()
+            if err != nil {{ "{" }}
+                return out, err
+            {{ "}" }}
+            if _, e = tx.Exec(ctx, "INSERT INTO account_proofs(hash,user_id,session_id,expires_at,method) VALUES($1,$2,$3,$4,'oauth')", hash(proof), uid, sid, s.now().Add(CodeTTL)); e != nil {{ "{" }}
+                return out, e
+            {{ "}" }}
+            out.Proof = proof
+        default:
+            return out, ErrInvalid
+        {{ "}" }}
+        if e = tx.Commit(ctx); e != nil {{ "{" }}
+            return out, e
+        {{ "}" }}
+        return out, nil
+    {{ "}" }}

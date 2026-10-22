@@ -1,0 +1,334 @@
+# ncgo exported template — internal/application/accountconfig/oauth_test.go
+path: internal/application/accountconfig/oauth_test.go
+update_behavior:
+    type: cover
+body: |-
+    package accountconfig
+
+    import (
+        "bytes"
+        "context"
+        "crypto"
+        "crypto/rand"
+        "crypto/rsa"
+        "crypto/sha256"
+        "crypto/x509"
+        "encoding/base64"
+        "encoding/json"
+        "encoding/pem"
+        "fmt"
+        "io"
+        "math/big"
+        "net/http"
+        "net/http/httptest"
+        "net/url"
+        "sort"
+        "strings"
+        "testing"
+        "time"
+    )
+
+    func testRSA(t *testing.T) *rsa.PrivateKey {{ "{" }}
+        t.Helper()
+        key, e := rsa.GenerateKey(rand.Reader, 2048)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        return key
+    {{ "}" }}
+    func privatePEM(key *rsa.PrivateKey) string {{ "{" }}
+        return string(pem.EncodeToMemory(&pem.Block{{ "{" }}Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key){{ "}" }}))
+    {{ "}" }}
+    func publicPEM(key *rsa.PrivateKey) string {{ "{" }}
+        der, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+        return string(pem.EncodeToMemory(&pem.Block{{ "{" }}Type: "PUBLIC KEY", Bytes: der{{ "}" }}))
+    {{ "}" }}
+    func signedJWT(t *testing.T, key *rsa.PrivateKey, claims map[string]any) string {{ "{" }}
+        t.Helper()
+        header := base64.RawURLEncoding.EncodeToString([]byte(`{{ "{" }}"alg":"RS256","kid":"fixture"{{ "}" }}`))
+        b, _ := json.Marshal(claims)
+        part := header + "." + base64.RawURLEncoding.EncodeToString(b)
+        h := sha256.Sum256([]byte(part))
+        sig, e := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, h[:])
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        return part + "." + base64.RawURLEncoding.EncodeToString(sig)
+    {{ "}" }}
+    func TestOIDCSignatureIssuerAudienceNonceAndPKCE(t *testing.T) {{ "{" }}
+        key := testRSA(t)
+        var issuer string
+        nonce := "expected-nonce"
+        audience := "client"
+        badSignature := false
+        expired := false
+        wrongIssuer := false
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            w.Header().Set("Content-Type", "application/json")
+            switch r.URL.Path {{ "{" }}
+            case "/.well-known/openid-configuration":
+                json.NewEncoder(w).Encode(map[string]any{{ "{" }}"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token", "jwks_uri": issuer + "/keys", "id_token_signing_alg_values_supported": []string{{ "{" }}"RS256"{{ "}" }}{{ "}" }})
+            case "/keys":
+                e := big.NewInt(int64(key.PublicKey.E)).Bytes()
+                fmt.Fprintf(w, `{{ "{" }}"keys":[{{ "{" }}"kty":"RSA","kid":"fixture","alg":"RS256","use":"sig","n":%q,"e":%q{{ "}" }}]{{ "}" }}`, base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()), base64.RawURLEncoding.EncodeToString(e))
+            case "/token":
+                r.ParseForm()
+                if r.Form.Get("code_verifier") != strings.Repeat("v", 43) || r.Form.Get("code") != "code" {{ "{" }}
+                    t.Error("missing PKCE verifier")
+                {{ "}" }}
+                claims := map[string]any{{ "{" }}"iss": issuer, "sub": "subject", "aud": audience, "nonce": nonce, "exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(), "name": "Alice", "picture": "https://example.com/avatar"{{ "}" }}
+                if expired {{ "{" }}
+                    claims["exp"] = time.Now().Add(-2 * time.Minute).Unix()
+                {{ "}" }}
+                if wrongIssuer {{ "{" }}
+                    claims["iss"] = "https://attacker.example.com"
+                {{ "}" }}
+                jwt := signedJWT(t, key, claims)
+                if badSignature {{ "{" }}
+                    parts := strings.Split(jwt, ".")
+                    parts[2] = base64.RawURLEncoding.EncodeToString(make([]byte, 256))
+                    jwt = strings.Join(parts, ".")
+                {{ "}" }}
+                json.NewEncoder(w).Encode(map[string]string{{ "{" }}"access_token": "private-access-token", "token_type": "Bearer", "id_token": jwt{{ "}" }})
+            default:
+                http.NotFound(w, r)
+            {{ "}" }}
+        {{ "}" }}))
+        defer server.Close()
+        issuer = server.URL
+        m := New(nil, "test", bytes.Repeat([]byte{{ "{" }}9{{ "}" }}, 32))
+        m.allowPrivate = true
+        m.http = server.Client()
+        c := Config{{ "{" }}ID: "oidc", Kind: "oauth", Provider: "oidc", Environment: "test", Enabled: true, Clients: []string{{ "{" }}"app"{{ "}" }}, Settings: map[string]string{{ "{" }}"client_id": "client", "issuer_url": issuer, "redirect_url": issuer + "/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "secret"{{ "}" }}{{ "}" }}
+        start, err := m.OAuthStart(context.Background(), c, "state", "expected-nonce", strings.Repeat("c", 43))
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        u, _ := url.Parse(start)
+        if u.Query().Get("nonce") != "expected-nonce" || u.Query().Get("state") != "state" || u.Query().Get("code_challenge_method") != "S256" {{ "{" }}
+            t.Fatal("OAuth start dropped nonce/state/PKCE")
+        {{ "}" }}
+        identity, err := m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "expected-nonce")
+        if err != nil || identity.Subject != "subject" || identity.Nickname != "Alice" {{ "{" }}
+            t.Fatalf("verified OIDC login: %v", err)
+        {{ "}" }}
+        nonce = "wrong"
+        if _, err = m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "expected-nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted wrong nonce")
+        {{ "}" }}
+        nonce = "expected-nonce"
+        audience = "attacker"
+        if _, err = m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "expected-nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted wrong audience")
+        {{ "}" }}
+        audience = "client"
+        expired = true
+        if _, err = m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "expected-nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted expired ID token")
+        {{ "}" }}
+        expired = false
+        wrongIssuer = true
+        if _, err = m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "expected-nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted wrong issuer")
+        {{ "}" }}
+        wrongIssuer = false
+        badSignature = true
+        if _, err = m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "expected-nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted invalid signature")
+        {{ "}" }}
+    {{ "}" }}
+    func TestAlipaySignsRequestAndVerifiesExactResponseBytes(t *testing.T) {{ "{" }}
+        merchant := testRSA(t)
+        provider := testRSA(t)
+        tamper := false
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            r.ParseForm()
+            v := r.PostForm
+            sig, _ := base64.StdEncoding.DecodeString(v.Get("sign"))
+            v.Del("sign")
+            parts := []string{{ "{" }}{{ "}" }}
+            keys := make([]string, 0, len(v))
+            for k := range v {{ "{" }}
+                keys = append(keys, k)
+            {{ "}" }}
+            sort.Strings(keys)
+            for _, key := range keys {{ "{" }}
+                parts = append(parts, key+"="+v.Get(key))
+            {{ "}" }}
+            h := sha256.Sum256([]byte(strings.Join(parts, "&")))
+            if rsa.VerifyPKCS1v15(&merchant.PublicKey, crypto.SHA256, h[:], sig) != nil {{ "{" }}
+                t.Error("invalid Alipay request signature")
+            {{ "}" }}
+            raw := `{{ "{" }}"user_id":"20880000000001","access_token":"private-token","code":"10000"{{ "}" }}`
+            responseKey := "alipay_system_oauth_token_response"
+            if v.Get("method") == "alipay.user.info.share" {{ "{" }}
+                raw = `{{ "{" }}"user_id":"20880000000001","nick_name":"Alice","code":"10000"{{ "}" }}`
+                responseKey = "alipay_user_info_share_response"
+            {{ "}" }}
+            digest := sha256.Sum256([]byte(raw))
+            signed, _ := rsa.SignPKCS1v15(rand.Reader, provider, crypto.SHA256, digest[:])
+            if tamper {{ "{" }}
+                raw = strings.Replace(raw, "20880000000001", "20880000000002", 1)
+            {{ "}" }}
+            fmt.Fprintf(w, `{{ "{" }}%q:%s,"sign":%q{{ "}" }}`, responseKey, raw, base64.StdEncoding.EncodeToString(signed))
+        {{ "}" }}))
+        defer server.Close()
+        m := fixtureManager(t, server)
+        c := Config{{ "{" }}ID: "alipay", Kind: "oauth", Provider: "alipay", Environment: "test", Enabled: true, Clients: []string{{ "{" }}"app"{{ "}" }}, Settings: map[string]string{{ "{" }}"client_id": "app", "redirect_url": "https://example.com/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"private_key": privatePEM(merchant), "public_key": publicPEM(provider){{ "}" }}{{ "}" }}
+        got, err := m.OAuthExchange(context.Background(), c, "code", "verifier", "nonce")
+        if err != nil || got.Subject != "20880000000001" {{ "{" }}
+            t.Fatalf("Alipay exchange: %v", err)
+        {{ "}" }}
+        tamper = true
+        if _, err = m.OAuthExchange(context.Background(), c, "code", "verifier", "nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted tampered Alipay response")
+        {{ "}" }}
+    {{ "}" }}
+    func TestWeChatMiniUsesServerExchangeAndRejectsProviderError(t *testing.T) {{ "{" }}
+        reject := false
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            if r.URL.Path != "/sns/jscode2session" || r.URL.Query().Get("js_code") != "sdk-code" || r.URL.Query().Get("secret") != "private" {{ "{" }}
+                t.Error("invalid mini-program exchange")
+            {{ "}" }}
+            if reject {{ "{" }}
+                io.WriteString(w, `{{ "{" }}"errcode":40029,"errmsg":"private sdk-code"{{ "}" }}`)
+            {{ "}" }} else {{ "{" }}
+                io.WriteString(w, `{{ "{" }}"openid":"mini-user","session_key":"private-session"{{ "}" }}`)
+            {{ "}" }}
+        {{ "}" }}))
+        defer server.Close()
+        m := fixtureManager(t, server)
+        c := Config{{ "{" }}ID: "mini", Kind: "oauth", Provider: "wechat", Environment: "test", Enabled: true, Clients: []string{{ "{" }}"mini"{{ "}" }}, Settings: map[string]string{{ "{" }}"client_id": "appid", "mode": "miniprogram", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "private"{{ "}" }}{{ "}" }}
+        if start, err := m.OAuthStart(context.Background(), c, "state", "nonce", "challenge"); err != nil || start != "" {{ "{" }}
+            t.Fatalf("native flow must defer to SDK: %v", err)
+        {{ "}" }}
+        got, err := m.OAuthExchange(context.Background(), c, "sdk-code", "verifier", "nonce")
+        if err != nil || got.Subject != "mini-user" {{ "{" }}
+            t.Fatalf("mini exchange: %v", err)
+        {{ "}" }}
+        reject = true
+        if _, err = m.OAuthExchange(context.Background(), c, "sdk-code", "verifier", "nonce"); err == nil || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "sdk-code") {{ "{" }}
+            t.Fatal("accepted or leaked provider error")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestGitHubExchangeUsesPKCEAndStableNumericSubject(t *testing.T) {{ "{" }}
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            w.Header().Set("Content-Type", "application/json")
+            switch r.URL.Path {{ "{" }}
+            case "/login/oauth/access_token":
+                r.ParseForm()
+                if r.Form.Get("client_secret") != "secret" || r.Form.Get("code_verifier") != strings.Repeat("v", 43) {{ "{" }}
+                    t.Error("missing confidential client proof/PKCE")
+                {{ "}" }}
+                io.WriteString(w, `{{ "{" }}"access_token":"access-private","token_type":"bearer"{{ "}" }}`)
+            case "/user":
+                if r.Header.Get("Authorization") != "Bearer access-private" {{ "{" }}
+                    t.Error("missing verified provider access token")
+                {{ "}" }}
+                io.WriteString(w, `{{ "{" }}"id":9007199254740993,"name":"Alice","avatar_url":"https://example.com/avatar"{{ "}" }}`)
+            default:
+                http.NotFound(w, r)
+            {{ "}" }}
+        {{ "}" }}))
+        defer server.Close()
+        m := fixtureManager(t, server)
+        c := Config{{ "{" }}ID: "github", Kind: "oauth", Provider: "github", Environment: "test", Enabled: true, Clients: []string{{ "{" }}"web"{{ "}" }}, Settings: map[string]string{{ "{" }}"client_id": "client", "redirect_url": "https://example.com/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "secret"{{ "}" }}{{ "}" }}
+        got, err := m.OAuthExchange(context.Background(), c, "code", strings.Repeat("v", 43), "nonce")
+        if err != nil || got.Subject != "9007199254740993" {{ "{" }}
+            t.Fatalf("GitHub subject lost precision: %v", err)
+        {{ "}" }}
+        start, err := m.OAuthStart(context.Background(), c, "state", "nonce", strings.Repeat("c", 43))
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        u, _ := url.Parse(start)
+        if u.Host != "github.com" || u.Query().Get("code_challenge_method") != "S256" || u.Query().Get("state") != "state" {{ "{" }}
+            t.Fatal("GitHub start dropped PKCE/state")
+        {{ "}" }}
+    {{ "}" }}
+    func TestWeChatWebAndAppRejectProfileSubjectSubstitution(t *testing.T) {{ "{" }}
+        wrong := false
+        server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {{ "{" }}
+            switch r.URL.Path {{ "{" }}
+            case "/sns/oauth2/access_token":
+                if r.URL.Query().Get("appid") != "app" || r.URL.Query().Get("code") != "code" {{ "{" }}
+                    t.Error("invalid app credential exchange")
+                {{ "}" }}
+                io.WriteString(w, `{{ "{" }}"access_token":"private","openid":"subject"{{ "}" }}`)
+            case "/sns/userinfo":
+                if wrong {{ "{" }}
+                    io.WriteString(w, `{{ "{" }}"openid":"other","nickname":"Attacker"{{ "}" }}`)
+                {{ "}" }} else {{ "{" }}
+                    io.WriteString(w, `{{ "{" }}"openid":"subject","nickname":"Alice","headimgurl":"https://example.com/avatar"{{ "}" }}`)
+                {{ "}" }}
+            default:
+                http.NotFound(w, r)
+            {{ "}" }}
+        {{ "}" }}))
+        defer server.Close()
+        m := fixtureManager(t, server)
+        c := Config{{ "{" }}ID: "wechat", Kind: "oauth", Provider: "wechat", Environment: "test", Enabled: true, Clients: []string{{ "{" }}"web"{{ "}" }}, Settings: map[string]string{{ "{" }}"client_id": "app", "mode": "web", "redirect_url": "https://example.com/callback", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"client_secret": "secret"{{ "}" }}{{ "}" }}
+        start, err := m.OAuthStart(context.Background(), c, "state", "nonce", "challenge")
+        if err != nil || !strings.HasPrefix(start, "https://open.weixin.qq.com/connect/qrconnect?") {{ "{" }}
+            t.Fatalf("web authorization URL: %v", err)
+        {{ "}" }}
+        for _, mode := range []string{{ "{" }}"web", "app"{{ "}" }} {{ "{" }}
+            c.Settings["mode"] = mode
+            got, err := m.OAuthExchange(context.Background(), c, "code", "verifier", "nonce")
+            if err != nil || got.Subject != "subject" || got.Nickname != "Alice" {{ "{" }}
+                t.Fatalf("WeChat %s exchange: %v", mode, err)
+            {{ "}" }}
+        {{ "}" }}
+        wrong = true
+        if _, err = m.OAuthExchange(context.Background(), c, "code", "verifier", "nonce"); err == nil {{ "{" }}
+            t.Fatal("accepted substituted profile identity")
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestAlipayNativeStartSignsSDKAuthorizationInfo(t *testing.T) {{ "{" }}
+        merchant := testRSA(t)
+        provider := testRSA(t)
+        m := New(nil, "production", bytes.Repeat([]byte{{ "{" }}1{{ "}" }}, 32))
+        c := Config{{ "{" }}ID: "alipay-native", Kind: "oauth", Provider: "alipay", Environment: "production", Clients: []string{{ "{" }}"app"{{ "}" }}, Enabled: true, Settings: map[string]string{{ "{" }}"client_id": "2014123100022800", "mode": "app", "pid": "2088123456789012", "return_urls": `["https://example.com/done"]`{{ "}" }}, Secret: map[string]string{{ "{" }}"private_key": privatePEM(merchant), "public_key": publicPEM(provider){{ "}" }}{{ "}" }}
+        authInfo, err := m.OAuthStart(context.Background(), c, "server-state-unique", "nonce", "challenge")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        q, err := url.ParseQuery(authInfo)
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        if q.Get("apiname") != "com.alipay.account.auth" || q.Get("method") != "alipay.open.auth.sdk.code.get" || q.Get("pid") != "2088123456789012" || q.Get("scope") != "kuaijie" || q.Get("auth_type") != "AUTHACCOUNT" || len(q.Get("target_id")) != 32 || q.Get("sign_type") != "RSA2" {{ "{" }}
+            t.Fatal("native authorization parameters are incomplete")
+        {{ "}" }}
+        sig, err := base64.StdEncoding.DecodeString(q.Get("sign"))
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        q.Del("sign")
+        keys := []string{{ "{" }}{{ "}" }}
+        for key := range q {{ "{" }}
+            keys = append(keys, key)
+        {{ "}" }}
+        sort.Strings(keys)
+        parts := []string{{ "{" }}{{ "}" }}
+        for _, key := range keys {{ "{" }}
+            parts = append(parts, key+"="+q.Get(key))
+        {{ "}" }}
+        digest := sha256.Sum256([]byte(strings.Join(parts, "&")))
+        if rsa.VerifyPKCS1v15(&merchant.PublicKey, crypto.SHA256, digest[:], sig) != nil {{ "{" }}
+            t.Fatal("native authInfo RSA2 signature is invalid")
+        {{ "}" }}
+        if strings.Contains(authInfo, "PRIVATE KEY") {{ "{" }}
+            t.Fatal("native authorization leaked credentials")
+        {{ "}" }}
+        next, err := m.OAuthStart(context.Background(), c, "different-server-state", "nonce", "challenge")
+        if err != nil {{ "{" }}
+            t.Fatal(err)
+        {{ "}" }}
+        different, _ := url.ParseQuery(next)
+        if different.Get("target_id") == q.Get("target_id") {{ "{" }}
+            t.Fatal("native target_id reused across authorization states")
+        {{ "}" }}
+    {{ "}" }}

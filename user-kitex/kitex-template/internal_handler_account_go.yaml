@@ -1,0 +1,127 @@
+# ncgo exported template — internal/handler/account.go
+path: internal/handler/account.go
+update_behavior:
+    type: cover
+body: |
+    package handler
+
+    import (
+        "context"
+        "encoding/json"
+
+        "{{.Module}}/internal/application/account"
+        "{{.Module}}/internal/application/accountconfig"
+        "{{.Module}}/internal/pkg/rpcerror"
+        api "{{.Module}}/kitex_gen/api/user/v1"
+    )
+
+    func (h *UserServiceHandlerImpl) UseAccounts(s *account.Service, c *accountconfig.Manager, environment string) *UserServiceHandlerImpl {{ "{" }}
+        h.accounts = s
+        h.configs = c
+        h.environment = environment
+        return h
+    {{ "}" }}
+    func accountResult[T any](v any, err error) (*T, error) {{ "{" }}
+        if err != nil {{ "{" }}
+            return nil, rpcerror.ToBizError(err)
+        {{ "}" }}
+        data, err := json.Marshal(v)
+        if err != nil {{ "{" }}
+            return nil, rpcerror.ToBizError(err)
+        {{ "}" }}
+        var out T
+        if err = json.Unmarshal(data, &out); err != nil {{ "{" }}
+            return nil, rpcerror.ToBizError(err)
+        {{ "}" }}
+        return &out, nil
+    {{ "}" }}
+    func accountEmpty(err error) (*api.AccountEmptyResp, error) {{ "{" }}
+        if err != nil {{ "{" }}
+            return nil, rpcerror.ToBizError(err)
+        {{ "}" }}
+        return &api.AccountEmptyResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountMethods(ctx context.Context, r *api.AccountClientReq) (*api.AccountMethodsResp, error) {{ "{" }}
+        v, e := h.accounts.Methods(ctx, r.ClientId)
+        return accountResult[api.AccountMethodsResp](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountSendCode(ctx context.Context, r *api.AccountCodeReq) (*api.AccountEmptyResp, error) {{ "{" }}
+        return accountEmpty(h.accounts.SendCode(ctx, account.CodeInput{{ "{" }}ClientID: r.ClientId, Kind: r.Kind, Identifier: r.Identifier, Purpose: r.Purpose, AccessToken: r.AccessToken, IP: r.ClientIp{{ "}" }}))
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountLogin(ctx context.Context, r *api.AccountLoginReq) (*api.AccountTokens, error) {{ "{" }}
+        v, e := h.accounts.Login(ctx, account.LoginInput{{ "{" }}ClientID: r.ClientId, Kind: r.Kind, Mode: r.Mode, Identifier: r.Identifier, Credential: r.Credential, IP: r.ClientIp, UserAgent: r.UserAgent{{ "}" }})
+        return accountResult[api.AccountTokens](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountRefresh(ctx context.Context, r *api.AccountRefreshReq) (*api.AccountTokens, error) {{ "{" }}
+        v, e := h.accounts.Refresh(ctx, r.RefreshToken, r.ClientId)
+        return accountResult[api.AccountTokens](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountVerify(ctx context.Context, r *api.AccountTokenReq) (*api.AccountSessionResp, error) {{ "{" }}
+        v, e := h.accounts.Verify(ctx, r.AccessToken, r.ClientId)
+        return accountResult[api.AccountSessionResp](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountLogout(ctx context.Context, r *api.AccountTokenReq) (*api.AccountEmptyResp, error) {{ "{" }}
+        return accountEmpty(h.accounts.Logout(ctx, r.AccessToken, r.ClientId))
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountProfile(ctx context.Context, r *api.AccountTokenReq) (*api.AccountProfileResp, error) {{ "{" }}
+        v, e := h.accounts.Profile(ctx, r.AccessToken, r.ClientId)
+        return accountResult[api.AccountProfileResp](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountUpdateProfile(ctx context.Context, r *api.AccountProfileReq) (*api.AccountProfileResp, error) {{ "{" }}
+        v, e := h.accounts.UpdateProfile(ctx, r.AccessToken, r.ClientId, r.Nickname, r.Avatar)
+        return accountResult[api.AccountProfileResp](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountReauthenticate(ctx context.Context, r *api.AccountProofReq) (*api.AccountProofResp, error) {{ "{" }}
+        v, e := h.accounts.Reauthenticate(ctx, account.ProofInput{{ "{" }}AccessToken: r.AccessToken, ClientID: r.ClientId, Mode: r.Mode, Kind: r.Kind, Identifier: r.Identifier, Credential: r.Credential, IP: r.ClientIp{{ "}" }})
+        return accountResult[api.AccountProofResp](map[string]string{{ "{" }}"proof": v{{ "}" }}, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountContact(ctx context.Context, r *api.AccountContactReq) (*api.AccountEmptyResp, error) {{ "{" }}
+        return accountEmpty(h.accounts.Contact(ctx, account.ContactInput{{ "{" }}AccessToken: r.AccessToken, ClientID: r.ClientId, Operation: r.Operation, Kind: r.Kind, Identifier: r.Identifier, Code: r.Code, Proof: r.Proof, IP: r.ClientIp{{ "}" }}))
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountPassword(ctx context.Context, r *api.AccountPasswordReq) (*api.AccountEmptyResp, error) {{ "{" }}
+        return accountEmpty(h.accounts.Password(ctx, account.PasswordInput{{ "{" }}AccessToken: r.AccessToken, ClientID: r.ClientId, NewPassword: r.NewPassword, OldPassword: r.OldPassword, Proof: r.Proof{{ "}" }}))
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountResetPassword(ctx context.Context, r *api.AccountResetReq) (*api.AccountEmptyResp, error) {{ "{" }}
+        return accountEmpty(h.accounts.ResetPassword(ctx, account.ResetInput{{ "{" }}ClientID: r.ClientId, Kind: r.Kind, Identifier: r.Identifier, Code: r.Code, NewPassword: r.NewPassword, IP: r.ClientIp{{ "}" }}))
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountOAuthStart(ctx context.Context, r *api.AccountOAuthStartReq) (*api.AccountOAuthStartResp, error) {{ "{" }}
+        v, e := h.accounts.OAuthStart(ctx, account.OAuthStartInput{{ "{" }}AccessToken: r.AccessToken, ClientID: r.ClientId, ConfigID: r.ConfigId, Purpose: r.Purpose, Proof: r.Proof, ReturnURL: r.ReturnUrl{{ "}" }})
+        return accountResult[api.AccountOAuthStartResp](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountOAuthComplete(ctx context.Context, r *api.AccountOAuthCompleteReq) (*api.AccountOAuthCompleteResp, error) {{ "{" }}
+        v, e := h.accounts.OAuthComplete(ctx, account.OAuthCompleteInput{{ "{" }}ClientID: r.ClientId, ConfigID: r.ConfigId, State: r.State, Code: r.Code, IP: r.ClientIp, UserAgent: r.UserAgent{{ "}" }})
+        return accountResult[api.AccountOAuthCompleteResp](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountListConfigs(ctx context.Context, r *api.AccountEmptyReq) (*api.AccountConfigListResp, error) {{ "{" }}
+        if r.OperatorUid == "" {{ "{" }}
+            return nil, rpcerror.ToBizError(account.ErrInvalid)
+        {{ "}" }}
+        v, e := h.configs.List(ctx)
+        return accountResult[api.AccountConfigListResp](map[string]any{{ "{" }}"environment": h.environment, "configs": v{{ "}" }}, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountSaveConfig(ctx context.Context, r *api.AccountSaveConfigReq) (*api.AccountLoginConfig, error) {{ "{" }}
+        if r.OperatorUid == "" || r.Config == nil {{ "{" }}
+            return nil, rpcerror.ToBizError(account.ErrInput)
+        {{ "}" }}
+        data, e := json.Marshal(r.Config)
+        if e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        var c accountconfig.Config
+        if e = json.Unmarshal(data, &c); e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        v, e := h.configs.Save(ctx, c, r.OperatorUid)
+        return accountResult[api.AccountLoginConfig](v, e)
+    {{ "}" }}
+    func (h *UserServiceHandlerImpl) AccountTestConfig(ctx context.Context, r *api.AccountTestConfigReq) (*api.AccountEmptyResp, error) {{ "{" }}
+        if r.OperatorUid == "" {{ "{" }}
+            return nil, rpcerror.ToBizError(account.ErrInvalid)
+        {{ "}" }}
+        return accountEmpty(h.configs.Test(ctx, r.ConfigId, r.Target, r.OperatorUid))
+    {{ "}" }}
+
+    func (h *UserServiceHandlerImpl) AccountExchange(ctx context.Context, r *api.AccountExchangeReq) (*api.AccountExchangeResp, error) {{ "{" }}
+        v, e := h.accounts.Exchange(ctx, r.Code, r.ClientId)
+        return accountResult[api.AccountExchangeResp](v, e)
+    {{ "}" }}

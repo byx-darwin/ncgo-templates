@@ -7,200 +7,239 @@ body: |
     package handler
 
     import (
-    	"context"
-    	"testing"
-    	"time"
-
-    	"github.com/cloudwego/hertz/pkg/app"
-    	"github.com/cloudwego/hertz/pkg/protocol"
-    	"github.com/cloudwego/hertz/pkg/protocol/consts"
-    	"github.com/cloudwego/hertz/pkg/route/param"
-    	"github.com/cloudwego/kitex/client/callopt"
-
-    	"{{.Module}}/internal/base/conf"
-    	"{{.Module}}/internal/pkg/middleware"
-    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "context"
+        "{{.Module}}/internal/base/conf"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/hertz/pkg/protocol"
+        "github.com/cloudwego/kitex/client/callopt"
+        "strings"
+        "testing"
+        "time"
     )
 
-    type fakeOAuthUserClient struct {{ "{" }}
-    	userservice.Client
-    	oauthStartFn     func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error)
-    	oauthCallbackFn  func(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error)
-    	bindProviderFn   func(ctx context.Context, req *userv1.BindProviderReq) (*userv1.BindProviderResp, error)
-    	unbindProviderFn func(ctx context.Context, req *userv1.UnbindProviderReq) (*userv1.UnbindProviderResp, error)
+    type memoryGrantStore struct {{ "{" }}
+        raw            string
+        ttl            time.Duration
+        puts, consumes int
     {{ "}" }}
 
-    func (f *fakeOAuthUserClient) OAuthStart(ctx context.Context, req *userv1.OAuthStartReq, callOptions ...callopt.Option) (*userv1.OAuthStartResp, error) {{ "{" }}
-    	return f.oauthStartFn(ctx, req)
+    func (s *memoryGrantStore) Put(ctx context.Context, raw string, ttl time.Duration) (string, error) {{ "{" }}
+        s.puts++
+        s.raw = raw
+        s.ttl = ttl
+        return "opaque-code", nil
     {{ "}" }}
-    func (f *fakeOAuthUserClient) OAuthCallback(ctx context.Context, req *userv1.OAuthCallbackReq, callOptions ...callopt.Option) (*userv1.OAuthCallbackResp, error) {{ "{" }}
-    	return f.oauthCallbackFn(ctx, req)
-    {{ "}" }}
-    func (f *fakeOAuthUserClient) BindProvider(ctx context.Context, req *userv1.BindProviderReq, callOptions ...callopt.Option) (*userv1.BindProviderResp, error) {{ "{" }}
-    	return f.bindProviderFn(ctx, req)
-    {{ "}" }}
-    func (f *fakeOAuthUserClient) UnbindProvider(ctx context.Context, req *userv1.UnbindProviderReq, callOptions ...callopt.Option) (*userv1.UnbindProviderResp, error) {{ "{" }}
-    	return f.unbindProviderFn(ctx, req)
-    {{ "}" }}
-
-    type fakeCodeStore struct {{ "{" }}
-    	putFn func(ctx context.Context, jwt string, ttl time.Duration) (string, error)
-    {{ "}" }}
-
-    func (f *fakeCodeStore) Put(ctx context.Context, jwt string, ttl time.Duration) (string, error) {{ "{" }}
-    	return f.putFn(ctx, jwt, ttl)
-    {{ "}" }}
-    func (f *fakeCodeStore) Consume(ctx context.Context, code string) (string, bool, error) {{ "{" }}
-    	if code == "valid-code" {{ "{" }}
-    		return "jwt-from-code", true, nil
-    	{{ "}" }}
-    	return "", false, nil
+    func (s *memoryGrantStore) Consume(ctx context.Context, code string) (string, bool, error) {{ "{" }}
+        s.consumes++
+        if code != "opaque-code" || s.raw == "" {{ "{" }}
+            return "", false, nil
+        {{ "}" }}
+        r := s.raw
+        s.raw = ""
+        return r, true, nil
     {{ "}" }}
 
-    func newOAuthTestContext(method, path, body string, params map[string]string) *app.RequestContext {{ "{" }}
-    	c := app.NewContext(0)
-    	req := protocol.NewRequest(method, path, nil)
-    	if body != "" {{ "{" }}
-    		req.SetBody([]byte(body))
-    	{{ "}" }}
-    	req.CopyTo(&c.Request)
-    	for k, v := range params {{ "{" }}
-    		c.Params = append(c.Params, param.Param{{ "{" }}Key: k, Value: v{{ "}" }})
-    	{{ "}" }}
-    	return c
+    type fakeOAuthClient struct {{ "{" }}
+        fakeAccountClient
+        start          *userv1.AccountOAuthStartReq
+        complete       *userv1.AccountOAuthCompleteReq
+        exchange       *userv1.AccountExchangeReq
+        consumed       bool
+        completion     *userv1.AccountOAuthCompleteResp
+        exchangeResult *userv1.AccountExchangeResp
     {{ "}" }}
 
-    func TestOAuthHandler_Start_Redirects(t *testing.T) {{ "{" }}
-    	cli := &fakeOAuthUserClient{{ "{" }}oauthStartFn: func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error) {{ "{" }}
-    		if req.Provider != "github" || req.Purpose != "login" || req.Uid != "" {{ "{" }}
-    			t.Fatalf("unexpected request: %+v", req)
-    		{{ "}" }}
-    		return &userv1.OAuthStartResp{{ "{" }}RedirectUrl: "https://github.com/authorize?..."{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost:3000/callback"{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("GET", "/auth/oauth/github/start", "", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
-    	h.Start(context.Background(), c)
-    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
-    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
-    	{{ "}" }}
-    	loc := string(c.Response.Header.Get("Location"))
-    	if loc != "https://github.com/authorize?..." {{ "{" }}
-    		t.Fatalf("unexpected redirect location: %s", loc)
-    	{{ "}" }}
+    func (f *fakeOAuthClient) AccountOAuthStart(ctx context.Context, r *userv1.AccountOAuthStartReq, _ ...callopt.Option) (*userv1.AccountOAuthStartResp, error) {{ "{" }}
+        f.start = r
+        return &userv1.AccountOAuthStartResp{{ "{" }}State: "s", AuthInfo: "signed-alipay-sdk-bootstrap", Flow: "web", RedirectUrl: "https://provider.test/auth"{{ "}" }}, nil
+    {{ "}" }}
+    func (f *fakeOAuthClient) AccountOAuthComplete(ctx context.Context, r *userv1.AccountOAuthCompleteReq, _ ...callopt.Option) (*userv1.AccountOAuthCompleteResp, error) {{ "{" }}
+        f.complete = r
+        if f.completion != nil {{ "{" }}
+            return f.completion, nil
+        {{ "}" }}
+        return &userv1.AccountOAuthCompleteResp{{ "{" }}ExchangeCode: "core-grant", ClientId: "app", Purpose: "login", ReturnUrl: "https://frontend.test/done?existing=yes"{{ "}" }}, nil
+    {{ "}" }}
+    func oauthEngine(f *fakeOAuthClient, s *memoryGrantStore) *server.Hertz {{ "{" }}
+        h := server.New()
+        o := NewOAuthHandler(f, s, conf.OAuthRedirectConfig{{ "{" }}SuccessURL: "https://frontend.test/done"{{ "}" }}, time.Hour)
+        h.GET("/:config/start", o.Start)
+        h.POST("/:config/start", o.Start)
+        h.GET("/:config/callback", o.Callback)
+        h.POST("/:config/callback", o.Callback)
+        h.POST("/exchange", o.Exchange)
+        return h
+    {{ "}" }}
+    func (f *fakeOAuthClient) AccountExchange(ctx context.Context, r *userv1.AccountExchangeReq, _ ...callopt.Option) (*userv1.AccountExchangeResp, error) {{ "{" }}
+        f.exchange = r
+        if f.consumed || r.ClientId != "app" || r.Code != "core-grant" {{ "{" }}
+            return nil, context.Canceled
+        {{ "}" }}
+        f.consumed = true
+        if f.exchangeResult != nil {{ "{" }}
+            return f.exchangeResult, nil
+        {{ "}" }}
+        return &userv1.AccountExchangeResp{{ "{" }}Purpose: "login", Tokens: &userv1.AccountTokens{{ "{" }}Uid: "verified-user", AccessToken: "secret-token", RefreshToken: "secret-refresh"{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+    func TestOAuthCallbackForwardsCoreGrantWithoutStoringCredentials(t *testing.T) {{ "{" }}
+        f := &fakeOAuthClient{{ "{" }}{{ "}" }}
+        store := &memoryGrantStore{{ "{" }}{{ "}" }}
+        h := oauthEngine(f, store)
+        w := ut.PerformRequest(h.Engine, "GET", "/cfg/start?client_id=app&return_url=https://attacker.test", nil)
+        if w.Result().StatusCode() != 200 || !strings.Contains(w.Body.String(), `"auth_info":"signed-alipay-sdk-bootstrap"`) || f.start.ConfigId != "cfg" || f.start.ReturnUrl != "https://frontend.test/done" {{ "{" }}
+            t.Fatalf("start: %s %+v", w.Body.String(), f.start)
+        {{ "}" }}
+        w = ut.PerformRequest(h.Engine, "GET", "/cfg/callback?state=state&code=provider-code&return_url=https://attacker.test", nil)
+        location := w.Result().Header.Get("Location")
+        if w.Result().StatusCode() != 302 || strings.Contains(location, "secret") || !strings.Contains(location, "code=core-grant") || !strings.Contains(location, "existing=yes") || store.puts != 0 || f.complete.ConfigId != "cfg" || f.complete.State != "state" {{ "{" }}
+            t.Fatalf("callback: %s puts=%d %+v", location, store.puts, f.complete)
+        {{ "}" }}
+        body := `{{ "{" }}"code":"core-grant"{{ "}" }}`
+        exchange := func(client string) string {{ "{" }}
+            return ut.PerformRequest(h.Engine, "POST", "/exchange", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: client{{ "}" }}).Body.String()
+        {{ "}" }}
+        if strings.Contains(exchange("other"), "secret-token") || f.exchange == nil || f.exchange.ClientId != "other" {{ "{" }}
+            t.Fatal("exchange must forward selected client to authority")
+        {{ "}" }}
+        if !strings.Contains(exchange("app"), "secret-token") || f.exchange.Code != "core-grant" || f.verifies != 1 {{ "{" }}
+            t.Fatal("core exchange did not verify issued session")
+        {{ "}" }}
+        if strings.Contains(exchange("app"), "secret-token") {{ "{" }}
+            t.Fatal("authority exchange replay")
+        {{ "}" }}
+        if store.puts != 0 || store.consumes != 0 || store.raw != "" {{ "{" }}
+            t.Fatal("v2 account flow touched obsolete Redis credential store")
+        {{ "}" }}
+    {{ "}" }}
+    func TestOAuthReplaceStartRequiresSessionAndForwardsProof(t *testing.T) {{ "{" }}
+        f := &fakeOAuthClient{{ "{" }}{{ "}" }}
+        h := oauthEngine(f, &memoryGrantStore{{ "{" }}{{ "}" }})
+        body := `{{ "{" }}"purpose":"replace","proof":"recent-proof"{{ "}" }}`
+        w := ut.PerformRequest(h.Engine, "POST", "/cfg/start", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "app"{{ "}" }}, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer access"{{ "}" }})
+        if w.Result().StatusCode() != 200 || f.start == nil || f.start.Purpose != "replace" || f.start.Proof != "recent-proof" || f.start.AccessToken != "access" || f.verifies != 1 {{ "{" }}
+            t.Fatalf("replace start: %s %+v", w.Body.String(), f.start)
+        {{ "}" }}
+        f.start = nil
+        w = ut.PerformRequest(h.Engine, "POST", "/cfg/start", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }}, ut.Header{{ "{" }}Key: "X-Client-ID", Value: "app"{{ "}" }})
+        if w.Result().StatusCode() == 200 || f.start != nil {{ "{" }}
+            t.Fatal("replace start did not require session")
+        {{ "}" }}
     {{ "}" }}
 
-    func TestOAuthHandler_Callback_RedirectsWithCode(t *testing.T) {{ "{" }}
-    	cli := &fakeOAuthUserClient{{ "{" }}oauthCallbackFn: func(ctx context.Context, req *userv1.OAuthCallbackReq) (*userv1.OAuthCallbackResp, error) {{ "{" }}
-    		return &userv1.OAuthCallbackResp{{ "{" }}Uid: "uid-1", Token: "signed-jwt"{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	putCalled := false
-    	codeStore := &fakeCodeStore{{ "{" }}putFn: func(ctx context.Context, jwt string, ttl time.Duration) (string, error) {{ "{" }}
-    		putCalled = true
-    		if jwt != "signed-jwt" {{ "{" }}
-    			t.Fatalf("expected the callback's jwt to be stored, got %q", jwt)
-    		{{ "}" }}
-    		return "one-time-code", nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewOAuthHandler(cli, codeStore, conf.OAuthRedirectConfig{{ "{" }}SuccessURL: "http://localhost:3000/callback"{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("GET", "/auth/oauth/github/callback?state=s1&code=c1", "", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
-    	h.Callback(context.Background(), c)
-    	if !putCalled {{ "{" }}
-    		t.Fatal("expected the code store to be used")
-    	{{ "}" }}
-    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
-    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
-    	{{ "}" }}
-    	loc := string(c.Response.Header.Get("Location"))
-    	if loc != "http://localhost:3000/callback?code=one-time-code" {{ "{" }}
-    		t.Fatalf("unexpected redirect location: %s", loc)
-    	{{ "}" }}
+    // Alipay's browser redirect uses auth_code rather than the OAuth code key.
+    func TestAlipayCallbackAuthCodeAlias(t *testing.T) {{ "{" }}
+        for _, tc := range []struct {{ "{" }}
+            name, method, path, body string
+            wantStatus               int
+        {{ "}" }}{{ "{" }}
+            {{ "{" }}name: "browser auth_code", method: "GET", path: "/alipay-web/callback?auth_code=alipay-authorization&state=bound-state", wantStatus: 302{{ "}" }},
+            {{ "{" }}name: "native auth_code", method: "POST", path: "/alipay-web/callback", body: `{{ "{" }}"auth_code":"alipay-authorization","state":"bound-state","client_id":"app"{{ "}" }}`, wantStatus: 200{{ "}" }},
+            {{ "{" }}name: "same aliases", method: "GET", path: "/alipay-web/callback?auth_code=alipay-authorization&code=alipay-authorization&state=bound-state", wantStatus: 302{{ "}" }},
+            {{ "{" }}name: "explicit empty query alias", method: "GET", path: "/alipay-web/callback?auth_code=alipay-authorization&code=&state=bound-state", wantStatus: 400{{ "}" }},
+            {{ "{" }}name: "explicit empty native alias", method: "POST", path: "/alipay-web/callback", body: `{{ "{" }}"auth_code":"alipay-authorization","code":"","state":"bound-state"{{ "}" }}`, wantStatus: 400{{ "}" }},
+            {{ "{" }}name: "conflicting query aliases", method: "GET", path: "/alipay-web/callback?auth_code=alipay-authorization&code=other-code&state=bound-state", wantStatus: 400{{ "}" }},
+            {{ "{" }}name: "conflicting native aliases", method: "POST", path: "/alipay-web/callback", body: `{{ "{" }}"auth_code":"alipay-authorization","code":"other-code","state":"bound-state","client_id":"app"{{ "}" }}`, wantStatus: 400{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            t.Run(tc.name, func(t *testing.T) {{ "{" }}
+                f := &fakeOAuthClient{{ "{" }}{{ "}" }}
+                store := &memoryGrantStore{{ "{" }}{{ "}" }}
+                h := oauthEngine(f, store)
+                var body *ut.Body
+                if tc.body != "" {{ "{" }}
+                    body = &ut.Body{{ "{" }}Body: strings.NewReader(tc.body), Len: len(tc.body){{ "}" }}
+                {{ "}" }}
+                w := ut.PerformRequest(h.Engine, tc.method, tc.path, body)
+                if w.Result().StatusCode() != tc.wantStatus {{ "{" }}
+                    t.Fatalf("callback status=%d want=%d body=%s", w.Result().StatusCode(), tc.wantStatus, w.Body.String())
+                {{ "}" }}
+                if tc.wantStatus == 400 {{ "{" }}
+                    if f.complete != nil || store.raw != "" {{ "{" }}
+                        t.Fatal("ambiguous callback reached service or minted exchange grant")
+                    {{ "}" }}
+                    return
+                {{ "}" }}
+                if f.complete == nil || f.complete.Code != "alipay-authorization" || f.complete.State != "bound-state" || f.complete.ConfigId != "alipay-web" {{ "{" }}
+                    t.Fatalf("callback binding changed: %+v", f.complete)
+                {{ "}" }}
+                if tc.method == "GET" && f.complete.ClientId != "" {{ "{" }}
+                    t.Fatalf("browser callback must resolve client from backend state: %+v", f.complete)
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
     {{ "}" }}
 
-    func TestOAuthHandler_Exchange_ConsumesCode(t *testing.T) {{ "{" }}
-    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("POST", "/auth/oauth/exchange", `{{ "{" }}"code":"valid-code"{{ "}" }}`, nil)
-    	h.Exchange(context.Background(), c)
-    	if c.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
-    	{{ "}" }}
+    func TestOAuthReauthenticationUsesOpaqueCoreProofGrant(t *testing.T) {{ "{" }}
+        f := &fakeOAuthClient{{ "{" }}completion: &userv1.AccountOAuthCompleteResp{{ "{" }}ClientId: "app", Purpose: "reauth", ExchangeCode: "core-grant", ReturnUrl: "https://frontend.test/settings"{{ "}" }}, exchangeResult: &userv1.AccountExchangeResp{{ "{" }}Purpose: "reauth", Proof: "recent-identity-proof"{{ "}" }}{{ "}" }}
+        store := &memoryGrantStore{{ "{" }}{{ "}" }}
+        h := oauthEngine(f, store)
+        callback := ut.PerformRequest(h.Engine, "GET", "/cfg/callback?state=state&code=authorization", nil).Result()
+        if callback.StatusCode() != 302 || strings.Contains(callback.Header.Get("Location"), "proof") || !strings.Contains(callback.Header.Get("Location"), "code=core-grant") {{ "{" }}
+            t.Fatalf("proof callback leaked or lost grant: %s", callback.Header.Get("Location"))
+        {{ "}" }}
+        body := `{{ "{" }}"code":"core-grant","client_id":"app"{{ "}" }}`
+        w := ut.PerformRequest(h.Engine, "POST", "/exchange", &ut.Body{{ "{" }}Body: strings.NewReader(body), Len: len(body){{ "}" }})
+        if w.Result().StatusCode() != 200 || !strings.Contains(w.Body.String(), `"proof":"recent-identity-proof"`) || !strings.Contains(w.Body.String(), `"purpose":"reauth"`) || f.verifies != 0 || store.puts != 0 || store.consumes != 0 {{ "{" }}
+            t.Fatalf("proof exchange: %s", w.Body.String())
+        {{ "}" }}
+        for _, resp := range []*protocol.Response{{ "{" }}callback, w.Result(){{ "}" }} {{ "{" }}
+            if resp.Header.Get("Cache-Control") != "no-store" || resp.Header.Get("Referrer-Policy") != "no-referrer" {{ "{" }}
+                t.Fatal("OAuth response privacy headers missing")
+            {{ "}" }}
+        {{ "}" }}
     {{ "}" }}
-
-    func TestOAuthHandler_Exchange_InvalidCode_Returns401(t *testing.T) {{ "{" }}
-    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("POST", "/auth/oauth/exchange", `{{ "{" }}"code":"never-issued"{{ "}" }}`, nil)
-    	h.Exchange(context.Background(), c)
-    	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
-    		t.Fatalf("expected 401, got %d", c.Response.StatusCode())
-    	{{ "}" }}
+    func TestOAuthBindReplaceCallbacksReturnStatusWithoutCredentialsOrGrant(t *testing.T) {{ "{" }}
+        for _, purpose := range []string{{ "{" }}"bind", "replace"{{ "}" }} {{ "{" }}
+            for _, method := range []string{{ "{" }}"GET", "POST"{{ "}" }} {{ "{" }}
+                t.Run(purpose+method, func(t *testing.T) {{ "{" }}
+                    f := &fakeOAuthClient{{ "{" }}completion: &userv1.AccountOAuthCompleteResp{{ "{" }}ClientId: "app", Purpose: purpose, ReturnUrl: "https://frontend.test/settings?code=obsolete"{{ "}" }}{{ "}" }}
+                    store := &memoryGrantStore{{ "{" }}{{ "}" }}
+                    h := oauthEngine(f, store)
+                    path := "/cfg/callback?state=state&code=authorization"
+                    var body *ut.Body
+                    if method == "POST" {{ "{" }}
+                        path = "/cfg/callback"
+                        raw := `{{ "{" }}"state":"state","code":"authorization"{{ "}" }}`
+                        body = &ut.Body{{ "{" }}Body: strings.NewReader(raw), Len: len(raw){{ "}" }}
+                    {{ "}" }}
+                    w := ut.PerformRequest(h.Engine, method, path, body)
+                    if method == "GET" {{ "{" }}
+                        location := w.Result().Header.Get("Location")
+                        if w.Result().StatusCode() != 302 || strings.Contains(location, "code=") || !strings.Contains(location, "status=ok") {{ "{" }}
+                            t.Fatalf("completion redirect: %s", location)
+                        {{ "}" }}
+                    {{ "}" }} else if w.Result().StatusCode() != 200 || !strings.Contains(w.Body.String(), `"status":"ok"`) {{ "{" }}
+                        t.Fatalf("completion JSON: %s", w.Body.String())
+                    {{ "}" }}
+                    if store.puts != 0 || store.consumes != 0 || strings.Contains(w.Body.String(), "token") {{ "{" }}
+                        t.Fatal("identity callback stored or exposed credentials")
+                    {{ "}" }}
+                {{ "}" }})
+            {{ "}" }}
+        {{ "}" }}
     {{ "}" }}
-
-    func newAuthenticatedOAuthTestContext(method, path, uid string, params map[string]string) *app.RequestContext {{ "{" }}
-    	c := newOAuthTestContext(method, path, "", params)
-    	c.Set(middleware.ContextKeyTokenClaims, &middleware.Claims{{ "{" }}Uid: uid{{ "}" }})
-    	return c
-    {{ "}" }}
-
-    func TestOAuthHandler_BindStart_UsesAuthenticatedUid(t *testing.T) {{ "{" }}
-    	cli := &fakeOAuthUserClient{{ "{" }}oauthStartFn: func(ctx context.Context, req *userv1.OAuthStartReq) (*userv1.OAuthStartResp, error) {{ "{" }}
-    		if req.Provider != "wechat" || req.Purpose != "bind" || req.Uid != "uid-authenticated" {{ "{" }}
-    			t.Fatalf("unexpected request: %+v", req)
-    		{{ "}" }}
-    		return &userv1.OAuthStartResp{{ "{" }}RedirectUrl: "https://wechat.example/authorize"{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}BindSuccessURL: "http://localhost:3000/settings"{{ "}" }}, time.Minute)
-    	c := newAuthenticatedOAuthTestContext("GET", "/auth/oauth/wechat/bind-start", "uid-authenticated", map[string]string{{ "{" }}"provider": "wechat"{{ "}" }})
-    	h.BindStart(context.Background(), c)
-    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
-    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestOAuthHandler_BindStart_MissingClaims_Returns401(t *testing.T) {{ "{" }}
-    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("GET", "/auth/oauth/wechat/bind-start", "", map[string]string{{ "{" }}"provider": "wechat"{{ "}" }})
-    	h.BindStart(context.Background(), c)
-    	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
-    		t.Fatalf("expected 401 when no claims are set, got %d", c.Response.StatusCode())
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestOAuthHandler_BindCallback_RedirectsToBindSuccessURL(t *testing.T) {{ "{" }}
-    	cli := &fakeOAuthUserClient{{ "{" }}bindProviderFn: func(ctx context.Context, req *userv1.BindProviderReq) (*userv1.BindProviderResp, error) {{ "{" }}
-    		return &userv1.BindProviderResp{{ "{" }}{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}BindSuccessURL: "http://localhost:3000/settings"{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("GET", "/auth/oauth/wechat/bind-callback?state=s1&code=c1", "", map[string]string{{ "{" }}"provider": "wechat"{{ "}" }})
-    	h.BindCallback(context.Background(), c)
-    	if c.Response.StatusCode() != consts.StatusFound {{ "{" }}
-    		t.Fatalf("expected 302, got %d", c.Response.StatusCode())
-    	{{ "}" }}
-    	loc := string(c.Response.Header.Get("Location"))
-    	if loc != "http://localhost:3000/settings" {{ "{" }}
-    		t.Fatalf("unexpected redirect location: %s", loc)
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestOAuthHandler_Unbind_UsesAuthenticatedUid(t *testing.T) {{ "{" }}
-    	cli := &fakeOAuthUserClient{{ "{" }}unbindProviderFn: func(ctx context.Context, req *userv1.UnbindProviderReq) (*userv1.UnbindProviderResp, error) {{ "{" }}
-    		if req.Uid != "uid-authenticated" || req.Provider != "github" {{ "{" }}
-    			t.Fatalf("unexpected request: %+v", req)
-    		{{ "}" }}
-    		return &userv1.UnbindProviderResp{{ "{" }}{{ "}" }}, nil
-    	{{ "}" }}{{ "}" }}
-    	h := NewOAuthHandler(cli, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
-    	c := newAuthenticatedOAuthTestContext("DELETE", "/auth/oauth/github/bind", "uid-authenticated", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
-    	h.Unbind(context.Background(), c)
-    	if c.Response.StatusCode() != 200 {{ "{" }}
-    		t.Fatalf("expected 200, got %d: %s", c.Response.StatusCode(), c.Response.Body())
-    	{{ "}" }}
-    {{ "}" }}
-
-    func TestOAuthHandler_Unbind_MissingClaims_Returns401(t *testing.T) {{ "{" }}
-    	h := NewOAuthHandler(&fakeOAuthUserClient{{ "{" }}{{ "}" }}, &fakeCodeStore{{ "{" }}{{ "}" }}, conf.OAuthRedirectConfig{{ "{" }}{{ "}" }}, time.Minute)
-    	c := newOAuthTestContext("DELETE", "/auth/oauth/github/bind", "", map[string]string{{ "{" }}"provider": "github"{{ "}" }})
-    	h.Unbind(context.Background(), c)
-    	if c.Response.StatusCode() != consts.StatusUnauthorized {{ "{" }}
-    		t.Fatalf("expected 401 when no claims are set, got %d", c.Response.StatusCode())
-    	{{ "}" }}
+    func TestOAuthCallbackRejectsUnexpectedCredentialsAndUnsafeRedirect(t *testing.T) {{ "{" }}
+        for _, completion := range []*userv1.AccountOAuthCompleteResp{{ "{" }}
+            {{ "{" }}ClientId: "app", Purpose: "login", ExchangeCode: "core-grant", ReturnUrl: "https://frontend.test/done", Tokens: &userv1.AccountTokens{{ "{" }}AccessToken: "should-not-leak"{{ "}" }}{{ "}" }},
+            {{ "{" }}ClientId: "app", Purpose: "reauth", ExchangeCode: "core-grant", ReturnUrl: "https://frontend.test/done", Proof: "should-not-leak"{{ "}" }},
+            {{ "{" }}ClientId: "app", Purpose: "login", ExchangeCode: "core-grant", ReturnUrl: "javascript:alert(1)"{{ "}" }},
+            {{ "{" }}ClientId: "app", Purpose: "login", ExchangeCode: "core-grant", ReturnUrl: "https://user:secret@frontend.test/done"{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            f := &fakeOAuthClient{{ "{" }}completion: completion{{ "}" }}
+            store := &memoryGrantStore{{ "{" }}{{ "}" }}
+            h := oauthEngine(f, store)
+            w := ut.PerformRequest(h.Engine, "GET", "/cfg/callback?state=s&code=c", nil)
+            if w.Result().StatusCode() == 302 || strings.Contains(w.Body.String(), "should-not-leak") || store.puts != 0 || w.Result().Header.Get("Cache-Control") != "no-store" || w.Result().Header.Get("Referrer-Policy") != "no-referrer" {{ "{" }}
+                t.Fatal("unsafe callback response accepted")
+            {{ "}" }}
+        {{ "}" }}
+        f := &fakeOAuthClient{{ "{" }}{{ "}" }}
+        f.verifyErr = context.Canceled
+        h := oauthEngine(f, nil)
+        raw := `{{ "{" }}"client_id":"app","code":"core-grant"{{ "}" }}`
+        w := ut.PerformRequest(h.Engine, "POST", "/exchange", &ut.Body{{ "{" }}Body: strings.NewReader(raw), Len: len(raw){{ "}" }})
+        if w.Result().StatusCode() == 200 || strings.Contains(w.Body.String(), "secret-token") || w.Result().Header.Get("Cache-Control") != "no-store" {{ "{" }}
+            t.Fatal("unverified exchange credential disclosure")
+        {{ "}" }}
     {{ "}" }}

@@ -1,0 +1,112 @@
+path: internal/handler/auth_config.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+
+    import (
+        "context"
+        "encoding/json"
+        "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/response"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/hertz/pkg/app"
+    )
+
+    type AuthConfigHandler struct{{ "{" }} userCli userservice.Client {{ "}" }}
+
+    func NewAuthConfigHandler(cli userservice.Client) *AuthConfigHandler {{ "{" }} return &AuthConfigHandler{{ "{" }}cli{{ "}" }} {{ "}" }}
+    func configOperator(c *app.RequestContext) (string, bool) {{ "{" }}
+        claims, ok := middleware.GetClaims(c)
+        if !ok || claims == nil || claims.Uid == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return "", false
+        {{ "}" }}
+        return claims.Uid, true
+    {{ "}" }}
+
+    type authConfigJSON struct {{ "{" }}
+        ID          string            `json:"id"`
+        Kind        string            `json:"kind"`
+        Provider    string            `json:"provider"`
+        Name        string            `json:"name"`
+        Environment string            `json:"environment"`
+        Clients     []string          `json:"clients"`
+        Enabled     bool              `json:"enabled"`
+        Sort        int32             `json:"sort"`
+        Settings    map[string]string `json:"settings"`
+        HasSecret   bool              `json:"has_secret"`
+    {{ "}" }}
+
+    func redactedConfig(cfg *userv1.AccountLoginConfig) *authConfigJSON {{ "{" }}
+        if cfg == nil {{ "{" }}
+            return nil
+        {{ "}" }}
+        clients := cfg.Clients
+        if clients == nil {{ "{" }}
+            clients = []string{{ "{" }}{{ "}" }}
+        {{ "}" }}
+        settings := cfg.Settings
+        if settings == nil {{ "{" }}
+            settings = map[string]string{{ "{" }}{{ "}" }}
+        {{ "}" }}
+        return &authConfigJSON{{ "{" }}ID: cfg.Id, Kind: cfg.Kind, Provider: cfg.Provider, Name: cfg.Name, Environment: cfg.Environment, Clients: clients, Enabled: cfg.Enabled, Sort: cfg.Sort, Settings: settings, HasSecret: cfg.HasSecret{{ "}" }}
+    {{ "}" }}
+    func (h *AuthConfigHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        actor, ok := configOperator(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        r, e := h.userCli.AccountListConfigs(ctx, &userv1.AccountEmptyReq{{ "{" }}OperatorUid: actor{{ "}" }})
+        if e != nil {{ "{" }}
+            response.Err(c, e)
+            return
+        {{ "}" }}
+        if r == nil {{ "{" }}
+            response.ErrorCode(c, response.CodeInternalError)
+            return
+        {{ "}" }}
+        configs := make([]*authConfigJSON, 0, len(r.Configs))
+        for _, cfg := range r.Configs {{ "{" }}
+            configs = append(configs, redactedConfig(cfg))
+        {{ "}" }}
+        response.OK(c, map[string]any{{ "{" }}"environment": r.Environment, "configs": configs{{ "}" }})
+    {{ "}" }}
+    func (h *AuthConfigHandler) Save(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        actor, ok := configOperator(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        var cfg userv1.AccountLoginConfig
+        if json.Unmarshal(c.Request.Body(), &cfg) != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        r, e := h.userCli.AccountSaveConfig(ctx, &userv1.AccountSaveConfigReq{{ "{" }}OperatorUid: actor, Config: &cfg{{ "}" }})
+        if e != nil {{ "{" }}
+            response.Err(c, e)
+            return
+        {{ "}" }}
+        response.OK(c, redactedConfig(r))
+    {{ "}" }}
+    func (h *AuthConfigHandler) Test(ctx context.Context, c *app.RequestContext) {{ "{" }}
+        actor, ok := configOperator(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        var body struct {{ "{" }}
+            Target string `json:"target"`
+        {{ "}" }}
+        if json.Unmarshal(c.Request.Body(), &body) != nil || c.Param("id") == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        _, e := h.userCli.AccountTestConfig(ctx, &userv1.AccountTestConfigReq{{ "{" }}OperatorUid: actor, ConfigId: c.Param("id"), Target: body.Target{{ "}" }})
+        if e != nil {{ "{" }}
+            response.Err(c, e)
+            return
+        {{ "}" }}
+        response.OK(c, map[string]string{{ "{" }}"status": "ok"{{ "}" }})
+    {{ "}" }}

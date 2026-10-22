@@ -12,21 +12,19 @@ body: |
         "time"
 
         "github.com/cloudwego/kitex/client"
-        "github.com/redis/go-redis/v9"
 
-        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
         gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
-        hertzobs "github.com/byx-darwin/go-tools/go-framework/hertz/observability"
+        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
         gtmiddleware "github.com/byx-darwin/go-tools/go-framework/hertz/middleware"
+        hertzobs "github.com/byx-darwin/go-tools/go-framework/hertz/observability"
 
         "{{.Module}}/internal/base/conf"
-        "{{.Module}}/internal/pkg/oauthcode"
         "{{.Module}}/internal/pkg/ratelimit"
         "{{.Module}}/internal/pkg/response"
         "{{.Module}}/internal/router"
         ratelimitv1 "{{.Module}}/kitex_gen/api/ratelimit/v1"
-        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
         ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     func Run() {{ "{" }}
@@ -80,16 +78,7 @@ body: |
 
         // ncgo:wire:ddd — Wire DDD layers (data -> repository -> usecase)
 
-        // One-time OAuth-code -> JWT exchange store, backed by Redis (see
-        // internal/pkg/oauthcode). Falls back to the top-level Redis config
-        // when oauth_code.redis is unset (applyRedisFallbacks in conf.go).
-        redisClient := redis.NewClient(&redis.Options{{ "{" }}
-            Addr:     cfg.OAuthCode.Redis.Addrs[0],
-            Username: cfg.OAuthCode.Redis.Username,
-            Password: cfg.OAuthCode.Redis.Password,
-            DB:       cfg.OAuthCode.Redis.DB,
-        {{ "}" }})
-        codeStore := oauthcode.NewRedisStore(redisClient)
+        // Account OAuth grants are issued/consumed by user-kitex PostgreSQL.
 
         // Create Kitex RPC clients — locally generated within this project's
         // own kitex_gen (populated by `ncgo add kitex-client`), not imported
@@ -119,7 +108,7 @@ body: |
         {{ "}" }})
 
         // Register routes
-        router.Register{{.ServiceName}}BffServiceRoutes(h, userCli, codeStore, resolver)
+        router.Register{{.ServiceName}}BffServiceRoutes(h, userCli, nil, resolver)
 
         // Start server
         h.Spin()

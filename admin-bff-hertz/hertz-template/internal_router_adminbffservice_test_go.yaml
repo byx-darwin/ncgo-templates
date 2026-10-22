@@ -7,29 +7,29 @@ body: |
     package router
 
     import (
+        "bytes"
+        "context"
         "github.com/cloudwego/hertz/pkg/app"
-    	"bytes"
-    	"context"
-    	"os"
-    	"path/filepath"
-    	"testing"
-    	"time"
+        "os"
+        "path/filepath"
+        "testing"
+        "time"
 
-    	"github.com/cloudwego/hertz/pkg/app/server"
-    	"github.com/cloudwego/hertz/pkg/common/ut"
-    	"github.com/cloudwego/hertz/pkg/protocol/consts"
-    	"github.com/cloudwego/hertz/pkg/route"
-    	"github.com/cloudwego/kitex/client/callopt"
-    	"github.com/golang-jwt/jwt/v5"
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/hertz/pkg/protocol/consts"
+        "github.com/cloudwego/hertz/pkg/route"
+        "github.com/cloudwego/kitex/client/callopt"
+        "github.com/golang-jwt/jwt/v5"
 
-    	"{{.Module}}/internal/pkg/ratelimit"
-    	api "{{.Module}}/kitex_gen/api/auth/v1"
-    	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
-    	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
-    	rbacv1 "{{.Module}}/kitex_gen/api/rbac/v1"
-    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
-    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "{{.Module}}/internal/pkg/ratelimit"
+        api "{{.Module}}/kitex_gen/api/auth/v1"
+        authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
+        ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+        rbacv1 "{{.Module}}/kitex_gen/api/rbac/v1"
+        rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     // testRouterConfYAML is a minimal conf.yaml satisfying conf.Config's
@@ -61,18 +61,18 @@ body: |
     // conf.Init() only loads once per process (sync.Once) and this package
     // has no other test file that would race it.
     func TestMain(m *testing.M) {{ "{" }}
-    	dir, err := os.MkdirTemp("", "adminbffservice-router-test")
-    	if err != nil {{ "{" }}
-    		panic(err)
-    	{{ "}" }}
-    	path := filepath.Join(dir, "conf.yaml")
-    	if err := os.WriteFile(path, []byte(testRouterConfYAML), 0o644); err != nil {{ "{" }}
-    		panic(err)
-    	{{ "}" }}
-    	os.Setenv("CONFIG_PATH", path)
-    	code := m.Run()
-    	os.RemoveAll(dir)
-    	os.Exit(code)
+        dir, err := os.MkdirTemp("", "adminbffservice-router-test")
+        if err != nil {{ "{" }}
+            panic(err)
+        {{ "}" }}
+        path := filepath.Join(dir, "conf.yaml")
+        if err := os.WriteFile(path, []byte(testRouterConfYAML), 0o644); err != nil {{ "{" }}
+            panic(err)
+        {{ "}" }}
+        os.Setenv("CONFIG_PATH", path)
+        code := m.Run()
+        os.RemoveAll(dir)
+        os.Exit(code)
     {{ "}" }}
 
     // fakeRouterRBACClient is a fake rbacservice.Client whose Enforce
@@ -84,22 +84,22 @@ body: |
     // Client if called, which would itself indicate a test bug (a route
     // reaching an RPC it shouldn't).
     type fakeRouterRBACClient struct {{ "{" }}
-    	rbacservice.Client
-    	allowed        bool
-    	lastEnforceUid string
+        rbacservice.Client
+        allowed        bool
+        lastEnforceUid string
         lastEnforceObj string
         lastEnforceAct string
     {{ "}" }}
 
     func (f *fakeRouterRBACClient) Enforce(ctx context.Context, req *rbacv1.EnforceReq, callOptions ...callopt.Option) (*rbacv1.EnforceResp, error) {{ "{" }}
-    	f.lastEnforceUid = req.Uid
+        f.lastEnforceUid = req.Uid
         f.lastEnforceObj = req.Obj
         f.lastEnforceAct = req.Act
-    	return &rbacv1.EnforceResp{{ "{" }}Allowed: f.allowed{{ "}" }}, nil
+        return &rbacv1.EnforceResp{{ "{" }}Allowed: f.allowed{{ "}" }}, nil
     {{ "}" }}
 
     func (f *fakeRouterRBACClient) ListUsers(ctx context.Context, req *rbacv1.ListUsersReq, callOptions ...callopt.Option) (*rbacv1.ListUsersResp, error) {{ "{" }}
-    	return &rbacv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
+        return &rbacv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
     {{ "}" }}
 
     // CreateUser is a minimal canned-success override needed by the
@@ -107,7 +107,7 @@ body: |
     // mutating protected route) rather than a GET route, since Idempotency's
     // default method set (POST/PUT/PATCH/DELETE) never activates for GET.
     func (f *fakeRouterRBACClient) CreateUser(ctx context.Context, req *rbacv1.CreateUserReq, callOptions ...callopt.Option) (*rbacv1.CreateUserResp, error) {{ "{" }}
-    	return &rbacv1.CreateUserResp{{ "{" }}User: &rbacv1.User{{ "{" }}Id: "new-user-id", Username: req.Username{{ "}" }}{{ "}" }}, nil
+        return &rbacv1.CreateUserResp{{ "{" }}User: &rbacv1.User{{ "{" }}Id: "new-user-id", Username: req.Username{{ "}" }}{{ "}" }}, nil
     {{ "}" }}
 
     // fakeRouterUserClient is a minimal fake userservice.Client. It embeds
@@ -118,53 +118,53 @@ body: |
     // the request through — mirroring fakeRouterRBACClient's ListUsers
     // override for the analogous /users case.
     type fakeRouterUserClient struct {{ "{" }}
-    	userservice.Client
+        userservice.Client
     {{ "}" }}
 
     func (f *fakeRouterUserClient) ListUsers(ctx context.Context, req *userv1.ListUsersReq, callOptions ...callopt.Option) (*userv1.ListUsersResp, error) {{ "{" }}
-    	return &userv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
+        return &userv1.ListUsersResp{{ "{" }}Users: nil, Total: 0{{ "}" }}, nil
     {{ "}" }}
 
     func newRouterTestEngine(t *testing.T, rbacCli rbacservice.Client) *route.Engine {{ "{" }}
-    	t.Helper()
-    	h := server.New()
+        t.Helper()
+        h := server.New()
         authCli := &fakeRouterAuthClient{{ "{" }}{{ "}" }}
-    	var ruleCli ruleservice.Client
-    	var resolver *ratelimit.Resolver
-    	userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
-    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli, resolver)
-    	return h.Engine
+        var ruleCli ruleservice.Client
+        var resolver *ratelimit.Resolver
+        userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
+        Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli, resolver)
+        return h.Engine
     {{ "}" }}
 
     // newRouterTestJWT builds a valid JWT for an authenticated user, signed
     // with the same secret the test conf.yaml configures for auth.token.
     func newRouterTestJWT(t *testing.T) string {{ "{" }}
-    	t.Helper()
-    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
-    		"uid": "user-123",
-    		"exp": time.Now().Add(time.Hour).Unix(),
-    	{{ "}" }})
-    	signed, err := token.SignedString([]byte("router-test-secret"))
-    	if err != nil {{ "{" }}
-    		t.Fatalf("failed to sign test jwt: %v", err)
-    	{{ "}" }}
-    	return signed
+        t.Helper()
+        token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
+            "uid": "user-123",
+            "exp": time.Now().Add(time.Hour).Unix(),
+        {{ "}" }})
+        signed, err := token.SignedString([]byte("router-test-secret"))
+        if err != nil {{ "{" }}
+            t.Fatalf("failed to sign test jwt: %v", err)
+        {{ "}" }}
+        return signed
     {{ "}" }}
 
     // newRouterTestJWTWithUid is like newRouterTestJWT but with a caller-
     // supplied uid, used by the Idempotency tests below to simulate two
     // distinct authenticated users.
     func newRouterTestJWTWithUid(t *testing.T, uid string) string {{ "{" }}
-    	t.Helper()
-    	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
-    		"uid": uid,
-    		"exp": time.Now().Add(time.Hour).Unix(),
-    	{{ "}" }})
-    	signed, err := token.SignedString([]byte("router-test-secret"))
-    	if err != nil {{ "{" }}
-    		t.Fatalf("failed to sign test jwt: %v", err)
-    	{{ "}" }}
-    	return signed
+        t.Helper()
+        token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{{ "{" }}
+            "uid": uid,
+            "exp": time.Now().Add(time.Hour).Unix(),
+        {{ "}" }})
+        signed, err := token.SignedString([]byte("router-test-secret"))
+        if err != nil {{ "{" }}
+            t.Fatalf("failed to sign test jwt: %v", err)
+        {{ "}" }}
+        return signed
     {{ "}" }}
 
     // TestAuthz_DeniedPermission_Returns403 is the fix probe: before this
@@ -179,16 +179,16 @@ body: |
     // registered per-route, immediately after RequirePermission), a JWT that
     // is valid but denied by RBAC must get 403.
     func TestAuthz_DeniedPermission_Returns403(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }})
-    	jwtToken := newRouterTestJWT(t)
+        engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }})
+        jwtToken := newRouterTestJWT(t)
 
-    	w := ut.PerformRequest(engine, "GET", "/api/v1/users",
-    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
-    	resp := w.Result()
+        w := ut.PerformRequest(engine, "GET", "/api/v1/users",
+            nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+        resp := w.Result()
 
-    	if resp.StatusCode() != consts.StatusForbidden {{ "{" }}
-    		t.Fatalf("expected 403 (permission denied) for a JWT-authenticated but RBAC-denied request to GET /api/v1/users, got %d — this is exactly the bug this task fixes: without per-route Authz registration, RBAC enforcement is silently skipped and this request would wrongly succeed", resp.StatusCode())
-    	{{ "}" }}
+        if resp.StatusCode() != consts.StatusForbidden {{ "{" }}
+            t.Fatalf("expected 403 (permission denied) for a JWT-authenticated but RBAC-denied request to GET /api/v1/users, got %d — this is exactly the bug this task fixes: without per-route Authz registration, RBAC enforcement is silently skipped and this request would wrongly succeed", resp.StatusCode())
+        {{ "}" }}
     {{ "}" }}
 
     // TestAuthz_AllowedPermission_Returns200 is the companion positive case:
@@ -196,15 +196,15 @@ body: |
     func TestAuthz_AllowedPermission_Returns200(t *testing.T) {{ "{" }}
         client := &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }}
         engine := newRouterTestEngine(t, client)
-    	jwtToken := newRouterTestJWT(t)
+        jwtToken := newRouterTestJWT(t)
 
-    	w := ut.PerformRequest(engine, "GET", "/api/v1/users",
-    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
-    	resp := w.Result()
+        w := ut.PerformRequest(engine, "GET", "/api/v1/users",
+            nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+        resp := w.Result()
 
-    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
-    		t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/users, got %d", resp.StatusCode())
-    	{{ "}" }}
+        if resp.StatusCode() != consts.StatusOK {{ "{" }}
+            t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/users, got %d", resp.StatusCode())
+        {{ "}" }}
         if client.lastEnforceObj != "user:read" || client.lastEnforceAct != "execute" {{ "{" }}
             t.Fatalf("Enforce(obj, act) = (%q, %q), want (user:read, execute)", client.lastEnforceObj, client.lastEnforceAct)
         {{ "}" }}
@@ -220,20 +220,20 @@ body: |
     // fakeRouterRBACClient.lastEnforceUid would have observed "" here
     // instead of "user-123".
     func TestAuthz_UsesRealJWTIdentity_PropagatesUidToRBAC(t *testing.T) {{ "{" }}
-    	rbacCli := &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }}
-    	engine := newRouterTestEngine(t, rbacCli)
-    	jwtToken := newRouterTestJWT(t)
+        rbacCli := &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }}
+        engine := newRouterTestEngine(t, rbacCli)
+        jwtToken := newRouterTestJWT(t)
 
-    	w := ut.PerformRequest(engine, "GET", "/api/v1/users",
-    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
-    	resp := w.Result()
+        w := ut.PerformRequest(engine, "GET", "/api/v1/users",
+            nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+        resp := w.Result()
 
-    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
-    		t.Fatalf("expected 200, got %d", resp.StatusCode())
-    	{{ "}" }}
-    	if rbacCli.lastEnforceUid != "user-123" {{ "{" }}
-    		t.Errorf("rbacCli.lastEnforceUid = %q, want %q — JWT identity did not propagate to RBAC Enforce", rbacCli.lastEnforceUid, "user-123")
-    	{{ "}" }}
+        if resp.StatusCode() != consts.StatusOK {{ "{" }}
+            t.Fatalf("expected 200, got %d", resp.StatusCode())
+        {{ "}" }}
+        if rbacCli.lastEnforceUid != "user-123" {{ "{" }}
+            t.Errorf("rbacCli.lastEnforceUid = %q, want %q — JWT identity did not propagate to RBAC Enforce", rbacCli.lastEnforceUid, "user-123")
+        {{ "}" }}
     {{ "}" }}
 
     // TestUnprotectedRoute_NoAuthHeader_StillBlockedByJWT is a narrow
@@ -242,12 +242,12 @@ body: |
     // route must still reject requests with no Authorization header at all,
     // independent of RBAC.
     func TestUnprotectedRoute_NoAuthHeader_StillBlockedByJWT(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+        engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
 
-    	w := ut.PerformRequest(engine, "GET", "/api/v1/users", nil)
-    	if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
-    		t.Fatalf("expected 401 for GET /api/v1/users without an Authorization header, got %d", got)
-    	{{ "}" }}
+        w := ut.PerformRequest(engine, "GET", "/api/v1/users", nil)
+        if got := w.Result().StatusCode(); got != consts.StatusUnauthorized {{ "{" }}
+            t.Fatalf("expected 401 for GET /api/v1/users without an Authorization header, got %d", got)
+        {{ "}" }}
     {{ "}" }}
 
     // TestTerminalUsersRoute_DeniedPermission_Returns403 proves the same
@@ -257,45 +257,45 @@ body: |
     // per-route RequirePermission+Authz pairing (not the buggy
     // group-level registration Task 3 fixed).
     func TestTerminalUsersRoute_DeniedPermission_Returns403(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }})
-    	jwtToken := newRouterTestJWT(t)
+        engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }})
+        jwtToken := newRouterTestJWT(t)
 
-    	w := ut.PerformRequest(engine, "GET", "/api/v1/terminal-users",
-    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
-    	resp := w.Result()
+        w := ut.PerformRequest(engine, "GET", "/api/v1/terminal-users",
+            nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+        resp := w.Result()
 
-    	if resp.StatusCode() != consts.StatusForbidden {{ "{" }}
-    		t.Fatalf("expected 403 (permission denied) for a JWT-authenticated but RBAC-denied request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
-    	{{ "}" }}
+        if resp.StatusCode() != consts.StatusForbidden {{ "{" }}
+            t.Fatalf("expected 403 (permission denied) for a JWT-authenticated but RBAC-denied request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
+        {{ "}" }}
     {{ "}" }}
 
     // TestTerminalUsersRoute_AllowedPermission_Returns200 is the companion
     // positive case: an RBAC-allowed request to /terminal-users must still
     // reach the real handler and succeed.
     func TestTerminalUsersRoute_AllowedPermission_Returns200(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
-    	jwtToken := newRouterTestJWT(t)
+        engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+        jwtToken := newRouterTestJWT(t)
 
-    	w := ut.PerformRequest(engine, "GET", "/api/v1/terminal-users",
-    		nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
-    	resp := w.Result()
+        w := ut.PerformRequest(engine, "GET", "/api/v1/terminal-users",
+            nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + jwtToken{{ "}" }})
+        resp := w.Result()
 
-    	if resp.StatusCode() != consts.StatusOK {{ "{" }}
-    		t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
-    	{{ "}" }}
+        if resp.StatusCode() != consts.StatusOK {{ "{" }}
+            t.Fatalf("expected 200 for a JWT-authenticated and RBAC-allowed request to GET /api/v1/terminal-users, got %d", resp.StatusCode())
+        {{ "}" }}
     {{ "}" }}
 
     // fakeRouterAuthClient is a minimal fake authservice.Client for the
     // Idempotency tests below — Login always succeeds so the test can focus
     // on whether Idempotency dedupes the second identical request.
     type fakeRouterAuthClient struct {{ "{" }}
-    	authservice.Client
-    	loginCalls int
+        authservice.Client
+        loginCalls int
     {{ "}" }}
 
     func (f *fakeRouterAuthClient) Login(ctx context.Context, req *api.LoginReq, callOptions ...callopt.Option) (*api.LoginResp, error) {{ "{" }}
-    	f.loginCalls++
-    	return &api.LoginResp{{ "{" }}AccessToken: "tok", RefreshToken: "rtok", ExpiresIn: 3600{{ "}" }}, nil
+        f.loginCalls++
+        return &api.LoginResp{{ "{" }}AccessToken: "tok", RefreshToken: "rtok", ExpiresIn: 3600{{ "}" }}, nil
     {{ "}" }}
 
     func (f *fakeRouterAuthClient) ValidateToken(ctx context.Context, req *api.ValidateTokenReq, callOptions ...callopt.Option) (*api.ValidateTokenResp, error) {{ "{" }}
@@ -311,13 +311,13 @@ body: |
     {{ "}" }}
 
     func newRouterTestEngineWithAuth(t *testing.T, authCli authservice.Client, rbacCli rbacservice.Client) *route.Engine {{ "{" }}
-    	t.Helper()
-    	h := server.New()
-    	var ruleCli ruleservice.Client
-    	var resolver *ratelimit.Resolver
-    	userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
-    	Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli, resolver)
-    	return h.Engine
+        t.Helper()
+        h := server.New()
+        var ruleCli ruleservice.Client
+        var resolver *ratelimit.Resolver
+        userCli := &fakeRouterUserClient{{ "{" }}{{ "}" }}
+        Register{{.ServiceName}}BffServiceRoutes(h, authCli, rbacCli, ruleCli, userCli, resolver)
+        return h.Engine
     {{ "}" }}
 
     // TestIdempotency_DifferentUsers_DoNotCollide is the fix probe for
@@ -333,35 +333,35 @@ body: |
     // gets their own user_uuid:-scoped key, so both requests succeed and
     // neither is served from the other's cached response.
     func TestIdempotency_DifferentUsers_DoNotCollide(t *testing.T) {{ "{" }}
-    	engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
-    	tokenA := newRouterTestJWTWithUid(t, "user-A")
-    	tokenB := newRouterTestJWTWithUid(t, "user-B")
-    	bodyA := []byte(`{{ "{" }}"username":"alice","password":"p","email":"alice@example.com"{{ "}" }}`)
-    	bodyB := []byte(`{{ "{" }}"username":"bob","password":"p","email":"bob@example.com"{{ "}" }}`)
+        engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+        tokenA := newRouterTestJWTWithUid(t, "user-A")
+        tokenB := newRouterTestJWTWithUid(t, "user-B")
+        bodyA := []byte(`{{ "{" }}"username":"alice","password":"p","email":"alice@example.com"{{ "}" }}`)
+        bodyB := []byte(`{{ "{" }}"username":"bob","password":"p","email":"bob@example.com"{{ "}" }}`)
 
-    	wA := ut.PerformRequest(engine, "POST", "/api/v1/users",
-    		&ut.Body{{ "{" }}Body: bytes.NewReader(bodyA), Len: len(bodyA){{ "}" }},
-    		ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + tokenA{{ "}" }},
-    		ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "shared-key-123"{{ "}" }},
-    		ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
-    	)
-    	if got := wA.Result().StatusCode(); got != consts.StatusOK {{ "{" }}
-    		t.Fatalf("user A: expected 200, got %d", got)
-    	{{ "}" }}
+        wA := ut.PerformRequest(engine, "POST", "/api/v1/users",
+            &ut.Body{{ "{" }}Body: bytes.NewReader(bodyA), Len: len(bodyA){{ "}" }},
+            ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + tokenA{{ "}" }},
+            ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "shared-key-123"{{ "}" }},
+            ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
+        )
+        if got := wA.Result().StatusCode(); got != consts.StatusOK {{ "{" }}
+            t.Fatalf("user A: expected 200, got %d", got)
+        {{ "}" }}
 
-    	wB := ut.PerformRequest(engine, "POST", "/api/v1/users",
-    		&ut.Body{{ "{" }}Body: bytes.NewReader(bodyB), Len: len(bodyB){{ "}" }},
-    		ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + tokenB{{ "}" }},
-    		ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "shared-key-123"{{ "}" }},
-    		ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
-    	)
-    	respB := wB.Result()
-    	if got := respB.StatusCode(); got != consts.StatusOK {{ "{" }}
-    		t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes", got)
-    	{{ "}" }}
-    	if replayed := respB.Header.Get("X-Idempotency-Replayed"); replayed != "" {{ "{" }}
-    		t.Errorf("user B response carries X-Idempotency-Replayed=%q — it must not be served from user A's cached response", replayed)
-    	{{ "}" }}
+        wB := ut.PerformRequest(engine, "POST", "/api/v1/users",
+            &ut.Body{{ "{" }}Body: bytes.NewReader(bodyB), Len: len(bodyB){{ "}" }},
+            ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + tokenB{{ "}" }},
+            ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "shared-key-123"{{ "}" }},
+            ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
+        )
+        respB := wB.Result()
+        if got := respB.StatusCode(); got != consts.StatusOK {{ "{" }}
+            t.Fatalf("user B: expected 200 (different user, same idempotency key must not collide), got %d — this is exactly the bug this task fixes", got)
+        {{ "}" }}
+        if replayed := respB.Header.Get("X-Idempotency-Replayed"); replayed != "" {{ "{" }}
+            t.Errorf("user B response carries X-Idempotency-Replayed=%q — it must not be served from user A's cached response", replayed)
+        {{ "}" }}
     {{ "}" }}
 
     // TestIdempotency_PublicLogin_StillDeduped confirms moving Idempotency
@@ -369,41 +369,58 @@ body: |
     // /auth/login route: two identical login requests with the same
     // X-Idempotency-Key must still result in only one real Login RPC call.
     func TestIdempotency_PublicLogin_StillDeduped(t *testing.T) {{ "{" }}
-    	authCli := &fakeRouterAuthClient{{ "{" }}{{ "}" }}
-    	engine := newRouterTestEngineWithAuth(t, authCli, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
-    	body := []byte(`{{ "{" }}"username":"u","password":"p"{{ "}" }}`)
+        authCli := &fakeRouterAuthClient{{ "{" }}{{ "}" }}
+        engine := newRouterTestEngineWithAuth(t, authCli, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }})
+        body := []byte(`{{ "{" }}"username":"u","password":"p"{{ "}" }}`)
 
-    	for i := 0; i < 2; i++ {{ "{" }}
-    		w := ut.PerformRequest(engine, "POST", "/api/v1/auth/login",
-    			&ut.Body{{ "{" }}Body: bytes.NewReader(body), Len: len(body){{ "}" }},
-    			ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "login-key-1"{{ "}" }},
-    			ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
-    		)
-    		if got := w.Result().StatusCode(); got != consts.StatusOK {{ "{" }}
-    			t.Fatalf("request %d: expected 200, got %d", i, got)
-    		{{ "}" }}
-    	{{ "}" }}
-    	if authCli.loginCalls != 1 {{ "{" }}
-    		t.Errorf("loginCalls = %d, want 1 — the second identical request should have been deduped by Idempotency, not re-invoked the real Login RPC", authCli.loginCalls)
-    	{{ "}" }}
+        for i := 0; i < 2; i++ {{ "{" }}
+            w := ut.PerformRequest(engine, "POST", "/api/v1/auth/login",
+                &ut.Body{{ "{" }}Body: bytes.NewReader(body), Len: len(body){{ "}" }},
+                ut.Header{{ "{" }}Key: "X-Idempotency-Key", Value: "login-key-1"{{ "}" }},
+                ut.Header{{ "{" }}Key: "Content-Type", Value: "application/json"{{ "}" }},
+            )
+            if got := w.Result().StatusCode(); got != consts.StatusOK {{ "{" }}
+                t.Fatalf("request %d: expected 200, got %d", i, got)
+            {{ "}" }}
+        {{ "}" }}
+        if authCli.loginCalls != 1 {{ "{" }}
+            t.Errorf("loginCalls = %d, want 1 — the second identical request should have been deduped by Idempotency, not re-invoked the real Login RPC", authCli.loginCalls)
+        {{ "}" }}
     {{ "}" }}
 
     func TestGlobalAuthz_UnregisteredRouteDenied(t *testing.T) {{ "{" }}
         h := server.New()
-        Register{{.ServiceName}}BffServiceRoutes(h, &fakeRouterAuthClient{{ "{}" }}, &fakeRouterRBACClient{{ "{" }}allowed:true{{ "}" }}, nil, &fakeRouterUserClient{{ "{}" }}, nil)
+        Register{{.ServiceName}}BffServiceRoutes(h, &fakeRouterAuthClient{{ "{" }}{{ "}" }}, &fakeRouterRBACClient{{ "{" }}allowed: true{{ "}" }}, nil, &fakeRouterUserClient{{ "{" }}{{ "}" }}, nil)
         h.GET("/api/v1/forgotten", func(ctx context.Context, c *app.RequestContext) {{ "{" }} c.Status(200) {{ "}" }})
         w := ut.PerformRequest(h.Engine, "GET", "/api/v1/forgotten", nil)
-        if got := w.Result().StatusCode(); got != consts.StatusForbidden {{ "{" }} t.Fatalf("unregistered route got %d, want 403", got) {{ "}" }}
+        if got := w.Result().StatusCode(); got != consts.StatusForbidden {{ "{" }}
+            t.Fatalf("unregistered route got %d, want 403", got)
+        {{ "}" }}
         w = ut.PerformRequest(h.Engine, "GET", "/api/v1/not-found", nil)
-        if got := w.Result().StatusCode(); got != consts.StatusNotFound {{ "{" }} t.Fatalf("unmatched route got %d, want 404", got) {{ "}" }}
+        if got := w.Result().StatusCode(); got != consts.StatusNotFound {{ "{" }}
+            t.Fatalf("unmatched route got %d, want 404", got)
+        {{ "}" }}
     {{ "}" }}
 
     func TestGrantRoutesRequirePermission(t *testing.T) {{ "{" }}
-        engine:=newRouterTestEngine(t,&fakeRouterRBACClient{{ "{" }}allowed:false{{ "}" }})
-        for _, test:=range []struct{{ "{" }}method,path string{{ "}{" }}
-            {{ "{" }}"POST","/api/v1/users/1/roles"{{ "}" }},{{ "{" }}"POST","/api/v1/roles/1/permissions"{{ "}" }},{{ "{" }}"GET","/api/v1/permissions/tree"{{ "}" }},
+        engine := newRouterTestEngine(t, &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }})
+        for _, test := range []struct{{ "{" }} method, path string {{ "}" }}{{ "{" }}
+            {{ "{" }}"POST", "/api/v1/users/1/roles"{{ "}" }}, {{ "{" }}"POST", "/api/v1/roles/1/permissions"{{ "}" }}, {{ "{" }}"GET", "/api/v1/permissions/tree"{{ "}" }},
         {{ "}" }} {{ "{" }}
-            w:=ut.PerformRequest(engine,test.method,test.path,nil,ut.Header{{ "{" }}Key:"Authorization",Value:"Bearer "+newRouterTestJWT(t){{ "}" }})
-            if got:=w.Result().StatusCode();got!=consts.StatusForbidden {{ "{" }} t.Fatalf("%s %s got %d, want 403",test.method,test.path,got) {{ "}" }}
+            w := ut.PerformRequest(engine, test.method, test.path, nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + newRouterTestJWT(t){{ "}" }})
+            if got := w.Result().StatusCode(); got != consts.StatusForbidden {{ "{" }}
+                t.Fatalf("%s %s got %d, want 403", test.method, test.path, got)
+            {{ "}" }}
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestAuthConfigRoutesRBACDeniedBeforeUserRPC(t *testing.T) {{ "{" }}
+        for _, check := range []struct{{ "{" }} method, path, code string {{ "}" }}{{ "{" }}{{ "{" }}"GET", "/api/v1/auth-configs", "auth-config:read"{{ "}" }}, {{ "{" }}"POST", "/api/v1/auth-configs", "auth-config:update"{{ "}" }}, {{ "{" }}"POST", "/api/v1/auth-configs/cfg/test", "auth-config:test"{{ "}" }}{{ "}" }} {{ "{" }}
+            cli := &fakeRouterRBACClient{{ "{" }}allowed: false{{ "}" }}
+            engine := newRouterTestEngine(t, cli)
+            w := ut.PerformRequest(engine, check.method, check.path, nil, ut.Header{{ "{" }}Key: "Authorization", Value: "Bearer " + newRouterTestJWT(t){{ "}" }})
+            if w.Result().StatusCode() != 403 || cli.lastEnforceObj != check.code || cli.lastEnforceUid != "user-123" {{ "{" }}
+                t.Fatalf("RBAC bypass on %s: %d %+v", check.path, w.Result().StatusCode(), cli)
+            {{ "}" }}
         {{ "}" }}
     {{ "}" }}

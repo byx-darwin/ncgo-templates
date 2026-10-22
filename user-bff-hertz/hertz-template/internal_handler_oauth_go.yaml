@@ -7,128 +7,197 @@ body: |
     package handler
 
     import (
-    	"context"
-    	"encoding/json"
-    	"time"
-
-    	"github.com/cloudwego/hertz/pkg/app"
-
-    	"{{.Module}}/internal/base/conf"
-    	"{{.Module}}/internal/pkg/middleware"
-    	"{{.Module}}/internal/pkg/oauthcode"
-    	"{{.Module}}/internal/pkg/response"
-    	userv1 "{{.Module}}/kitex_gen/api/user/v1"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "context"
+        "encoding/json"
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/pkg/oauthcode"
+        "{{.Module}}/internal/pkg/response"
+        userv1 "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/hertz/pkg/app"
+        "net/url"
+        "strings"
+        "time"
     )
 
     type OAuthHandler struct {{ "{" }}
-    	userCli     userservice.Client
-    	codeStore   oauthcode.Store
-    	redirectCfg conf.OAuthRedirectConfig
-    	codeTTL     time.Duration
+        userCli     userservice.Client
+        redirectCfg conf.OAuthRedirectConfig
     {{ "}" }}
 
-    func NewOAuthHandler(userCli userservice.Client, codeStore oauthcode.Store, redirectCfg conf.OAuthRedirectConfig, codeTTL time.Duration) *OAuthHandler {{ "{" }}
-    	return &OAuthHandler{{ "{" }}userCli: userCli, codeStore: codeStore, redirectCfg: redirectCfg, codeTTL: codeTTL{{ "}" }}
+    // NewOAuthHandler retains legacy constructor arguments for source compatibility.
+    // Account v2 exchange grants are hashed and consumed by the authority database;
+    // the BFF never stores access/refresh credentials or reauthentication proofs.
+    func NewOAuthHandler(cli userservice.Client, _ oauthcode.Store, cfg conf.OAuthRedirectConfig, _ time.Duration) *OAuthHandler {{ "{" }}
+        return &OAuthHandler{{ "{" }}userCli: cli, redirectCfg: cfg{{ "}" }}
     {{ "}" }}
-
-    // Start begins a login-flow OAuth redirect: GET /auth/oauth/:provider/start
     func (h *OAuthHandler) Start(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	provider := c.Param("provider")
-    	resp, err := h.userCli.OAuthStart(ctx, &userv1.OAuthStartReq{{ "{" }}Provider: provider, Purpose: "login"{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	c.Redirect(302, []byte(resp.RedirectUrl))
+        var r *accountRequest
+        var ok bool
+        if string(c.Method()) == "GET" {{ "{" }}
+            client, valid := accountClient(c, string(c.Query("client_id")), true)
+            if !valid {{ "{" }}
+                return
+            {{ "}" }}
+            r = &accountRequest{{ "{" }}ClientID: client, Purpose: string(c.Query("purpose")), Proof: string(c.Query("proof")){{ "}" }}
+        {{ "}" }} else {{ "{" }}
+            r, ok = accountInput(c)
+            if !ok {{ "{" }}
+                return
+            {{ "}" }}
+        {{ "}" }}
+        if r.Purpose == "" {{ "{" }}
+            r.Purpose = "login"
+        {{ "}" }}
+        if r.Purpose != "login" {{ "{" }}
+            if !NewAccountHandler(h.userCli).verify(ctx, c, r.ClientID) {{ "{" }}
+                return
+            {{ "}" }}
+        {{ "}" }}
+        v, e := h.userCli.AccountOAuthStart(ctx, &userv1.AccountOAuthStartReq{{ "{" }}ClientId: r.ClientID, ConfigId: c.Param("config"), Purpose: r.Purpose, Proof: r.Proof, AccessToken: accountBearer(c), ReturnUrl: h.redirectCfg.SuccessURL{{ "}" }})
+        accountResult(c, v, e)
     {{ "}" }}
 
-    // Callback completes a login-flow OAuth redirect: GET /auth/oauth/:provider/callback
+    func oauthPrivateResponse(c *app.RequestContext) {{ "{" }}
+        c.Response.Header.Set("Cache-Control", "no-store")
+        c.Response.Header.Set("Referrer-Policy", "no-referrer")
+    {{ "}" }}
+
     func (h *OAuthHandler) Callback(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	provider := c.Param("provider")
-    	state := string(c.Query("state"))
-    	code := string(c.Query("code"))
-    	resp, err := h.userCli.OAuthCallback(ctx, &userv1.OAuthCallbackReq{{ "{" }}Provider: provider, State: state, Code: code{{ "}" }})
-    	if err != nil {{ "{" }}
-    		c.Redirect(302, []byte(h.redirectCfg.ErrorURL))
-    		return
-    	{{ "}" }}
-    	oneTimeCode, err := h.codeStore.Put(ctx, resp.Token, h.codeTTL)
-    	if err != nil {{ "{" }}
-    		c.Redirect(302, []byte(h.redirectCfg.ErrorURL))
-    		return
-    	{{ "}" }}
-    	c.Redirect(302, []byte(h.redirectCfg.SuccessURL+"?code="+oneTimeCode))
+        oauthPrivateResponse(c)
+        r := &struct {{ "{" }}
+            ClientID string  `json:"client_id"`
+            State    string  `json:"state"`
+            Code     *string `json:"code"`
+            AuthCode *string `json:"auth_code"`
+        {{ "}" }}{{ "{" }}{{ "}" }}
+        browser := string(c.Method()) == "GET"
+        if browser {{ "{" }}
+            r.State = string(c.Query("state"))
+            if c.Request.URI().QueryArgs().Has("code") {{ "{" }}
+                v := string(c.Query("code"))
+                r.Code = &v
+            {{ "}" }}
+            if c.Request.URI().QueryArgs().Has("auth_code") {{ "{" }}
+                v := string(c.Query("auth_code"))
+                r.AuthCode = &v
+            {{ "}" }}
+            r.ClientID = string(c.Query("client_id"))
+        {{ "}" }} else if json.Unmarshal(c.Request.Body(), r) != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        // Alipay web/SDK callbacks name the authorization code auth_code.
+        // Ambiguous aliases must fail before consuming server-side OAuth state.
+        if r.Code != nil && r.AuthCode != nil && *r.Code != *r.AuthCode {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        providerCode := ""
+        if r.Code != nil {{ "{" }}
+            providerCode = *r.Code
+        {{ "}" }} else if r.AuthCode != nil {{ "{" }}
+            providerCode = *r.AuthCode
+        {{ "}" }}
+        client, ok := accountClient(c, r.ClientID, false)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        if r.State == "" || providerCode == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        v, e := h.userCli.AccountOAuthComplete(ctx, &userv1.AccountOAuthCompleteReq{{ "{" }}ClientId: client, ConfigId: c.Param("config"), State: r.State, Code: providerCode, ClientIp: c.ClientIP(), UserAgent: strings.TrimSpace(c.Request.Header.Get("User-Agent")){{ "}" }})
+        if e != nil {{ "{" }}
+            response.Err(c, e)
+            return
+        {{ "}" }}
+        if v == nil || v.ClientId == "" || (client != "" && v.ClientId != client) {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return
+        {{ "}" }}
+        if v.Tokens != nil || v.Proof != "" {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return
+        {{ "}" }}
+        switch v.Purpose {{ "{" }}
+        case "login", "reauth":
+            if v.ExchangeCode == "" {{ "{" }}
+                response.ErrorCode(c, response.CodeTokenInvalid)
+                return
+            {{ "}" }}
+        case "bind", "replace":
+            if v.ExchangeCode != "" {{ "{" }}
+                response.ErrorCode(c, response.CodeTokenInvalid)
+                return
+            {{ "}" }}
+        default:
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return
+        {{ "}" }}
+        if !browser {{ "{" }}
+            if v.ExchangeCode != "" {{ "{" }}
+                response.OK(c, map[string]string{{ "{" }}"code": v.ExchangeCode, "purpose": v.Purpose, "client_id": v.ClientId{{ "}" }})
+            {{ "}" }} else {{ "{" }}
+                response.OK(c, map[string]string{{ "{" }}"status": "ok", "purpose": v.Purpose, "client_id": v.ClientId{{ "}" }})
+            {{ "}" }}
+            return
+        {{ "}" }}
+        // The service returns only an exactly allowlisted URL from consumed OAuth state.
+        target, e := url.Parse(v.ReturnUrl)
+        if e != nil || (target.Scheme != "https" && target.Scheme != "http") || target.Host == "" || target.User != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        q := target.Query()
+        if v.ExchangeCode != "" {{ "{" }}
+            q.Set("code", v.ExchangeCode)
+        {{ "}" }} else {{ "{" }}
+            q.Del("code")
+            q.Set("status", "ok")
+            q.Set("purpose", v.Purpose)
+        {{ "}" }}
+        target.RawQuery = q.Encode()
+        c.Redirect(302, []byte(target.String()))
     {{ "}" }}
-
-    type exchangeReq struct {{ "{" }}
-    	Code string `json:"code"`
-    {{ "}" }}
-
-    // Exchange redeems a one-time code for the JWT it was issued for:
-    // POST /auth/oauth/exchange
     func (h *OAuthHandler) Exchange(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req exchangeReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil || req.Code == "" {{ "{" }}
-    		response.ErrorCode(c, response.CodeRequestParamInvalid)
-    		return
-    	{{ "}" }}
-    	jwt, ok, err := h.codeStore.Consume(ctx, req.Code)
-    	if err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	if !ok {{ "{" }}
-    		response.ErrorCode(c, response.CodeTokenInvalid)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"token": jwt{{ "}" }})
-    {{ "}" }}
-
-    // BindStart begins a bind-flow OAuth redirect for the authenticated user:
-    // GET /auth/oauth/:provider/bind-start (JWT-protected)
-    func (h *OAuthHandler) BindStart(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	claims, ok := middleware.GetClaims(c)
-    	if !ok {{ "{" }}
-    		response.ErrorCode(c, response.CodeTokenMissing)
-    		return
-    	{{ "}" }}
-    	provider := c.Param("provider")
-    	resp, err := h.userCli.OAuthStart(ctx, &userv1.OAuthStartReq{{ "{" }}Provider: provider, Purpose: "bind", Uid: claims.Uid{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	c.Redirect(302, []byte(resp.RedirectUrl))
-    {{ "}" }}
-
-    // BindCallback completes a bind-flow OAuth redirect: GET /auth/oauth/:provider/bind-callback
-    // The identity being bound comes from the OAuth state (set in BindStart
-    // from the authenticated caller's JWT), not from anything in this request.
-    func (h *OAuthHandler) BindCallback(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	provider := c.Param("provider")
-    	state := string(c.Query("state"))
-    	code := string(c.Query("code"))
-    	_, err := h.userCli.BindProvider(ctx, &userv1.BindProviderReq{{ "{" }}Provider: provider, State: state, Code: code{{ "}" }})
-    	if err != nil {{ "{" }}
-    		c.Redirect(302, []byte(h.redirectCfg.ErrorURL))
-    		return
-    	{{ "}" }}
-    	c.Redirect(302, []byte(h.redirectCfg.BindSuccessURL))
-    {{ "}" }}
-
-    // Unbind removes a bound third-party identity: DELETE /auth/oauth/:provider/bind (JWT-protected)
-    func (h *OAuthHandler) Unbind(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	claims, ok := middleware.GetClaims(c)
-    	if !ok {{ "{" }}
-    		response.ErrorCode(c, response.CodeTokenMissing)
-    		return
-    	{{ "}" }}
-    	provider := c.Param("provider")
-    	_, err := h.userCli.UnbindProvider(ctx, &userv1.UnbindProviderReq{{ "{" }}Uid: claims.Uid, Provider: provider{{ "}" }})
-    	if err != nil {{ "{" }}
-    		response.Err(c, err)
-    		return
-    	{{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "ok"{{ "}" }})
+        oauthPrivateResponse(c)
+        r, ok := accountInput(c)
+        if !ok {{ "{" }}
+            return
+        {{ "}" }}
+        if r.Code == "" {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
+        {{ "}" }}
+        result, err := h.userCli.AccountExchange(ctx, &userv1.AccountExchangeReq{{ "{" }}ClientId: r.ClientID, Code: r.Code{{ "}" }})
+        if err != nil {{ "{" }}
+            response.Err(c, err)
+            return
+        {{ "}" }}
+        if result == nil {{ "{" }}
+            response.ErrorCode(c, response.CodeTokenInvalid)
+            return
+        {{ "}" }}
+        switch result.Purpose {{ "{" }}
+        case "login":
+            if result.Tokens == nil || result.Tokens.AccessToken == "" || result.Proof != "" {{ "{" }}
+                response.ErrorCode(c, response.CodeTokenInvalid)
+                return
+            {{ "}" }}
+            session, err := h.userCli.AccountVerify(ctx, &userv1.AccountTokenReq{{ "{" }}AccessToken: result.Tokens.AccessToken, ClientId: r.ClientID{{ "}" }})
+            if err != nil || session == nil || session.Uid == "" || session.Uid != result.Tokens.Uid || session.ClientId != r.ClientID {{ "{" }}
+                response.ErrorCode(c, response.CodeTokenInvalid)
+                return
+            {{ "}" }}
+            response.OK(c, result.Tokens)
+        case "reauth":
+            if result.Proof == "" || result.Tokens != nil {{ "{" }}
+                response.ErrorCode(c, response.CodeTokenInvalid)
+                return
+            {{ "}" }}
+            response.OK(c, map[string]string{{ "{" }}"proof": result.Proof, "purpose": result.Purpose{{ "}" }})
+        default:
+            response.ErrorCode(c, response.CodeTokenInvalid)
+        {{ "}" }}
     {{ "}" }}

@@ -2,16 +2,17 @@
 path: internal/application/useradmin/admin_service.go
 update_behavior:
     type: cover
-body: |-
+body: |
     package useradminsvc
 
     import (
-    	"context"
+        "context"
+        "{{.Module}}/internal/application/account"
 
-    	"github.com/google/uuid"
+        "github.com/google/uuid"
 
-    	"{{.Module}}/internal/domain/user"
-    	"{{.Module}}/internal/infrastructure/audit"
+        "{{.Module}}/internal/domain/user"
+        "{{.Module}}/internal/infrastructure/audit"
     )
 
     // PasswordSetter is implemented by usersvc.Service (see its
@@ -19,64 +20,64 @@ body: |-
     // old-password-optional logic without useradminsvc importing usersvc's
     // full surface or duplicating hashing/blacklist-revoke logic.
     type PasswordSetter interface {{ "{" }}
-    	SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error
+        SetPasswordForAdmin(ctx context.Context, uid, newPassword, operatorUID string) error
     {{ "}" }}
 
     // Service implements admin-facing end-user management operations,
     // called from admin-bff-hertz via the "user:manage" RBAC-gated endpoints.
     type Service struct {{ "{" }}
-    	repo           user.Repository
-    	blacklist      Blacklist
-    	audit          audit.Writer
-    	passwordSetter PasswordSetter
+        repo           user.Repository
+        blacklist      Blacklist
+        audit          audit.Writer
+        passwordSetter PasswordSetter
     {{ "}" }}
 
     // New constructs a Service.
     func New(repo user.Repository, blacklist Blacklist, auditWriter audit.Writer, passwordSetter PasswordSetter) *Service {{ "{" }}
-    	return &Service{{ "{" }}repo: repo, blacklist: blacklist, audit: auditWriter, passwordSetter: passwordSetter{{ "}" }}
+        return &Service{{ "{" }}repo: repo, blacklist: blacklist, audit: auditWriter, passwordSetter: passwordSetter{{ "}" }}
     {{ "}" }}
 
     func toUserDTO(u *user.User) UserDTO {{ "{" }}
-    	username := ""
-    	if u.Username != nil {{ "{" }}
-    		username = *u.Username
-    	{{ "}" }}
-    	return UserDTO{{ "{" }}Uid: u.ID.String(), Username: username, Nickname: u.Nickname, Status: u.Status{{ "}" }}
+        username := ""
+        if u.Username != nil {{ "{" }}
+            username = *u.Username
+        {{ "}" }}
+        return UserDTO{{ "{" }}Phone: account.MaskIdentity("phone", u.Phone), Email: account.MaskIdentity("email", u.Email), Avatar: u.Avatar, Uid: u.ID.String(), Username: username, Nickname: u.Nickname, Status: u.Status{{ "}" }}
     {{ "}" }}
 
     func (s *Service) ListUsers(ctx context.Context, in ListUsersInput) (ListUsersOutput, error) {{ "{" }}
-    	limit := in.Limit
-    	if limit <= 0 {{ "{" }}
-    		limit = 20
-    	{{ "}" }}
-    	if limit > 100 {{ "{" }}
-    		limit = 100
-    	{{ "}" }}
-    	users, err := s.repo.List(ctx, limit, in.Offset)
-    	if err != nil {{ "{" }}
-    		return ListUsersOutput{{ "{" }}{{ "}" }}, err
-    	{{ "}" }}
-    	total, err := s.repo.Count(ctx)
-    	if err != nil {{ "{" }}
-    		return ListUsersOutput{{ "{" }}{{ "}" }}, err
-    	{{ "}" }}
-    	dtos := make([]UserDTO, 0, len(users))
-    	for _, u := range users {{ "{" }}
-    		dtos = append(dtos, toUserDTO(u))
-    	{{ "}" }}
-    	return ListUsersOutput{{ "{" }}Users: dtos, Total: total{{ "}" }}, nil
+        limit := in.Limit
+        if limit <= 0 {{ "{" }}
+            limit = 20
+        {{ "}" }}
+        if limit > 100 {{ "{" }}
+            limit = 100
+        {{ "}" }}
+        users, err := s.repo.List(ctx, limit, in.Offset)
+        if err != nil {{ "{" }}
+            return ListUsersOutput{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        total, err := s.repo.Count(ctx)
+        if err != nil {{ "{" }}
+            return ListUsersOutput{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        dtos := make([]UserDTO, 0, len(users))
+        for _, u := range users {{ "{" }}
+            dtos = append(dtos, toUserDTO(u))
+        {{ "}" }}
+        return ListUsersOutput{{ "{" }}Users: dtos, Total: total{{ "}" }}, nil
     {{ "}" }}
 
     func (s *Service) GetUser(ctx context.Context, uid string) (UserDTO, error) {{ "{" }}
-    	id, err := uuid.Parse(uid)
-    	if err != nil {{ "{" }}
-    		return UserDTO{{ "{" }}{{ "}" }}, err
-    	{{ "}" }}
-    	u, err := s.repo.GetByID(ctx, id)
-    	if err != nil {{ "{" }}
-    		return UserDTO{{ "{" }}{{ "}" }}, err
-    	{{ "}" }}
-    	return toUserDTO(u), nil
+        id, err := uuid.Parse(uid)
+        if err != nil {{ "{" }}
+            return UserDTO{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        u, err := s.repo.GetByID(ctx, id)
+        if err != nil {{ "{" }}
+            return UserDTO{{ "{" }}{{ "}" }}, err
+        {{ "}" }}
+        return toUserDTO(u), nil
     {{ "}" }}
 
     // auditActor resolves the actor_uid for an admin-initiated audit entry.
@@ -85,49 +86,49 @@ body: |-
     // to the target uid instead of writing an empty actor_uid, matching the
     // pre-operator_uid behaviour.
     func auditActor(operatorUID, uid string) string {{ "{" }}
-    	if operatorUID == "" {{ "{" }}
-    		return uid
-    	{{ "}" }}
-    	return operatorUID
+        if operatorUID == "" {{ "{" }}
+            return uid
+        {{ "}" }}
+        return operatorUID
     {{ "}" }}
 
     // BanUser bans the end-user uid. operatorUID is the admin performing the
     // action, used only for audit attribution (see BanUserReq.operator_uid's
     // trust-boundary comment); it may be empty.
     func (s *Service) BanUser(ctx context.Context, uid, operatorUID string) error {{ "{" }}
-    	id, err := uuid.Parse(uid)
-    	if err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	if err := s.repo.UpdateStatus(ctx, id, user.StatusBanned); err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.ban"{{ "}" }})
-    	return nil
+        id, err := uuid.Parse(uid)
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        if err := s.repo.UpdateStatus(ctx, id, user.StatusBanned); err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        _ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.ban"{{ "}" }})
+        return nil
     {{ "}" }}
 
     // UnbanUser unbans the end-user uid. operatorUID is the admin performing
     // the action, used only for audit attribution; it may be empty.
     func (s *Service) UnbanUser(ctx context.Context, uid, operatorUID string) error {{ "{" }}
-    	id, err := uuid.Parse(uid)
-    	if err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	if err := s.repo.UpdateStatus(ctx, id, user.StatusEnabled); err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.unban"{{ "}" }})
-    	return nil
+        id, err := uuid.Parse(uid)
+        if err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        if err := s.repo.UpdateStatus(ctx, id, user.StatusEnabled); err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        _ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.unban"{{ "}" }})
+        return nil
     {{ "}" }}
 
     // ForceLogout revokes the end-user uid's sessions. operatorUID is the admin
     // performing the action, used only for audit attribution; it may be empty.
     func (s *Service) ForceLogout(ctx context.Context, uid, operatorUID string) error {{ "{" }}
-    	if err := s.blacklist.Revoke(ctx, uid); err != nil {{ "{" }}
-    		return err
-    	{{ "}" }}
-    	_ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.force_logout"{{ "}" }})
-    	return nil
+        if err := s.blacklist.Revoke(ctx, uid); err != nil {{ "{" }}
+            return err
+        {{ "}" }}
+        _ = s.audit.Write(ctx, audit.Entry{{ "{" }}ActorUID: auditActor(operatorUID, uid), Target: uid, Action: "user.force_logout"{{ "}" }})
+        return nil
     {{ "}" }}
 
     // ResetPassword delegates to usersvc's shared password-setting logic via
@@ -137,21 +138,21 @@ body: |-
     // operatorUID is the admin performing the reset, forwarded for audit
     // attribution only; it may be empty.
     func (s *Service) ResetPassword(ctx context.Context, uid, newPassword, operatorUID string) error {{ "{" }}
-    	return s.passwordSetter.SetPasswordForAdmin(ctx, uid, newPassword, operatorUID)
+        return s.passwordSetter.SetPasswordForAdmin(ctx, uid, newPassword, operatorUID)
     {{ "}" }}
 
     func (s *Service) ListUserIdentities(ctx context.Context, uid string) ([]IdentityDTO, error) {{ "{" }}
-    	id, err := uuid.Parse(uid)
-    	if err != nil {{ "{" }}
-    		return nil, err
-    	{{ "}" }}
-    	identities, err := s.repo.ListIdentitiesByUserID(ctx, id)
-    	if err != nil {{ "{" }}
-    		return nil, err
-    	{{ "}" }}
-    	out := make([]IdentityDTO, 0, len(identities))
-    	for _, i := range identities {{ "{" }}
-    		out = append(out, IdentityDTO{{ "{" }}Provider: i.Provider, ProviderUserID: i.ProviderUserID{{ "}" }})
-    	{{ "}" }}
-    	return out, nil
+        id, err := uuid.Parse(uid)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        identities, err := s.repo.ListIdentitiesByUserID(ctx, id)
+        if err != nil {{ "{" }}
+            return nil, err
+        {{ "}" }}
+        out := make([]IdentityDTO, 0, len(identities))
+        for _, i := range identities {{ "{" }}
+            out = append(out, IdentityDTO{{ "{" }}Provider: i.Provider, ProviderUserID: i.ProviderUserID{{ "}" }})
+        {{ "}" }}
+        return out, nil
     {{ "}" }}

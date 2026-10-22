@@ -107,7 +107,7 @@ body: |
         signing_key: "dev-secret-change-me"
         buffer_seconds: "300s"
         expires_seconds: "7200s"
-    # 一次性 code -> JWT 兑换（独立于 user-kitex 自己的 OAuth CSRF state）
+    # 兼容旧项目的配置；Account v2 一次性 grant 由 user-kitex PostgreSQL 管理
     oauth_code:
       ttl_seconds: "60s"
     # OAuth 回调完成后 302 回前端的地址；生产环境必须替换成真实前端域名

@@ -7,76 +7,81 @@ body: |
     package router
 
     import (
-    	"github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/app/server"
 
-    	"{{.Module}}/internal/base/conf"
-    	"{{.Module}}/internal/handler"
-    	"{{.Module}}/internal/pkg/middleware"
-    	"{{.Module}}/internal/pkg/ratelimit"
-    	authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
-    	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
-    	rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
-    	userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/handler"
+        "{{.Module}}/internal/pkg/middleware"
+        "{{.Module}}/internal/pkg/ratelimit"
+        authservice "{{.Module}}/kitex_gen/api/auth/v1/authservice"
+        ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+        rbacservice "{{.Module}}/kitex_gen/api/rbac/v1/rbacservice"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
     )
 
     // Register{{.ServiceName}}BffServiceRoutes registers all adminbffservice BFF routes
     func Register{{.ServiceName}}BffServiceRoutes(h *server.Hertz, rbacAuthCli authservice.Client, rbacCli rbacservice.Client, rulecenterCli ruleservice.Client, userCli userservice.Client, resolver *ratelimit.Resolver) {{ "{" }}
-    	cfg := conf.Get()
+        cfg := conf.Get()
 
-    	authHandler := handler.NewAuthHandler(rbacAuthCli)
+        authHandler := handler.NewAuthHandler(rbacAuthCli)
         dingHandler := handler.NewDingTalkHandler(rbacAuthCli)
-    	userHandler := handler.NewUserHandler(rbacCli)
-    	roleHandler := handler.NewRoleHandler(rbacCli)
-    	permHandler := handler.NewPermissionHandler(rbacCli)
-    	menuHandler := handler.NewMenuHandler(rbacCli)
-    	currentUserHandler := handler.NewCurrentUserHandler(rbacCli)
-    	rateLimitHandler := handler.NewRateLimitHandler(rulecenterCli)
-    	terminalUserHandler := handler.NewTerminalUserHandler(userCli)
+        userHandler := handler.NewUserHandler(rbacCli)
+        roleHandler := handler.NewRoleHandler(rbacCli)
+        permHandler := handler.NewPermissionHandler(rbacCli)
+        menuHandler := handler.NewMenuHandler(rbacCli)
+        currentUserHandler := handler.NewCurrentUserHandler(rbacCli)
+        rateLimitHandler := handler.NewRateLimitHandler(rulecenterCli)
+        terminalUserHandler := handler.NewTerminalUserHandler(userCli)
+        authConfigHandler := handler.NewAuthConfigHandler(userCli)
 
         // Register both gates before routes so all route groups inherit them.
         h.Use(middleware.RouteTokenAuth(cfg.Auth.Token, middleware.AuthorityJWTVerifier{{ "{" }}Config: cfg.Auth.Token, Client: rbacAuthCli{{ "}" }}))
         h.Use(middleware.EnforceRoutes(rbacCli))
 
-    	api := h.Group("/api/v1")
+        api := h.Group("/api/v1")
 
-    	// ── Signature verification (optional, for open-api callers) ─────────
-    	if cfg.Auth.Signature.Enabled {{ "{" }}
-    		sigResolver := middleware.StaticSecretResolver{{ "{" }}SecretValue: cfg.Auth.Signature.StaticSecret{{ "}" }}
-    		api.Use(middleware.SignatureAuth(cfg.Auth.Signature, sigResolver))
-    	{{ "}" }}
+        // ── Signature verification (optional, for open-api callers) ─────────
+        if cfg.Auth.Signature.Enabled {{ "{" }}
+            sigResolver := middleware.StaticSecretResolver{{ "{" }}SecretValue: cfg.Auth.Signature.StaticSecret{{ "}" }}
+            api.Use(middleware.SignatureAuth(cfg.Auth.Signature, sigResolver))
+        {{ "}" }}
 
-    	// Public routes (no JWT)
-    	auth := api.Group("/auth")
-    	// ── Idempotency for public auth routes (ak:/ip: scope only — no Uid
-    	// pre-authentication; see issue #73) ─────────────────────────────────
-    	if cfg.Idempotency.Enabled {{ "{" }}
-    		auth.Use(middleware.Idempotency(cfg.Idempotency))
-    	{{ "}" }}
-    	auth.POST("/login", authHandler.Login)
-    	auth.POST("/refresh", authHandler.Refresh)
+        // Public routes (no JWT)
+        auth := api.Group("/auth")
+        // ── Idempotency for public auth routes (ak:/ip: scope only — no Uid
+        // pre-authentication; see issue #73) ─────────────────────────────────
+        if cfg.Idempotency.Enabled {{ "{" }}
+            auth.Use(middleware.Idempotency(cfg.Idempotency))
+        {{ "}" }}
+        auth.POST("/login", authHandler.Login)
+        auth.POST("/refresh", authHandler.Refresh)
         auth.POST("/dingtalk/login", dingHandler.Login)
         auth.POST("/dingtalk/apply", dingHandler.Apply)
 
-    	// Protected routes (JWT required)
-    	protected := api.Group("")
-    	// ── Idempotency for protected routes — registered after JWTAuth, so
-    	// Claims.Uid is available and idempotencyKey()'s ak_user_uuid:/
-    	// user_uuid: branches are reachable (see issue #73) ─────────────────
-    	if cfg.Idempotency.Enabled {{ "{" }}
-    		protected.Use(middleware.Idempotency(cfg.Idempotency))
-    	{{ "}" }}
+        // Protected routes (JWT required)
+        protected := api.Group("")
+        // ── Idempotency for protected routes — registered after JWTAuth, so
+        // Claims.Uid is available and idempotencyKey()'s ak_user_uuid:/
+        // user_uuid: branches are reachable (see issue #73) ─────────────────
+        if cfg.Idempotency.Enabled {{ "{" }}
+            protected.Use(middleware.Idempotency(cfg.Idempotency))
+        {{ "}" }}
 
+        authConfigs := protected.Group("/auth-configs")
+        authConfigs.GET("", authConfigHandler.List)
+        authConfigs.POST("", authConfigHandler.Save)
+        authConfigs.POST("/:id/test", authConfigHandler.Test)
 
-    	// Auth (logout requires auth)
-    	protected.POST("/auth/logout", authHandler.Logout)
+        // Auth (logout requires auth)
+        protected.POST("/auth/logout", authHandler.Logout)
 
-    	// Current user
-    	me := protected.Group("/me")
-    	me.GET("/menus", currentUserHandler.GetMenus)
-    	me.GET("/perms", currentUserHandler.GetPerms)
+        // Current user
+        me := protected.Group("/me")
+        me.GET("/menus", currentUserHandler.GetMenus)
+        me.GET("/perms", currentUserHandler.GetPerms)
 
-    	// RBAC management
-            dingApplications := protected.Group("/rbac/dingtalk-applications")
+        // RBAC management
+        dingApplications := protected.Group("/rbac/dingtalk-applications")
         dingApplications.GET("", dingHandler.List)
         dingApplications.POST("/:id/approve", dingHandler.Approve)
         dingApplications.POST("/:id/reject", dingHandler.Reject)
@@ -89,14 +94,14 @@ body: |
         users.DELETE("/:id", userHandler.Delete)
         users.POST("/:id/roles", userHandler.AssignRoles)
 
-    	roles := protected.Group("/roles")
+        roles := protected.Group("/roles")
         roles.GET("", roleHandler.List)
         roles.POST("", roleHandler.Create)
         roles.PUT("/:id", roleHandler.Update)
         roles.DELETE("/:id", roleHandler.Delete)
         roles.POST("/:id/permissions", roleHandler.GrantPermissions)
 
-    	perms := protected.Group("/permissions")
+        perms := protected.Group("/permissions")
         perms.GET("", permHandler.List)
         perms.GET("/:id", permHandler.Get)
         perms.GET("/tree", permHandler.Tree)
@@ -104,20 +109,20 @@ body: |
         perms.PUT("/:id", permHandler.Update)
         perms.DELETE("/:id", permHandler.Delete)
 
-    	menus := protected.Group("/menus")
+        menus := protected.Group("/menus")
         menus.GET("", menuHandler.List)
 
-    	// Rate limit rules management
-    	rules := protected.Group("/rate-limit-rules")
+        // Rate limit rules management
+        rules := protected.Group("/rate-limit-rules")
         rules.GET("", rateLimitHandler.List)
         rules.POST("", rateLimitHandler.Create)
         rules.PUT("/:id", rateLimitHandler.Update)
         rules.DELETE("/:id", rateLimitHandler.Delete)
 
-    	// Terminal (end-user) management — distinct from /users (RBAC admin
-    	// accounts above): these call user-kitex, not rbacservice. See this
-    	// plan's design doc for the naming-collision rationale.
-    	terminalUsers := protected.Group("/terminal-users")
+        // Terminal (end-user) management — distinct from /users (RBAC admin
+        // accounts above): these call user-kitex, not rbacservice. See this
+        // plan's design doc for the naming-collision rationale.
+        terminalUsers := protected.Group("/terminal-users")
         terminalUsers.GET("", terminalUserHandler.List)
         terminalUsers.GET("/:uid", terminalUserHandler.Get)
         terminalUsers.POST("/:uid/ban", terminalUserHandler.Ban)

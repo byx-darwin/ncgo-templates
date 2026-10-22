@@ -23,7 +23,7 @@ ncgo new my-svc --module github.com/acme/my-svc --kind kitex --template base-kit
 | `base-hertz` | 标准 Hertz HTTP 服务（DDD 分层 + JWT + 签名 + 幂等性） | ✅ `ncgo new --kind hertz --template base-hertz` |
 | `ratelimit-hertz` | 带限流执行的 Hertz HTTP 服务（两阶段：认证前 + 认证后） | ✅ `ncgo new --kind hertz --template ratelimit-hertz` |
 | `admin-bff-hertz` | 带 RBAC 授权与终端用户管理的 Admin BFF（JWT + Casbin + gRPC 调用权限服务 + user-kitex） | ✅ `ncgo new --kind hertz --template admin-bff-hertz` |
-| `user-bff-hertz` | 终端用户 HTTP 网关（本地登录 + OAuth 第三方登录，一次性 code 换 JWT，账号绑定解绑） | ✅ `ncgo new --kind hertz --template user-bff-hertz` |
+| `user-bff-hertz` | 终端用户 HTTP 网关（手机/邮箱验证码及密码登录、动态第三方应用、设备会话和身份管理） | ✅ `ncgo new --kind hertz --template user-bff-hertz` |
 
 ### RPC 服务 (Kitex)
 
@@ -31,7 +31,7 @@ ncgo new my-svc --module github.com/acme/my-svc --kind kitex --template base-kit
 |---|---|---|
 | `base-kitex` | 标准 Kitex RPC 服务（分层布局 + 健康检查） | ✅ `ncgo new --kind kitex --template base-kitex` |
 | `rbac-kitex` | RBAC + 权限认证服务（DDD、Casbin sqlc 适配器、JWT 登录、审计） | ✅ `ncgo new --kind kitex --template rbac-kitex` |
-| `user-kitex` | 终端用户账号服务（本地密码 + 微信/支付宝/GitHub/Google/OIDC 第三方登录，管理端 RPC） | ✅ `ncgo new --kind kitex --template user-kitex` |
+| `user-kitex` | 终端用户账号服务（手机/邮箱验证码及密码、动态多应用第三方登录、持久化会话和后台渠道配置） | ✅ `ncgo new --kind kitex --template user-kitex` |
 | `admin-services-kitex` | 合并的 Admin 权限服务（RBAC + 规则中心合二为一） | ✅ `ncgo new --kind kitex --template admin-services-kitex` |
 | `rule-center` | 限流规则中心服务（独立版） | ⚠️ 资源就绪；建议使用合并版 `admin-services-kitex` |
 

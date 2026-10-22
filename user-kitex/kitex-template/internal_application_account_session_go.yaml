@@ -1,0 +1,237 @@
+# ncgo exported template — internal/application/account/session.go
+path: internal/application/account/session.go
+update_behavior:
+    type: cover
+body: |
+    package account
+
+    import (
+        "context"
+        "errors"
+        "strings"
+
+        "github.com/golang-jwt/jwt/v5"
+        "github.com/google/uuid"
+        "github.com/jackc/pgx/v5"
+    )
+
+    type accessClaims struct {{ "{" }}
+        UID      string   `json:"uid"`
+        SID      string   `json:"sid"`
+        ClientID string   `json:"client_id"`
+        Roles    []string `json:"roles"`
+        jwt.RegisteredClaims
+    {{ "}" }}
+    type userRow struct {{ "{" }}
+        ID, Password, Nickname, Avatar, Phone, Email string
+        Status                                       int
+    {{ "}" }}
+
+    func readUser(row pgx.Row) (userRow, error) {{ "{" }}
+        var u userRow
+        err := row.Scan(&u.ID, &u.Password, &u.Nickname, &u.Avatar, &u.Phone, &u.Email, &u.Status)
+        return u, err
+    {{ "}" }}
+
+    const userColumns = "id::text,coalesce(password_hash,''),coalesce(nickname,''),coalesce(avatar,''),coalesce(phone,''),coalesce(email,''),status"
+
+    func lockUser(ctx context.Context, tx pgx.Tx, id string) (userRow, error) {{ "{" }}
+        u, err := readUser(tx.QueryRow(ctx, "SELECT "+userColumns+" FROM users WHERE id=$1 FOR UPDATE", id))
+        if errors.Is(err, pgx.ErrNoRows) {{ "{" }}
+            return u, ErrInvalid
+        {{ "}" }}
+        return u, err
+    {{ "}" }}
+    func (s *Service) sign(uid, sid, client string) (string, error) {{ "{" }}
+        now := s.now()
+        claims := accessClaims{{ "{" }}UID: uid, SID: sid, ClientID: client, Roles: []string{{ "{" }}"user"{{ "}" }}, RegisteredClaims: jwt.RegisteredClaims{{ "{" }}Issuer: "application-account:" + s.environment, Subject: uid, Audience: jwt.ClaimStrings{{ "{" }}client{{ "}" }}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(s.policy.AccessTTL)){{ "}" }}{{ "}" }}
+        return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.key)
+    {{ "}" }}
+    func (s *Service) claims(token, client string) (*accessClaims, error) {{ "{" }}
+        if !validClient(client) {{ "{" }}
+            return nil, ErrInput
+        {{ "}" }}
+        c := new(accessClaims)
+        t, e := jwt.ParseWithClaims(token, c, func(t *jwt.Token) (any, error) {{ "{" }} return s.key, nil {{ "}" }}, jwt.WithValidMethods([]string{{ "{" }}"HS256"{{ "}" }}), jwt.WithExpirationRequired(), jwt.WithIssuer("application-account:"+s.environment), jwt.WithAudience(client), jwt.WithTimeFunc(s.now))
+        if e != nil || !t.Valid || c.UID == "" || c.SID == "" || c.ClientID != client {{ "{" }}
+            return nil, ErrInvalid
+        {{ "}" }}
+        if _, e = uuid.Parse(c.UID); e != nil {{ "{" }}
+            return nil, ErrInvalid
+        {{ "}" }}
+        if _, e = uuid.Parse(c.SID); e != nil {{ "{" }}
+            return nil, ErrInvalid
+        {{ "}" }}
+        return c, nil
+    {{ "}" }}
+    func (s *Service) newSession(ctx context.Context, tx pgx.Tx, uid, client string, isNew bool) (Tokens, error) {{ "{" }}
+        sid := uuid.NewString()
+        secret, e := randomToken()
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        refresh := sid + "." + secret
+        if _, e = tx.Exec(ctx, "INSERT INTO account_sessions(id,user_id,client_id,environment,refresh_hash,expires_at) VALUES($1,$2,$3,$4,$5,$6)", sid, uid, client, s.environment, hash(refresh), s.now().Add(s.policy.SessionTTL)); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        access, e := s.sign(uid, sid, client)
+        return Tokens{{ "{" }}UID: uid, AccessToken: access, RefreshToken: refresh, ExpiresIn: int64(s.policy.AccessTTL.Seconds()), IsNewUser: isNew{{ "}" }}, e
+    {{ "}" }}
+    func (s *Service) Verify(ctx context.Context, token, client string) (Session, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return Session{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        c, e := s.claims(token, client)
+        if e != nil {{ "{" }}
+            return Session{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        var out Session
+        e = s.pool.QueryRow(ctx, `UPDATE account_sessions AS s SET expires_at=$1,last_seen_at=$2 FROM users u WHERE s.id=$3 AND s.user_id=$4 AND s.client_id=$5 AND s.environment=$6 AND s.expires_at>$2 AND u.id=s.user_id AND u.status=1 RETURNING s.user_id::text,s.id::text,s.client_id`, s.now().Add(s.policy.SessionTTL), s.now(), c.SID, c.UID, client, s.environment).Scan(&out.UID, &out.ID, &out.ClientID)
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return out, ErrInvalid
+        {{ "}" }}
+        return out, e
+    {{ "}" }}
+    func (s *Service) Refresh(ctx context.Context, refresh, client string) (Tokens, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if !validClient(client) || len(refresh) > 200 {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        parts := strings.Split(refresh, ".")
+        if len(parts) != 2 {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        if _, e := uuid.Parse(parts[0]); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        var uid string
+        if e := s.pool.QueryRow(ctx, "SELECT user_id::text FROM account_sessions WHERE id=$1 AND environment=$2", parts[0], s.environment).Scan(&uid); e != nil {{ "{" }}
+            if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+                return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+            {{ "}" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        u, e := lockUser(ctx, tx, uid)
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if u.Status != 1 {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        var sid string
+        e = tx.QueryRow(ctx, "SELECT id::text FROM account_sessions WHERE id=$1 AND refresh_hash=$2 AND client_id=$3 AND environment=$4 AND expires_at>$5 FOR UPDATE", parts[0], hash(refresh), client, s.environment, s.now()).Scan(&sid)
+        if errors.Is(e, pgx.ErrNoRows) {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, ErrInvalid
+        {{ "}" }}
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        secret, e := randomToken()
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        next := sid + "." + secret
+        if _, e = tx.Exec(ctx, "UPDATE account_sessions SET refresh_hash=$1,expires_at=$2,last_seen_at=$3 WHERE id=$4", hash(next), s.now().Add(s.policy.SessionTTL), s.now(), sid); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        access, e := s.sign(uid, sid, client)
+        if e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        if e = tx.Commit(ctx); e != nil {{ "{" }}
+            return Tokens{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        return Tokens{{ "{" }}UID: uid, AccessToken: access, RefreshToken: next, ExpiresIn: int64(s.policy.AccessTTL.Seconds()){{ "}" }}, nil
+    {{ "}" }}
+    func (s *Service) Logout(ctx context.Context, token, client string) error {{ "{" }}
+        session, e := s.Verify(ctx, token, client)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        _, e = s.pool.Exec(ctx, "DELETE FROM account_sessions WHERE id=$1 AND user_id=$2", session.ID, session.UID)
+        return e
+    {{ "}" }}
+
+    // Revoke participates in legacy administrator password reset/force-logout wiring.
+    func (s *Service) Revoke(ctx context.Context, uid string) error {{ "{" }}
+        if s.pool == nil {{ "{" }}
+            return errors.New("account: database unavailable")
+        {{ "}" }}
+        tx, e := s.pool.Begin(ctx)
+        if e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        defer tx.Rollback(ctx)
+        if _, e = lockUser(ctx, tx, uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "DELETE FROM account_sessions WHERE user_id=$1", uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        if _, e = tx.Exec(ctx, "DELETE FROM account_grants WHERE user_id=$1", uid); e != nil {{ "{" }}
+            return e
+        {{ "}" }}
+        return tx.Commit(ctx)
+    {{ "}" }}
+    func (s *Service) Methods(ctx context.Context, client string) (any, error) {{ "{" }}
+        if e := s.ready(); e != nil {{ "{" }}
+            return nil, e
+        {{ "}" }}
+        if !validClient(client) {{ "{" }}
+            return nil, ErrInput
+        {{ "}" }}
+        m, e := s.config.Methods(ctx, client)
+        return map[string]any{{ "{" }}"methods": m{{ "}" }}, e
+    {{ "}" }}
+    func (s *Service) Profile(ctx context.Context, token, client string) (Profile, error) {{ "{" }}
+        session, e := s.Verify(ctx, token, client)
+        if e != nil {{ "{" }}
+            return Profile{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        return s.profile(ctx, session.UID)
+    {{ "}" }}
+    func (s *Service) profile(ctx context.Context, uid string) (Profile, error) {{ "{" }}
+        u, e := readUser(s.pool.QueryRow(ctx, "SELECT "+userColumns+" FROM users WHERE id=$1", uid))
+        if e != nil {{ "{" }}
+            return Profile{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        p := Profile{{ "{" }}UID: u.ID, Nickname: u.Nickname, Avatar: u.Avatar, Phone: mask("phone", u.Phone), Email: mask("email", u.Email), HasPassword: u.Password != "", Identities: []Identity{{ "{" }}{{ "}" }}{{ "}" }}
+        rows, e := s.pool.Query(ctx, "SELECT i.config_id,coalesce(c.provider,''),coalesce(c.name,i.config_id) FROM account_identities i LEFT JOIN account_login_configs c ON c.id=i.config_id AND c.environment=$2 WHERE i.user_id=$1", uid, s.environment)
+        if e != nil {{ "{" }}
+            return Profile{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        defer rows.Close()
+        for rows.Next() {{ "{" }}
+            var id Identity
+            if e = rows.Scan(&id.ConfigID, &id.Provider, &id.Name); e != nil {{ "{" }}
+                return Profile{{ "{" }}{{ "}" }}, e
+            {{ "}" }}
+            p.Identities = append(p.Identities, id)
+        {{ "}" }}
+        return p, rows.Err()
+    {{ "}" }}
+    func (s *Service) UpdateProfile(ctx context.Context, token, client, nickname, avatar string) (Profile, error) {{ "{" }}
+        session, e := s.Verify(ctx, token, client)
+        if e != nil {{ "{" }}
+            return Profile{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        nickname = strings.TrimSpace(nickname)
+        if nickname == "" || len([]rune(nickname)) > 64 || len(avatar) > 2048 || strings.ContainsAny(nickname, "\r\n\x00") || (avatar != "" && !strings.HasPrefix(avatar, "https://")) {{ "{" }}
+            return Profile{{ "{" }}{{ "}" }}, ErrInput
+        {{ "}" }}
+        if _, e = s.pool.Exec(ctx, "UPDATE users SET nickname=$1,avatar=$2,updated_at=now() WHERE id=$3", nickname, avatar, session.UID); e != nil {{ "{" }}
+            return Profile{{ "{" }}{{ "}" }}, e
+        {{ "}" }}
+        return s.profile(ctx, session.UID)
+    {{ "}" }}
+    func audit(ctx context.Context, tx pgx.Tx, uid, action, target string) error {{ "{" }}
+        _, e := tx.Exec(ctx, "INSERT INTO audit_log(actor_uid,action,target) VALUES($1,$2,$3)", uid, action, target)
+        return e
+    {{ "}" }}

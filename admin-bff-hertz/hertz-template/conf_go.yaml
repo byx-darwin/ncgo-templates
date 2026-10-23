@@ -390,6 +390,7 @@ body: |-
 
   type GRPCConfig struct {
       Authority    ClientConfig `yaml:"authority"`
+      RuleCenter   ClientConfig `yaml:"rule_center"`
       TerminalUser ClientConfig `yaml:"terminal_user"`
   }
 
@@ -507,6 +508,10 @@ body: |-
               Authority: ClientConfig{
                   ServiceName: "authority",
                   HostPorts:   []string{"127.0.0.1:8888"},
+              },
+              RuleCenter: ClientConfig{
+                  ServiceName: "rulecenter",
+                  HostPorts:   []string{"127.0.0.1:8889"},
               },
               TerminalUser: ClientConfig{
                   ServiceName: "userservice",
@@ -746,6 +751,15 @@ body: |-
       if c == nil {
           return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("config is nil")
       }
+      // Older configuration files omit grpc.rule_center. Preserve explicit
+      // overrides and supply the standalone rule-center preset's defaults.
+      ruleCenterDefaults := Default().GRPC.RuleCenter
+      if c.GRPC.RuleCenter.ServiceName == "" {
+          c.GRPC.RuleCenter.ServiceName = ruleCenterDefaults.ServiceName
+      }
+      if len(c.GRPC.RuleCenter.HostPorts) == 0 {
+          c.GRPC.RuleCenter.HostPorts = ruleCenterDefaults.HostPorts
+      }
       c.applyRedisFallbacks()
       if c.Server.Registry.Name == "" {
           c.Server.Registry.Name = c.Env
@@ -834,13 +848,16 @@ body: |-
           if c.RateLimit.Backend == "memory" && c.RateLimit.Memory.MaxEntries < 0 {
               return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("rate_limit.memory.max_entries must not be negative")
           }
-          if !c.RateLimit.PreAuth.Enabled && !c.RateLimit.PostAuth.Enabled {
+          if !c.RateLimit.PreAuth.Enabled && !c.RateLimit.PostAuth.Enabled && !c.RateLimit.PasswordChange.Enabled {
               return goerror.In("config").Code(frameworkerror.CodeConfigInvalid).Public("config_invalid").New("at least one rate_limit phase must be enabled")
           }
           if err := validateRateLimitPhase("rate_limit.pre_auth", c.RateLimit.PreAuth); err != nil {
               return err
           }
           if err := validateRateLimitPhase("rate_limit.post_auth", c.RateLimit.PostAuth); err != nil {
+              return err
+          }
+          if err := validateRateLimitPhase("rate_limit.password_change", c.RateLimit.PasswordChange); err != nil {
               return err
           }
       }

@@ -1,0 +1,111 @@
+path: internal/repository/rulecenter/resolution_test.go
+update_behavior:
+  type: skip
+body: |-
+  package rulecenterrepo
+
+  import (
+      "context"
+      "os"
+      "strings"
+      "testing"
+      "time"
+
+      "github.com/jackc/pgx/v5/pgxpool"
+      "{{.Module}}/internal/db/gen"
+      usecase "{{.Module}}/internal/usecase/rulecenter"
+  )
+
+  // POSTGRES_DSN enables SQL -> repository -> usecase coverage. A temporary
+  // table from the shipped schema isolates this test from stored rules.
+  func TestGetRulePostgresMatchingAndScope(t *testing.T) {{ "{" }}
+      dsn := os.Getenv("POSTGRES_DSN")
+      if dsn == "" {{ "{" }} t.Skip("POSTGRES_DSN not set") {{ "}" }}
+      ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+      defer cancel()
+      pool, err := pgxpool.New(ctx, dsn)
+      if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+      defer pool.Close()
+      tx, err := pool.Begin(ctx)
+      if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+      defer tx.Rollback(context.Background())
+      schema, err := os.ReadFile("../../db/schema/000001_rate_limit_rules.sql")
+      if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+      temporarySchema := strings.Replace(string(schema), "CREATE TABLE rate_limit_rules", "CREATE TEMP TABLE rate_limit_rules", 1)
+      if _, err := tx.Exec(ctx, temporarySchema); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+      uc := usecase.New(New(gen.New(tx), pool))
+      appKey, otherApp := "tenant-a", "tenant-b"
+      // An exact rule may retain unrelated pattern text from an earlier edit.
+      // That text must never make the rule match a different request path.
+      for _, tc := range []struct {{ "{" }} name, kind, path, pattern, hit, miss string {{ "}" }}{{ "{" }}
+          {{ "{" }}"exact", "exact", "/orders/42", "/orders/43", "/orders/42", "/orders/43"{{ "}" }},
+          {{ "{" }}"prefix", "prefix", "*", "/orders/", "/orders/42", "/reports/42"{{ "}" }},
+          {{ "{" }}"glob", "glob", "*", "/orders/*/items", "/orders/42/items", "/orders/42/detail"{{ "}" }},
+          {{ "{" }}"regex", "regex", "*", "^/orders/[0-9]+$", "/orders/42", "/orders/abc"{{ "}" }},
+      {{ "}" }} {{ "{" }}
+          t.Run(tc.name, func(t *testing.T) {{ "{" }}
+              service := "matching-"+tc.name
+              var scopedID int64
+              err := tx.QueryRow(ctx, `INSERT INTO rate_limit_rules
+                  (service, phase, method, match_kind, path, path_pattern, app_key, max_requests)
+                  VALUES ($1, 'post_auth', 'GET', $2, $3, $4, $5, 5) RETURNING id`,
+                  service, tc.kind, tc.path, tc.pattern, appKey).Scan(&scopedID)
+              if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+              got, found, err := uc.GetRule(ctx, service, "post_auth", "GET", tc.hit, &appKey)
+              if err != nil || !found || got == nil || got.Id != scopedID {{ "{" }}
+                  t.Fatalf("matching scoped rule = %+v, found=%v, err=%v; want rule %d", got, found, err, scopedID)
+              {{ "}" }}
+              for _, miss := range []struct {{ "{" }} name, service, phase, method, path string; app *string {{ "}" }}{{ "{" }}
+                  {{ "{" }}"path", service, "post_auth", "GET", tc.miss, &appKey{{ "}" }},
+                  {{ "{" }}"service", "other-service", "post_auth", "GET", tc.hit, &appKey{{ "}" }},
+                  {{ "{" }}"phase", service, "pre_auth", "GET", tc.hit, &appKey{{ "}" }},
+                  {{ "{" }}"method", service, "post_auth", "POST", tc.hit, &appKey{{ "}" }},
+                  {{ "{" }}"other app", service, "post_auth", "GET", tc.hit, &otherApp{{ "}" }},
+                  {{ "{" }}"absent app", service, "post_auth", "GET", tc.hit, nil{{ "}" }},
+              {{ "}" }} {{ "{" }}
+                  t.Run(miss.name, func(t *testing.T) {{ "{" }}
+                      got, found, err := uc.GetRule(ctx, miss.service, miss.phase, miss.method, miss.path, miss.app)
+                      if err != nil || found || got != nil {{ "{" }}
+                          t.Fatalf("nonmatching scope resolved %+v, found=%v, err=%v", got, found, err)
+                      {{ "}" }}
+                  {{ "}" }})
+              {{ "}" }}
+              if _, err := tx.Exec(ctx, "UPDATE rate_limit_rules SET enabled = false WHERE id = $1", scopedID); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+              if got, found, err := uc.GetRule(ctx, service, "post_auth", "GET", tc.hit, &appKey); err != nil || found || got != nil {{ "{" }}
+                  t.Fatalf("disabled rule resolved %+v, found=%v, err=%v", got, found, err)
+              {{ "}" }}
+              if _, err := tx.Exec(ctx, "UPDATE rate_limit_rules SET enabled = true WHERE id = $1", scopedID); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+              var fallbackID int64
+              err = tx.QueryRow(ctx, `INSERT INTO rate_limit_rules
+                  (service, phase, method, match_kind, path, path_pattern, app_key, max_requests)
+                  VALUES ($1, 'post_auth', 'GET', $2, $3, $4, NULL, 77) RETURNING id`,
+                  service, tc.kind, tc.path, tc.pattern).Scan(&fallbackID)
+              if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+              for _, key := range []*string{{ "{" }}nil, &otherApp, &appKey{{ "}" }} {{ "{" }}
+                  got, found, err := uc.GetRule(ctx, service, "post_auth", "GET", tc.hit, key)
+                  wantID := fallbackID
+                  if key == &appKey {{ "{" }} wantID = scopedID {{ "}" }}
+                  if err != nil || !found || got == nil || got.Id != wantID {{ "{" }}
+                      t.Fatalf("app-key fallback resolved %+v, found=%v, err=%v; want rule %d", got, found, err, wantID)
+                  {{ "}" }}
+              {{ "}" }}
+              for _, miss := range []struct {{ "{" }} name string; app *string {{ "}" }}{{ "{" }}
+                  {{ "{" }}name: "fallback miss without app"{{ "}" }},
+                  {{ "{" }}name: "fallback miss other app", app: &otherApp{{ "}" }},
+              {{ "}" }} {{ "{" }}
+                  t.Run(miss.name, func(t *testing.T) {{ "{" }}
+                      got, found, err := uc.GetRule(ctx, service, "post_auth", "GET", tc.miss, miss.app)
+                      if err != nil || found || got != nil {{ "{" }}
+                          t.Fatalf("nonmatching fallback path resolved %+v, found=%v, err=%v", got, found, err)
+                      {{ "}" }}
+                  {{ "}" }})
+              {{ "}" }}
+          {{ "}" }})
+      {{ "}" }}
+      // The UI's default wildcard includes nested paths.
+      if _, err := tx.Exec(ctx, `INSERT INTO rate_limit_rules (service, phase, method, match_kind, path_pattern)
+          VALUES ('default-wildcard', 'post_auth', 'GET', 'glob', '*')`); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+      if got, found, err := uc.GetRule(ctx, "default-wildcard", "post_auth", "GET", "/orders/42/items", nil); err != nil || !found || got == nil {{ "{" }}
+          t.Fatalf("default wildcard resolved %+v, found=%v, err=%v", got, found, err)
+      {{ "}" }}
+  {{ "}" }}

@@ -67,3 +67,34 @@ TLS verification remains enabled and the system trust store is unchanged.
 That test CA bootstrap is not exported into product templates. SMS, WeChat,
 Alipay, GitHub and Google require real deployment credentials and were not tested
 against live provider accounts. Services remain running for manual inspection.
+
+## Application-user, rate-limit and permission-page acceptance
+
+The standalone frontend now has application-user list/detail, namespaced identity
+unbind, ban/unban, password reset and filtered audit views. Every action uses its
+own permission. The permission page reads `/api/v1/permissions/tree` once, keeps
+ancestors when filtering and has no pagination. A local 170-node tree, including
+110 children under one parent, was verified in the browser, together with real
+permission create/edit/delete.
+
+The new rate-limit page supports complete scope, fixed-window/token-bucket
+configuration, create/edit/delete and reload. Match identity is immutable on edit;
+int64 IDs are strings throughout HTTP/JavaScript. Sliding-window creation is
+disabled because the current enforcement runtime does not implement it.
+
+A separately generated rule-center service uses its own migrated `rules_local`
+database (v1) and RPC port 18889. Configure `grpc.rule_center` independently of
+`grpc.authority`, select `rate_limit.source.type: rule_center`, and enable the
+required phase. The local password-change phase uses a one-second rule cache.
+Browser-created rules produced a real successful password-reset request followed
+by HTTP 429; raising the limit in the editor restored HTTP 200. Rule deletion was
+also verified. Prefix/glob/regex resolution and stale exact-pattern rejection
+passed PostgreSQL integration tests in transaction-local temporary tables.
+
+The browser ban, password-reset and identity-unbind flows were followed by actual
+application access/refresh checks: old sessions were rejected, unban did not
+revive them, and the valid new password could log in. Audit filtering returned the
+matching actor/target operation. Frontend Biome, TypeScript, 137 tests and production
+build passed. Fresh generated BFF/rule-center full tests, vet, targeted race tests
+and independent final review passed. Temporary acceptance permissions and rules
+were removed after verification. Services remain running for manual inspection.

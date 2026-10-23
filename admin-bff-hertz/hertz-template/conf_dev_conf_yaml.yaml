@@ -157,6 +157,10 @@ body: |
         service_name: "authority"
         host_ports:
           - "127.0.0.1:8888"
+      rule_center:
+        service_name: "rulecenter"
+        host_ports:
+          - "127.0.0.1:8889"
       terminal_user:
         service_name: "userservice"
         host_ports:

@@ -1,0 +1,149 @@
+path: internal/base/server/rule_center_test.go
+update_behavior:
+    type: cover
+body: |
+    package server
+
+    import (
+        "context"
+        "errors"
+        "reflect"
+        "net"
+        "testing"
+        "time"
+
+        "{{.Module}}/internal/base/conf"
+        "{{.Module}}/internal/pkg/ratelimit"
+        gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
+        "github.com/cloudwego/kitex/client/callopt"
+        api "{{.Module}}/kitex_gen/api/ratelimit/v1"
+        "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+        "github.com/cloudwego/kitex/pkg/transmeta"
+        kitexserver "github.com/cloudwego/kitex/server"
+    )
+
+    type wireRuleCenter struct {{ "{" }}
+        api.RuleService
+        total int32
+    {{ "}" }}
+
+    func (s wireRuleCenter) ListRules(context.Context, *api.ListRulesReq) (*api.ListRulesResp, error) {{ "{" }}
+        return &api.ListRulesResp{{ "{" }}Total: s.total{{ "}" }}, nil
+    {{ "}" }}
+
+    func startWireRuleCenter(t *testing.T, total int32) string {{ "{" }}
+        t.Helper()
+        ln, err := net.Listen("tcp", "127.0.0.1:0")
+        if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        srv := ruleservice.NewServer(&wireRuleCenter{{ "{" }}total: total{{ "}" }}, kitexserver.WithListener(ln), kitexserver.WithMetaHandler(transmeta.ServerTTHeaderHandler))
+        done := make(chan error, 1)
+        go func() {{ "{" }} done <- srv.Run() {{ "}" }}()
+        t.Cleanup(func() {{ "{" }}
+            if err := srv.Stop(); err != nil {{ "{" }} t.Error(err) {{ "}" }}
+            select {{ "{" }}
+            case err := <-done:
+                if err != nil {{ "{" }} t.Error(err) {{ "}" }}
+            case <-time.After(3*time.Second):
+                t.Error("rule-center RPC server did not stop")
+            {{ "}" }}
+        {{ "}" }})
+        return ln.Addr().String()
+    {{ "}" }}
+
+    func TestRuleCenterClientUsesDedicatedEndpoint(t *testing.T) {{ "{" }}
+        // Both endpoints speak RuleService but return distinct data, so routing
+        // rule calls to authority reproduces the bug as an observable wrong result.
+        authorityAddress := startWireRuleCenter(t, 99)
+        ruleAddress := startWireRuleCenter(t, 23)
+        cfg := conf.Default()
+        cfg.GRPC.Authority.HostPorts = []string{{ "{" }}authorityAddress{{ "}" }}
+        cfg.GRPC.RuleCenter.HostPorts = []string{{ "{" }}ruleAddress{{ "}" }}
+        cfg.GRPC.RuleCenter.ServiceName = "custom-rule-center"
+        cli, err := newRuleCenterClient(cfg)
+        if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+        defer cancel()
+        got, err := cli.ListRules(ctx, &api.ListRulesReq{{ "{" }}Page: 1, PageSize: 20{{ "}" }})
+        if err != nil {{ "{" }} t.Fatalf("ListRules: %v", err) {{ "}" }}
+        if got.Total != 23 {{ "{" }}
+            t.Fatalf("ListRules total = %d, want 23 from rule center (authority returns 99)", got.Total)
+        {{ "}" }}
+    {{ "}" }}
+
+
+    type resolveRuleClient struct {{ "{" }}
+        ruleservice.Client
+        response *api.GetRuleResp
+        err error
+        lookup *api.GetRuleReq
+    {{ "}" }}
+
+    func (s *resolveRuleClient) GetRule(_ context.Context, req *api.GetRuleReq, _ ...callopt.Option) (*api.GetRuleResp, error) {{ "{" }}
+        s.lookup = req
+        return s.response, s.err
+    {{ "}" }}
+
+    // Keep the old adapter callable to make its failure explicit instead of
+    // panicking through the embedded interface when it tries to resolve a list.
+    func (s *resolveRuleClient) ListRules(context.Context, *api.ListRulesReq, ...callopt.Option) (*api.ListRulesResp, error) {{ "{" }}
+        if s.err != nil {{ "{" }} return nil, s.err {{ "}" }}
+        if s.response == nil || s.response.Rule == nil {{ "{" }} return &api.ListRulesResp{{ "{" }}{{ "}" }}, nil {{ "}" }}
+        return &api.ListRulesResp{{ "{" }}Rules: []*api.RateLimitRule{{ "{" }}s.response.Rule{{ "}" }}{{ "}" }}, nil
+    {{ "}" }}
+
+    func TestRateLimitResolverDelegatesMatchingAndPreservesRule(t *testing.T) {{ "{" }}
+        for _, tc := range []struct {{ "{" }} name, matchKind, pattern, appKey string {{ "}" }}{{ "{" }}
+            {{ "{" }}name: "wildcard", matchKind: "glob", pattern: "*", appKey: "mobile-app"{{ "}" }},
+            {{ "{" }}name: "prefix", matchKind: "prefix", pattern: "/api/v1/", appKey: "mobile-app"{{ "}" }},
+            {{ "{" }}name: "regex", matchKind: "regex", pattern: "^/api/v1/terminal-users/[0-9]+$", appKey: "mobile-app"{{ "}" }},
+            {{ "{" }}name: "exact without app", matchKind: "exact", pattern: "/api/v1/terminal-users/42"{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            t.Run(tc.name, func(t *testing.T) {{ "{" }}
+                cli := &resolveRuleClient{{ "{" }}response: &api.GetRuleResp{{ "{" }}Found: true, Rule: &api.RateLimitRule{{ "{" }}
+                    Enabled: true, MatchKind: tc.matchKind, PathPattern: tc.pattern,
+                    KeyBy: []string{{ "{" }}"app_key", "user_uuid", "path"{{ "}" }}, Strategy: "token_bucket",
+                    WindowSeconds: 60, MaxRequests: 13, RequestsPerSecond: 2.5, Burst: 7, ClientTtlSeconds: 90,
+                {{ "}" }}{{ "}" }}{{ "}" }}
+                got, found, err := ratelimitResolveFunc(cli)(context.Background(), ratelimit.Lookup{{ "{" }}
+                    Service: "admin-bff", Phase: "post_auth", Method: "GET", Path: "/api/v1/terminal-users/42", AppKey: tc.appKey,
+                {{ "}" }})
+                if cli.lookup == nil {{ "{" }} t.Fatal("resolution must use GetRule so rule center owns scoped pattern matching") {{ "}" }}
+                req := cli.lookup
+                if req.Service != "admin-bff" || req.Phase != "post_auth" || req.Method != "GET" || req.Path != "/api/v1/terminal-users/42" {{ "{" }}
+                    t.Fatalf("GetRule lookup lost request scope: %+v", req)
+                {{ "}" }}
+                if tc.appKey == "" {{ "{" }}
+                    if req.AppKey != nil {{ "{" }} t.Fatalf("empty app key must be absent, got %q", *req.AppKey) {{ "}" }}
+                {{ "}" }} else if req.AppKey == nil || *req.AppKey != "mobile-app" {{ "{" }}
+                    t.Fatalf("GetRule app key = %v, want mobile-app", req.AppKey)
+                {{ "}" }}
+                want := &conf.RateLimitRuleConfig{{ "{" }}
+                    Enabled: true, KeyBy: []string{{ "{" }}"app_key", "user_uuid", "path"{{ "}" }}, Strategy: "token_bucket",
+                    WindowSeconds: gfconfig.Duration{{ "{" }}Duration: 60*time.Second{{ "}" }}, MaxRequests: 13,
+                    RequestsPerSecond: 2.5, Burst: 7, ClientTTLSeconds: gfconfig.Duration{{ "{" }}Duration: 90*time.Second{{ "}" }},
+                {{ "}" }}
+                if err != nil || !found || !reflect.DeepEqual(got, want) {{ "{" }}
+                    t.Fatalf("resolved rule = %+v, found=%v, err=%v; want %+v", got, found, err, want)
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestRateLimitResolverHonorsMissingDisabledAndRPCFailure(t *testing.T) {{ "{" }}
+        rpcFailure := errors.New("rule center unavailable")
+        for _, tc := range []struct {{ "{" }} name string; response *api.GetRuleResp; err error {{ "}" }}{{ "{" }}
+            {{ "{" }}name: "nil response"{{ "}" }},
+            {{ "{" }}name: "not found", response: &api.GetRuleResp{{ "{" }}Found: false, Rule: &api.RateLimitRule{{ "{" }}Enabled: true{{ "}" }}{{ "}" }}{{ "}" }},
+            {{ "{" }}name: "missing rule", response: &api.GetRuleResp{{ "{" }}Found: true{{ "}" }}{{ "}" }},
+            {{ "{" }}name: "disabled rule", response: &api.GetRuleResp{{ "{" }}Found: true, Rule: &api.RateLimitRule{{ "{" }}Enabled: false{{ "}" }}{{ "}" }}{{ "}" }},
+            {{ "{" }}name: "RPC failure", err: rpcFailure{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            t.Run(tc.name, func(t *testing.T) {{ "{" }}
+                cli := &resolveRuleClient{{ "{" }}response: tc.response, err: tc.err{{ "}" }}
+                got, found, err := ratelimitResolveFunc(cli)(context.Background(), ratelimit.Lookup{{ "{" }}Path: "/orders"{{ "}" }})
+                if got != nil || found || !errors.Is(err, tc.err) {{ "{" }}
+                    t.Fatalf("resolve = %+v, %v, %v; want nil, false, %v", got, found, err, tc.err)
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}

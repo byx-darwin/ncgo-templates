@@ -17,12 +17,12 @@ body: |-
 
   -- name: GetRateLimitPatternRuleByAppKey :many
   SELECT * FROM rate_limit_rules
-  WHERE service = $1 AND phase = $2 AND method = $3 AND app_key = $4 AND enabled = true AND (path_pattern = '*' OR path = $5)
+  WHERE service = $1 AND phase = $2 AND method = $3 AND app_key = $4 AND match_kind IN ('prefix', 'glob', 'regex') AND enabled = true
   ORDER BY priority DESC, id DESC;
 
   -- name: GetRateLimitPatternRuleFallback :many
   SELECT * FROM rate_limit_rules
-  WHERE service = $1 AND phase = $2 AND method = $3 AND app_key IS NULL AND enabled = true AND (path_pattern = '*' OR path = $4)
+  WHERE service = $1 AND phase = $2 AND method = $3 AND app_key IS NULL AND match_kind IN ('prefix', 'glob', 'regex') AND enabled = true
   ORDER BY priority DESC, id DESC;
 
   -- name: CreateRateLimitRule :one

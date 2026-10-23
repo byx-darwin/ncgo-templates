@@ -7,82 +7,99 @@ body: |
     package handler
 
     import (
-    	"context"
+        "context"
         "encoding/json"
         "strconv"
 
-    	"github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/app"
 
-    	"{{.Module}}/internal/pkg/response"
-    	api "{{.Module}}/kitex_gen/api/ratelimit/v1"
-    	ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+        "{{.Module}}/internal/pkg/response"
+        api "{{.Module}}/kitex_gen/api/ratelimit/v1"
+        ruleservice "{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
     )
 
     type RateLimitHandler struct {{ "{" }}
-    	rulecenterCli ruleservice.Client
+        rulecenterCli ruleservice.Client
     {{ "}" }}
 
     func NewRateLimitHandler(rulecenterCli ruleservice.Client) *RateLimitHandler {{ "{" }}
-    	return &RateLimitHandler{{ "{" }}rulecenterCli: rulecenterCli{{ "}" }}
+        return &RateLimitHandler{{ "{" }}rulecenterCli: rulecenterCli{{ "}" }}
+    {{ "}" }}
+
+    // rateLimitRuleDTO shadows the RPC int64 ID so browser clients retain all digits.
+    type rateLimitRuleDTO struct {{ "{" }}
+        *api.RateLimitRule
+        Id string `json:"id"`
     {{ "}" }}
 
     func (h *RateLimitHandler) List(ctx context.Context, c *app.RequestContext) {{ "{" }}
-        resp, err := h.rulecenterCli.ListRules(ctx, &api.ListRulesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
-        if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-        return
+        rules := make([]rateLimitRuleDTO, 0)
+        for page := int32(1); ; page++ {{ "{" }}
+            resp, err := h.rulecenterCli.ListRules(ctx, &api.ListRulesReq{{ "{" }}Page: page, PageSize: 100{{ "}" }})
+            if err != nil {{ "{" }}
+                response.ErrorCode(c, response.CodeInternalError)
+                return
+            {{ "}" }}
+            for _, rule := range resp.Rules {{ "{" }}
+                if rule != nil {{ "{" }}
+                    rules = append(rules, rateLimitRuleDTO{{ "{" }}RateLimitRule: rule, Id: strconv.FormatInt(rule.Id, 10){{ "}" }})
+                {{ "}" }}
+            {{ "}" }}
+            if len(resp.Rules) == 0 || (resp.Total > 0 && len(rules) >= int(resp.Total)) || len(resp.Rules) < 100 {{ "{" }}
+                break
+            {{ "}" }}
         {{ "}" }}
-    	response.OK(c, resp.Rules)
+        response.OK(c, rules)
     {{ "}" }}
 
     func (h *RateLimitHandler) Create(ctx context.Context, c *app.RequestContext) {{ "{" }}
-    	var req api.CreateRuleReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-        response.ErrorCode(c, response.CodeRequestParamInvalid)
-        return
+        var req api.CreateRuleReq
+        if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
         {{ "}" }}
 
         resp, err := h.rulecenterCli.CreateRule(ctx, &req)
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-        return
+            response.ErrorCode(c, response.CodeInternalError)
+            return
         {{ "}" }}
-        response.OK(c, map[string]int64{{ "{" }}"id": resp.Id{{ "}" }})
+        response.OK(c, map[string]string{{ "{" }}"id": strconv.FormatInt(resp.Id, 10){{ "}" }})
     {{ "}" }}
 
     func (h *RateLimitHandler) Update(ctx context.Context, c *app.RequestContext) {{ "{" }}
         id, err := strconv.ParseInt(c.Param("id"), 10, 64)
         if err != nil {{ "{" }}
-        response.ErrorCode(c, response.CodeRequestParamInvalid)
-        return
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
         {{ "}" }}
 
-    	var req api.UpdateRuleReq
-    	if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
-        response.ErrorCode(c, response.CodeRequestParamInvalid)
-        return
+        var req api.UpdateRuleReq
+        if err := json.Unmarshal(c.Request.Body(), &req); err != nil {{ "{" }}
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
         {{ "}" }}
         req.Id = id
 
         _, err = h.rulecenterCli.UpdateRule(ctx, &req)
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-        return
+            response.ErrorCode(c, response.CodeInternalError)
+            return
         {{ "}" }}
-    	response.OK(c, nil)
+        response.OK(c, nil)
     {{ "}" }}
 
     func (h *RateLimitHandler) Delete(ctx context.Context, c *app.RequestContext) {{ "{" }}
         id, err := strconv.ParseInt(c.Param("id"), 10, 64)
         if err != nil {{ "{" }}
-        response.ErrorCode(c, response.CodeRequestParamInvalid)
-        return
+            response.ErrorCode(c, response.CodeRequestParamInvalid)
+            return
         {{ "}" }}
 
         _, err = h.rulecenterCli.DeleteRule(ctx, &api.DeleteRuleReq{{ "{" }}Id: id{{ "}" }})
         if err != nil {{ "{" }}
-    		response.ErrorCode(c, response.CodeInternalError)
-        return
+            response.ErrorCode(c, response.CodeInternalError)
+            return
         {{ "}" }}
-    	response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
+        response.OK(c, map[string]string{{ "{" }}"status": "deleted"{{ "}" }})
     {{ "}" }}

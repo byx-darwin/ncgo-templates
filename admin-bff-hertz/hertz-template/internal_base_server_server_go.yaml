@@ -7,7 +7,6 @@ body: |
     import (
         "context"
         "log"
-        "strings"
         "time"
 
         hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
@@ -80,7 +79,6 @@ body: |
 
         // Create Kitex RPC clients
         rbacAddr := cfg.GRPC.Authority.HostPorts[0]
-        ruleAddr := cfg.GRPC.Authority.HostPorts[0]
 
         rbacAuthCli, err := authservice.NewClient(
             cfg.GRPC.Authority.ServiceName,
@@ -98,10 +96,7 @@ body: |
             log.Fatalf("create rbac client: %v", err)
         {{ "}" }}
 
-        ruleCli, err := ruleservice.NewClient(
-            cfg.GRPC.Authority.ServiceName,
-            rpcClientOptions(ruleAddr)...,
-        )
+        ruleCli, err := newRuleCenterClient(cfg)
         if err != nil {{ "{" }}
             log.Fatalf("create rule client: %v", err)
         {{ "}" }}
@@ -118,7 +113,7 @@ body: |
         // Rate-limit resolver — reads local (config-defined) rules by
         // default; when rate_limit.source.type is set to "rule_center" it
         // instead resolves rules dynamically via the rule-center RPC client
-        // above (ListRules, matched by method/path_pattern). Used by the
+        // above (GetRule resolves service, phase, method, path and app key). Used by the
         // password-reset route's middleware.RateLimit("password_change", ...).
         resolver := ratelimit.NewResolver(cfg.RateLimit, ratelimit.Options{{ "{" }}
             RuleCenter: ratelimitResolveFunc(ruleCli),
@@ -133,33 +128,45 @@ body: |
         h.Spin()
     {{ "}" }}
 
-    // ratelimitResolveFunc adapts the rule-center RPC client's ListRules
-    // call to ratelimit.GRPCClient, matching returned rules by method and
-    // path_pattern (exact match, or prefix when the pattern doesn't equal
-    // the request path).
+    // newRuleCenterClient shares the standalone rule-center service between
+    // rule-management routes and the dynamic rate-limit resolver.
+    func newRuleCenterClient(cfg *conf.Config) (ruleservice.Client, error) {{ "{" }}
+        return ruleservice.NewClient(
+            cfg.GRPC.RuleCenter.ServiceName,
+            rpcClientOptions(cfg.GRPC.RuleCenter.HostPorts[0])...,
+        )
+    {{ "}" }}
+
+    // ratelimitResolveFunc delegates rule selection and pattern matching to
+    // rule center, preserving all strategy and key settings for enforcement.
     func ratelimitResolveFunc(ruleCli ruleservice.Client) ratelimit.ResolveFunc {{ "{" }}
         return func(ctx context.Context, lookup ratelimit.Lookup) (*conf.RateLimitRuleConfig, bool, error) {{ "{" }}
-            resp, err := ruleCli.ListRules(ctx, &ratelimitv1.ListRulesReq{{ "{" }}Page: 1, PageSize: 100{{ "}" }})
+            req := &ratelimitv1.GetRuleReq{{ "{" }}
+                Service: lookup.Service,
+                Phase:   lookup.Phase,
+                Method:  lookup.Method,
+                Path:    lookup.Path,
+            {{ "}" }}
+            if lookup.AppKey != "" {{ "{" }}
+                req.AppKey = &lookup.AppKey
+            {{ "}" }}
+            resp, err := ruleCli.GetRule(ctx, req)
             if err != nil {{ "{" }}
                 return nil, false, err
             {{ "}" }}
-            for _, rule := range resp.Rules {{ "{" }}
-                if rule == nil || !rule.Enabled {{ "{" }}
-                    continue
-                {{ "}" }}
-                if rule.Method != "" && !strings.EqualFold(rule.Method, lookup.Method) {{ "{" }}
-                    continue
-                {{ "}" }}
-                if rule.PathPattern != "" && rule.PathPattern != lookup.Path && !strings.HasPrefix(lookup.Path, rule.PathPattern) {{ "{" }}
-                    continue
-                {{ "}" }}
-                return &conf.RateLimitRuleConfig{{ "{" }}
-                    Enabled:       rule.Enabled,
-                    Strategy:      rule.Strategy,
-                    WindowSeconds: gfconfig.Duration{{ "{" }}Duration: time.Duration(rule.WindowSeconds) * time.Second{{ "}" }},
-                    MaxRequests:   int(rule.MaxRequests),
-                {{ "}" }}, true, nil
+            if resp == nil || !resp.Found || resp.Rule == nil || !resp.Rule.Enabled {{ "{" }}
+                return nil, false, nil
             {{ "}" }}
-            return nil, false, nil
+            rule := resp.Rule
+            return &conf.RateLimitRuleConfig{{ "{" }}
+                Enabled:           rule.Enabled,
+                KeyBy:             append([]string(nil), rule.KeyBy...),
+                Strategy:          rule.Strategy,
+                WindowSeconds:     gfconfig.Duration{{ "{" }}Duration: time.Duration(rule.WindowSeconds) * time.Second{{ "}" }},
+                MaxRequests:       int(rule.MaxRequests),
+                RequestsPerSecond: rule.RequestsPerSecond,
+                Burst:             int(rule.Burst),
+                ClientTTLSeconds:  gfconfig.Duration{{ "{" }}Duration: time.Duration(rule.ClientTtlSeconds) * time.Second{{ "}" }},
+            {{ "}" }}, true, nil
         {{ "}" }}
     {{ "}" }}

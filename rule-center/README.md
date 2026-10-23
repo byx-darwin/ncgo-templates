@@ -27,3 +27,18 @@ ncgo new rule-center --module github.com/acme/rule-center --kind kitex \
   UpdateRule / DeleteRule / ListRules).
 
 Variables: `{{.Module}}`, `{{.ServiceName}}`, `{{ToLower .ServiceName}}`.
+
+
+## PostgreSQL matching regression
+
+After generating the service and running `make sqlc`, set `POSTGRES_DSN` to a
+reachable PostgreSQL database and run:
+
+```bash
+go test ./internal/repository/rulecenter -run TestGetRulePostgresMatchingAndScope -count=1
+```
+
+The test checks exact, prefix, glob, regex, wildcard, app-key fallback, and
+service/phase/method scopes through the real generated SQL and usecase. It creates
+a temporary table from the shipped schema inside a rolled-back transaction;
+existing database rules are untouched. Without `POSTGRES_DSN` it explicitly skips.

@@ -1,7 +1,7 @@
 # ncgo exported template — internal/base/conf/conf_test.go
 # Overrides ncgo's built-in default hertz conf_test.go to add negative tests
 # for grpc.authority.service_name/host_ports (Issue #68 — guards against the
-# server.go rbacAddr/ruleAddr host_ports[0] panic on startup, symmetric with
+# server.go rbacAddr host_ports[0] panic on startup, symmetric with
 # the existing grpc.terminal_user guard).
 path: internal/base/conf/conf_test.go
 update_behavior:
@@ -9,7 +9,13 @@ update_behavior:
 body: |
     package conf
 
-    import "testing"
+    import (
+        "os"
+        "path/filepath"
+        "testing"
+
+        "gopkg.in/yaml.v3"
+    )
 
     func TestApplyRedisFallbacksUsesTopLevelRedis(t *testing.T) {{ "{" }}
     	cfg := &Config{{ "{" }}
@@ -73,4 +79,58 @@ body: |
     	if err := cfg.Validate(); err == nil {{ "{" }}
     		t.Fatal("expected error when grpc.authority.host_ports is empty, not a later panic")
     	{{ "}" }}
+    {{ "}" }}
+
+
+    // Existing configurations predate grpc.rule_center. Loading them must keep
+    // rule management independent of authority while preserving explicit overrides.
+    func TestLoadRuleCenterDefaultsAndOverrides(t *testing.T) {{ "{" }}
+        for _, tc := range []struct {{ "{" }}
+            name string
+            section string
+            wantService string
+            wantAddress string
+        {{ "}" }}{{ "{" }}
+            {{ "{" }}name: "legacy config", wantService: "rulecenter", wantAddress: "127.0.0.1:8889"{{ "}" }},
+            {{ "{" }}name: "custom endpoint", section: "rule_center:\n    host_ports: [rule.internal:18889]\n", wantService: "rulecenter", wantAddress: "rule.internal:18889"{{ "}" }},
+            {{ "{" }}name: "custom service", section: "rule_center:\n    service_name: custom-rule-center\n", wantService: "custom-rule-center", wantAddress: "127.0.0.1:8889"{{ "}" }},
+            {{ "{" }}name: "full override", section: "rule_center:\n    service_name: custom-rule-center\n    host_ports: [rule.internal:18889]\n", wantService: "custom-rule-center", wantAddress: "rule.internal:18889"{{ "}" }},
+        {{ "}" }} {{ "{" }}
+            t.Run(tc.name, func(t *testing.T) {{ "{" }}
+                source := "env: test\ngrpc:\n  authority:\n    service_name: authority\n    host_ports: [authority.internal:18888]\n  terminal_user:\n    service_name: userservice\n    host_ports: [user.internal:18890]\n  " + tc.section
+                path := filepath.Join(t.TempDir(), "conf.yaml")
+                if err := os.WriteFile(path, []byte(source), 0o600); err != nil {{ "{" }}
+                    t.Fatal(err)
+                {{ "}" }}
+                cfg, err := Load(path)
+                if err != nil {{ "{" }}
+                    t.Fatalf("Load: %v", err)
+                {{ "}" }}
+                // Read the public YAML shape so this regression also fails against
+                // templates that have not added RuleCenter to GRPCConfig yet.
+                payload, err := yaml.Marshal(cfg)
+                if err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+                var got struct {{ "{" }} GRPC struct {{ "{" }} RuleCenter ClientConfig `yaml:"rule_center"` {{ "}" }} `yaml:"grpc"` {{ "}" }}
+                if err := yaml.Unmarshal(payload, &got); err != nil {{ "{" }} t.Fatal(err) {{ "}" }}
+                actual := got.GRPC.RuleCenter
+                if actual.ServiceName != tc.wantService || len(actual.HostPorts) != 1 || actual.HostPorts[0] != tc.wantAddress {{ "{" }}
+                    t.Fatalf("grpc.rule_center = %+v, want service %q at %q", actual, tc.wantService, tc.wantAddress)
+                {{ "}" }}
+                if cfg.GRPC.Authority.HostPorts[0] != "authority.internal:18888" {{ "{" }}
+                    t.Fatalf("authority endpoint changed: %v", cfg.GRPC.Authority.HostPorts)
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}
+
+    func TestPasswordChangeOnlyRateLimitPhaseCanStart(t *testing.T) {{ "{" }}
+     cfg := Default()
+     cfg.RateLimit.Enabled = true
+     cfg.RateLimit.PasswordChange = cfg.RateLimit.PreAuth
+     cfg.RateLimit.PasswordChange.Enabled = true
+     cfg.RateLimit.PreAuth.Enabled = false
+     cfg.RateLimit.PostAuth.Enabled = false
+     if err := cfg.Validate(); err != nil {{ "{" }} t.Fatalf("password-change-only limiter rejected: %v", err) {{ "}" }}
+     cfg.RateLimit.PasswordChange.DefaultRule.KeyBy = nil
+     if err := cfg.Validate(); err == nil {{ "{" }} t.Fatal("invalid password-change limiter was not validated") {{ "}" }}
     {{ "}" }}

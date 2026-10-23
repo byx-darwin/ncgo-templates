@@ -1,0 +1,106 @@
+# ncgo exported template — internal/handler/rate_limit_test.go
+path: internal/handler/rate_limit_test.go
+update_behavior:
+    type: skip
+loop_service: true
+body: |
+    package handler
+    
+    import (
+    	"context"
+    	"encoding/json"
+    	"errors"
+    	api "{{.Module}}/kitex_gen/api/ratelimit/v1"
+    	"{{.Module}}/kitex_gen/api/ratelimit/v1/ruleservice"
+    	"github.com/cloudwego/hertz/pkg/app"
+    	"github.com/cloudwego/hertz/pkg/route/param"
+    	"github.com/cloudwego/kitex/client/callopt"
+    	"testing"
+    )
+    
+    type rateLimitClientStub struct {{ "{" }}
+    	ruleservice.Client
+    	pages    []int32
+    	failPage int32
+    	update   *api.UpdateRuleReq
+    {{ "}" }}
+    
+    func (f *rateLimitClientStub) ListRules(_ context.Context, req *api.ListRulesReq, _ ...callopt.Option) (*api.ListRulesResp, error) {{ "{" }}
+    	f.pages = append(f.pages, req.Page)
+    	if req.Page == f.failPage {{ "{" }}
+    		return nil, errors.New("unavailable")
+    	{{ "}" }}
+    	rules := make([]*api.RateLimitRule, 0)
+    	start := (req.Page - 1) * req.PageSize
+    	for i := start; i < start+req.PageSize && i < 105; i++ {{ "{" }}
+    		rules = append(rules, &api.RateLimitRule{{ "{" }}Id: 9007199254740993 + int64(i), Service: "admin", Enabled: true{{ "}" }})
+    	{{ "}" }}
+    	return &api.ListRulesResp{{ "{" }}Rules: rules, Total: 105, Page: req.Page, PageSize: req.PageSize{{ "}" }}, nil
+    {{ "}" }}
+    func (f *rateLimitClientStub) CreateRule(_ context.Context, _ *api.CreateRuleReq, _ ...callopt.Option) (*api.CreateRuleResp, error) {{ "{" }}
+    	return &api.CreateRuleResp{{ "{" }}Id: 9007199254740993{{ "}" }}, nil
+    {{ "}" }}
+    func (f *rateLimitClientStub) UpdateRule(_ context.Context, req *api.UpdateRuleReq, _ ...callopt.Option) (*api.UpdateRuleResp, error) {{ "{" }}
+    	f.update = req
+    	return &api.UpdateRuleResp{{ "{" }}{{ "}" }}, nil
+    {{ "}" }}
+    func TestRateLimitListAllPagesAndLosslessIDs(t *testing.T) {{ "{" }}
+    	f := &rateLimitClientStub{{ "{" }}{{ "}" }}
+    	c := app.NewContext(0)
+    	NewRateLimitHandler(f).List(context.Background(), c)
+    	var body struct {{ "{" }}
+    		Data []struct {{ "{" }}
+    			Id      string `json:"id"`
+    			Service string `json:"service"`
+    			Enabled bool   `json:"enabled"`
+    		{{ "}" }} `json:"data"`
+    	{{ "}" }}
+    	if err := json.Unmarshal(c.Response.Body(), &body); err != nil {{ "{" }}
+    		t.Fatalf("response: %s: %v", c.Response.Body(), err)
+    	{{ "}" }}
+    	if len(body.Data) != 105 {{ "{" }}
+    		t.Fatalf("got %d rules, want 105", len(body.Data))
+    	{{ "}" }}
+    	if body.Data[0].Id != "9007199254740993" || body.Data[104].Id != "9007199254741097" {{ "{" }}
+    		t.Fatalf("IDs lost precision: %+v", body.Data)
+    	{{ "}" }}
+    	if !body.Data[0].Enabled || body.Data[0].Service != "admin" {{ "{" }}
+    		t.Fatal("DTO omitted rule fields")
+    	{{ "}" }}
+    	if len(f.pages) != 2 || f.pages[1] != 2 {{ "{" }}
+    		t.Fatalf("pages=%v", f.pages)
+    	{{ "}" }}
+    {{ "}" }}
+    func TestRateLimitCreateReturnsStringID(t *testing.T) {{ "{" }}
+    	c := app.NewContext(0)
+    	c.Request.SetBodyString(`{{ "{" }}"service":"admin","config":{{ "{" }}"enabled":true{{ "}" }}{{ "}" }}`)
+    	NewRateLimitHandler(&rateLimitClientStub{{ "{" }}{{ "}" }}).Create(context.Background(), c)
+    	var body struct {{ "{" }}
+    		Data struct {{ "{" }}
+    			Id string `json:"id"`
+    		{{ "}" }} `json:"data"`
+    	{{ "}" }}
+    	if err := json.Unmarshal(c.Response.Body(), &body); err != nil {{ "{" }}
+    		t.Fatalf("response: %s: %v", c.Response.Body(), err)
+    	{{ "}" }}
+    	if body.Data.Id != "9007199254740993" {{ "{" }}
+    		t.Fatalf("ID=%s", body.Data.Id)
+    	{{ "}" }}
+    {{ "}" }}
+    func TestRateLimitListFailsWithoutPublishingPartialRules(t *testing.T) {{ "{" }}
+    	c := app.NewContext(0)
+    	NewRateLimitHandler(&rateLimitClientStub{{ "{" }}failPage: 2{{ "}" }}).List(context.Background(), c)
+    	if c.Response.StatusCode() < 400 {{ "{" }}
+    		t.Fatalf("partial list exposed: %s", c.Response.Body())
+    	{{ "}" }}
+    {{ "}" }}
+    func TestRateLimitUpdateUsesExactURLIDAndPreservesFalseAndZero(t *testing.T) {{ "{" }}
+    	f := &rateLimitClientStub{{ "{" }}{{ "}" }}
+    	c := app.NewContext(0)
+    	c.Params = param.Params{{ "{" }}{{ "{" }}Key: "id", Value: "9007199254740993"{{ "}" }}{{ "}" }}
+    	c.Request.SetBodyString(`{{ "{" }}"enabled":false,"priority":0,"key_by":["ip"]{{ "}" }}`)
+    	NewRateLimitHandler(f).Update(context.Background(), c)
+    	if f.update == nil || f.update.Id != 9007199254740993 || f.update.Enabled == nil || *f.update.Enabled || f.update.Priority == nil || *f.update.Priority != 0 {{ "{" }}
+    		t.Fatalf("update=%+v", f.update)
+    	{{ "}" }}
+    {{ "}" }}

@@ -43,6 +43,11 @@ seed, and permissions plus the admin/operator user seed were applied successfull
    success. User/authority adapters now return a nonzero generic internal error
    without exposing private details. Tests reject zero status and secret leakage.
 
+3. BFF error helpers called the framework's global default responder, ignoring
+   the injected error router. They now use the request responder and adapt Kitex
+   business status to the public HTTP envelope. Tests cover wrapped RPC failures,
+   400 invalid input, 401 authentication failure and 429 throttling.
+
 The local authority uses its supported default memory token store. The existing
 Redis token-store seam is not implemented and was not enabled for this run.
 Application accounts continue to use their PostgreSQL persistent sessions.

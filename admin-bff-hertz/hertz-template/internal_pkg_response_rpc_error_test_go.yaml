@@ -1,0 +1,42 @@
+path: internal/pkg/response/rpc_error_test.go
+update_behavior:
+    type: cover
+body: |
+    package response
+
+    import (
+        "context"
+        "encoding/json"
+        "fmt"
+
+        "github.com/cloudwego/hertz/pkg/app"
+        "github.com/cloudwego/hertz/pkg/app/server"
+        "github.com/cloudwego/hertz/pkg/common/ut"
+        "github.com/cloudwego/kitex/pkg/kerrors"
+        "testing"
+    )
+
+    func TestRemoteBusinessErrorPreservesPublicCodeAndMessage(t *testing.T) {{ "{" }}
+        for _, tc := range []struct {{ "{" }}
+            code   int
+            public string
+        {{ "}" }}{{ "{" }}{{ "{" }}10001, "invalid_request"{{ "}" }}, {{ "{" }}10002, "invalid_credentials"{{ "}" }}, {{ "{" }}10200, "rate_limited"{{ "}" }}, {{ "{" }}10000, "internal_error"{{ "}" }}{{ "}" }} {{ "{" }}
+            t.Run(tc.public, func(t *testing.T) {{ "{" }}
+                h := server.New()
+                h.Use(NewResponder().Middleware())
+                h.GET("/error", func(_ context.Context, c *app.RequestContext) {{ "{" }}
+                    Err(c, fmt.Errorf("RPC wrapper: %w", kerrors.NewBizStatusError(int32(tc.code), tc.public)))
+                {{ "}" }})
+                w := ut.PerformRequest(h.Engine, "GET", "/error", nil)
+                r := w.Result()
+                var body ErrBody
+                if e := json.Unmarshal(r.Body(), &body); e != nil {{ "{" }}
+                    t.Fatal(e)
+                {{ "}" }}
+                expected := map[int]int{{ "{" }}10001: 400, 10002: 401, 10200: 429, 10000: 500{{ "}" }}[tc.code]
+                if r.StatusCode() != expected || body.Code != tc.code || body.Msg != tc.public {{ "{" }}
+                    t.Fatalf("HTTP mapping lost: status=%d body=%s expected status=%d code=%d", r.StatusCode(), r.Body(), expected, tc.code)
+                {{ "}" }}
+            {{ "}" }})
+        {{ "}" }}
+    {{ "}" }}

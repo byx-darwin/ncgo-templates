@@ -1,7 +1,7 @@
 name: user-kitex
 kind: kitex
 description: "Application account RPC template: phone/email OTP and password, persistent sessions, configurable WeChat/Alipay/GitHub/Google/OIDC login and administration"
-version: "2"
+version: "3"
 skip_default_templates:
   - handler.yaml
   - usecase.yaml

@@ -40,6 +40,10 @@ body: |
     	if _, ok := kerrors.FromBizStatusError(err); ok {{ "{" }}
     		return err
     	{{ "}" }}
+        // Kitex treats status zero as success; untyped errors need a nonzero status.
+        if code, _ := goerror.Extract(err); code == 0 {{ "{" }}
+            return kerrors.NewBizStatusError(CodeInternalError, "internal_error")
+        {{ "}" }}
     	return &rpcerror.OopsStatusAdapter{{ "{" }}Err: err{{ "}" }}
     {{ "}" }}
 

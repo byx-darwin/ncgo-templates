@@ -1,4 +1,4 @@
 name: user-bff-hertz
 kind: hertz
 description: "Application HTTP gateway for user-kitex: phone/email code and password, session verification, OAuth one-time exchange and identity management"
-version: "2"
+version: "3"

@@ -1,0 +1,58 @@
+path: internal/base/server/rpc_test.go
+update_behavior:
+    type: cover
+body: |
+    package server
+
+    import (
+        "context"
+        api "{{.Module}}/kitex_gen/api/user/v1"
+        userservice "{{.Module}}/kitex_gen/api/user/v1/userservice"
+        "github.com/cloudwego/kitex/pkg/kerrors"
+        "github.com/cloudwego/kitex/pkg/transmeta"
+        kitexserver "github.com/cloudwego/kitex/server"
+        "net"
+        "testing"
+        "time"
+    )
+
+    type wireAccount struct{{ "{" }} api.UserService {{ "}" }}
+
+    func (wireAccount) AccountLogin(_ context.Context, req *api.AccountLoginReq) (*api.AccountTokens, error) {{ "{" }}
+        if req.Credential != "valid" {{ "{" }}
+            return nil, kerrors.NewBizStatusError(10002, "invalid credentials")
+        {{ "}" }}
+        return &api.AccountTokens{{ "{" }}AccessToken: "wire-access", Uid: "wire-user"{{ "}" }}, nil
+    {{ "}" }}
+    func TestRPCClientsPreserveBusinessErrors(t *testing.T) {{ "{" }}
+        ln, e := net.Listen("tcp", "127.0.0.1:0")
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        srv := userservice.NewServer(&wireAccount{{ "{" }}{{ "}" }}, kitexserver.WithListener(ln), kitexserver.WithMetaHandler(transmeta.ServerTTHeaderHandler))
+        done := make(chan error, 1)
+        go func() {{ "{" }} done <- srv.Run() {{ "}" }}()
+        t.Cleanup(func() {{ "{" }}
+            srv.Stop()
+            select {{ "{" }}
+            case <-done:
+            case <-time.After(3 * time.Second):
+                t.Error("RPC server did not stop")
+            {{ "}" }}
+        {{ "}" }})
+        cli, e := userservice.NewClient("account-wire", rpcClientOptions(ln.Addr().String())...)
+        if e != nil {{ "{" }}
+            t.Fatal(e)
+        {{ "}" }}
+        ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+        defer cancel()
+        good, e := cli.AccountLogin(ctx, &api.AccountLoginReq{{ "{" }}Credential: "valid"{{ "}" }})
+        if e != nil || good.AccessToken != "wire-access" {{ "{" }}
+            t.Fatalf("success response lost: %+v %v", good, e)
+        {{ "}" }}
+        result, e := cli.AccountLogin(ctx, &api.AccountLoginReq{{ "{" }}Credential: "wrong"{{ "}" }})
+        biz, ok := kerrors.FromBizStatusError(e)
+        if !ok || biz.BizStatusCode() != 10002 {{ "{" }}
+            t.Fatalf("business rejection must reach HTTP adapter as error; got result=%+v err=%v", result, e)
+        {{ "}" }}
+    {{ "}" }}

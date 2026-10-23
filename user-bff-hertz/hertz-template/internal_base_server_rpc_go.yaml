@@ -1,0 +1,21 @@
+path: internal/base/server/rpc.go
+update_behavior:
+    type: cover
+body: |
+    package server
+
+    import (
+        "github.com/cloudwego/kitex/client"
+        "github.com/cloudwego/kitex/pkg/transmeta"
+        "github.com/cloudwego/kitex/transport"
+    )
+
+    // TTHeader carries Kitex business errors and request metadata for protobuf RPCs.
+    // Without it a rejected call can decode as an empty successful response.
+    func rpcClientOptions(address string) []client.Option {{ "{" }}
+        return []client.Option{{ "{" }}
+            client.WithHostPorts(address),
+            client.WithTransportProtocol(transport.TTHeader),
+            client.WithMetaHandler(transmeta.ClientTTHeaderHandler),
+        {{ "}" }}
+    {{ "}" }}

@@ -95,7 +95,7 @@ body: |-
   // NewResponder creates a Responder instance (called by server.Run).
   func NewResponder() *hertzframework.Responder {
       return hertzframework.NewResponder(
-          hertzframework.WithErrorRouter(&hertzframework.RPCErrorRouter{}),
+          hertzframework.WithErrorRouter(&rpcErrorRouter{}),
       )
   }
 
@@ -104,9 +104,9 @@ body: |-
       hertzframework.Success(c, data)
   }
 
-  // Err writes an error response using package-level convenience function.
+  // Err writes an error response using the request-scoped responder.
   func Err(c *app.RequestContext, err error) {
-      hertzframework.Error(context.Background(), c, err, "")
+      hertzframework.RespondFrom(c).Error(context.Background(), c, err, "")
   }
 
   // BindError writes a 400 bind-validation error response.

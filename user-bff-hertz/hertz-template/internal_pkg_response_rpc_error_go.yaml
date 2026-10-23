@@ -1,0 +1,32 @@
+path: internal/pkg/response/rpc_error.go
+update_behavior:
+    type: cover
+body: |
+    package response
+
+    import (
+        "context"
+        goerror "github.com/byx-darwin/go-tools/go-common/error"
+        hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
+        "github.com/cloudwego/kitex/pkg/kerrors"
+    )
+
+    // Kitex business status is transport metadata, not a go-common error.
+    // Preserve the public contract before delegating ordinary errors to the framework.
+    type rpcErrorRouter struct{{ "{" }}{{ "}" }}
+
+    func (*rpcErrorRouter) Route(ctx context.Context, err error) (hertzframework.ErrorRoute, bool) {{ "{" }}
+        if biz, ok := kerrors.FromBizStatusError(err); ok {{ "{" }}
+            code, public := int(biz.BizStatusCode()), biz.BizMessage()
+            if code <= 0 {{ "{" }}
+                code, public = CodeSystem, "internal_error"
+            {{ "}" }}
+            routed := goerror.In("rpc.client").Code(code).Public(public).New("upstream business rejection")
+            status := goerror.HTTPStatus(routed)
+            if code == CodeRateLimited {{ "{" }}
+                status = 429
+            {{ "}" }}
+            return hertzframework.ErrorRoute{{ "{" }}HTTPCode: status, BizCode: code, Override: public{{ "}" }}, true
+        {{ "}" }}
+        return (&hertzframework.RPCErrorRouter{{ "{" }}{{ "}" }}).Route(ctx, err)
+    {{ "}" }}

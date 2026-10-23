@@ -1,4 +1,3 @@
-# ncgo exported template — internal/base/server/server.go
 path: internal/base/server/server.go
 update_behavior:
     type: cover
@@ -10,8 +9,6 @@ body: |
         "log"
         "strings"
         "time"
-
-        "github.com/cloudwego/kitex/client"
 
         hertzframework "github.com/byx-darwin/go-tools/go-framework/hertz"
         gfconfig "github.com/byx-darwin/go-tools/go-framework/config"
@@ -87,7 +84,7 @@ body: |
 
         rbacAuthCli, err := authservice.NewClient(
             cfg.GRPC.Authority.ServiceName,
-            client.WithHostPorts(rbacAddr),
+            rpcClientOptions(rbacAddr)...,
         )
         if err != nil {{ "{" }}
             log.Fatalf("create rbac auth client: %v", err)
@@ -95,7 +92,7 @@ body: |
 
         rbacCli, err := rbacservice.NewClient(
             cfg.GRPC.Authority.ServiceName,
-            client.WithHostPorts(rbacAddr),
+            rpcClientOptions(rbacAddr)...,
         )
         if err != nil {{ "{" }}
             log.Fatalf("create rbac client: %v", err)
@@ -103,7 +100,7 @@ body: |
 
         ruleCli, err := ruleservice.NewClient(
             cfg.GRPC.Authority.ServiceName,
-            client.WithHostPorts(ruleAddr),
+            rpcClientOptions(ruleAddr)...,
         )
         if err != nil {{ "{" }}
             log.Fatalf("create rule client: %v", err)
@@ -112,7 +109,7 @@ body: |
         userAddr := cfg.GRPC.TerminalUser.HostPorts[0]
         userCli, err := userservice.NewClient(
             cfg.GRPC.TerminalUser.ServiceName,
-            client.WithHostPorts(userAddr),
+            rpcClientOptions(userAddr)...,
         )
         if err != nil {{ "{" }}
             log.Fatalf("create terminal-user client: %v", err)
